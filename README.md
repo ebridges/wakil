@@ -35,7 +35,35 @@ uv run wakil status --path ~/kb
 
 # Re-index Markdown files after edits
 uv run wakil index --path ~/kb
+
+# Search the knowledge base (QMD if installed, plus local FTS indexes)
+uv run wakil search "insurance claims routing" --path ~/kb
+
+# Ask a grounded question (requires a model provider, see below)
+uv run wakil query "How do my notes on FNOL relate to graph memory?" --path ~/kb
 ```
+
+## Search
+
+`wakil search` combines two engines: [QMD](https://github.com/tobi/qmd) over
+the Markdown knowledge base when the `qmd` binary is installed (`--mode
+search|vsearch|query` selects BM25, vector, or hybrid), and SQLite FTS5
+indexes over note metadata, memories, and sources. QMD results take
+precedence; FTS fills in workspace records QMD doesn't cover.
+
+## Query
+
+`wakil query` retrieves matching notes, memories, and sources, sends them to a
+model as numbered context blocks, and prints a cited answer. Answers are
+grounded: if the knowledge base doesn't support an answer, wakil says so.
+Each query is recorded in the workspace database (`query_runs`).
+
+Configure a provider via environment variables (see `.env.example`):
+
+- `ANTHROPIC_API_KEY` — uses Anthropic (default model `claude-opus-4-8`)
+- `OPENAI_API_KEY` + `WAKIL_MODEL` (+ optional `WAKIL_OPENAI_BASE_URL`) — any
+  OpenAI-compatible endpoint, including local model servers
+- `WAKIL_MODEL` / `WAKIL_PROVIDER` — override the model or force a provider
 
 `wakil init` indexes every Markdown file in the workspace (title, frontmatter,
 content hash), detects whether the directory is a git repository, checks for

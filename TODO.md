@@ -4,11 +4,15 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 
 ## Phase 2: Search and Query
 
-- [ ] QMD search wrapper (`integrations/qmd.py`) and `wakil search`
-- [ ] SQLite FTS5 over memories and sources
-- [ ] Minimal model client abstraction (Anthropic + OpenAI-compatible)
-- [ ] `wakil query` using QMD results + memory search, with citations
-- [ ] Follow-up query suggestions
+- [x] QMD search wrapper (`integrations/qmd.py`) and `wakil search`
+- [x] SQLite FTS5 over notes, memories, and sources
+- [x] Minimal model client abstraction (Anthropic + OpenAI-compatible)
+- [x] `wakil query` using QMD results + memory search, with citations
+- [x] Follow-up query suggestions (prompted as part of the answer)
+- [ ] Verify QMD JSON field names against a real qmd install (parser is
+      defensive but untested against the actual binary)
+- [ ] Memory-aware ranking in query context selection (state/importance
+      weighting comes with Phase 5)
 
 ## Phase 3: Ingest
 
