@@ -4,8 +4,6 @@ QMD is the first-class search engine for the knowledge base. Phase 1 only
 detects whether it is available; the search wrapper comes with Phase 2.
 """
 
-from __future__ import annotations
-
 import shutil
 import subprocess
 from dataclasses import dataclass

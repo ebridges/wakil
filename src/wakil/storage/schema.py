@@ -5,8 +5,6 @@ schema can serve multiple users later. Markdown stays the source of truth;
 these tables index, cache, and record operational history.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 
 from sqlalchemy import ForeignKey, String, Text, UniqueConstraint

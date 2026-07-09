@@ -1,7 +1,5 @@
 """Thin subprocess wrapper around git for workspace awareness."""
 
-from __future__ import annotations
-
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path

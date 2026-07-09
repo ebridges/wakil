@@ -1,7 +1,5 @@
 """SQLite engine and session helpers."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine
