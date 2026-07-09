@@ -16,13 +16,18 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 
 ## Phase 3: Ingest
 
-- [ ] Source records for ingests (`wakil ingest`)
-- [ ] Text/transcript ingest
-- [ ] Article URL ingest (httpx + readability-lxml)
-- [ ] Candidate memory extraction
-- [ ] Candidate relationship extraction
-- [ ] Related note search during ingest
-- [ ] Markdown note proposal with diff preview
+- [x] Source records for ingests (`wakil ingest`)
+- [x] Text/transcript ingest (including .srt subtitle stripping)
+- [x] Article URL ingest (httpx + readability-lxml)
+- [x] Candidate memory extraction
+- [x] Candidate relationship extraction
+- [x] Related note search during ingest
+- [x] Markdown note proposal with preview and confirmation
+- [ ] Whisper zip archive ingest (transcript JSON)
+- [ ] Twitter/X URL ingest (metadata-only)
+- [ ] Pasted-text ingest from stdin
+- [ ] Consult SCHEMA.md/RESOLVER.md content when proposing note paths
+      (currently: model suggests, wakil validates + falls back to drafts/)
 
 ## Phase 4: Git-Native Changes
 

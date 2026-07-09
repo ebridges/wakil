@@ -3,8 +3,10 @@
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 
+from wakil.app.ingest_service import IngestProposal, IngestResult
 from wakil.app.query_service import QueryResult
 from wakil.app.search_service import SearchHit
 from wakil.app.workspace_service import IndexResult, WorkspaceStatus
@@ -74,6 +76,68 @@ def print_status(status: WorkspaceStatus) -> None:
         console.print("[bold]Recent commits:[/bold]")
         for line in status.git.recent_commits:
             console.print(f"  [dim]{line}[/dim]")
+
+
+def print_ingest_proposal(proposal: IngestProposal) -> None:
+    console.print(
+        Panel(
+            f"[bold]{proposal.title}[/bold]\n[dim]{proposal.source_type}: {proposal.origin}[/dim]",
+            title="Ingest preview",
+            border_style="cyan",
+        )
+    )
+    if proposal.summary:
+        console.print(Panel(Markdown(proposal.summary), title="Summary"))
+    if proposal.key_points:
+        console.print("[bold]Key points:[/bold]")
+        for point in proposal.key_points:
+            console.print(f"  • {point}")
+    if proposal.related_notes:
+        console.print("[bold]Related notes:[/bold]")
+        for hit in proposal.related_notes:
+            console.print(f"  [green]{hit.ref}[/green] {hit.title}")
+    if proposal.memories:
+        table = Table(title="Candidate memories")
+        table.add_column("#", style="dim")
+        table.add_column("Type", style="magenta")
+        table.add_column("Content", overflow="fold")
+        table.add_column("Conf", justify="right")
+        for i, memory in enumerate(proposal.memories):
+            conf = f"{memory.confidence:.2f}" if memory.confidence is not None else "-"
+            table.add_row(str(i), memory.memory_type, memory.content, conf)
+        console.print(table)
+    if proposal.relationships:
+        console.print("[bold]Candidate relationships:[/bold]")
+        for rel in proposal.relationships:
+            console.print(f"  [{rel.subject_index}] --{rel.predicate}--> [{rel.object_index}]")
+
+    console.print("[bold]Proposed files:[/bold]")
+    for proposed in filter(None, [proposal.raw_file, proposal.proposed_note]):
+        preview = proposed.content[:1500]
+        if len(proposed.content) > 1500:
+            preview += "\n…"
+        console.print(
+            Panel(
+                Syntax(preview, "markdown", background_color="default"),
+                title=f"NEW {proposed.path}",
+                border_style="green",
+            )
+        )
+
+
+def print_ingest_result(result: IngestResult) -> None:
+    console.print(
+        f"Ingested source [bold]#{result.source_id}[/bold]: "
+        f"{len(result.files_written)} file(s) written, "
+        f"[magenta]{result.memories_created}[/magenta] candidate memories, "
+        f"{result.relationships_created} relationships."
+    )
+    for path in result.files_written:
+        console.print(f"  [green]+ {path}[/green]")
+    console.print(
+        "[dim]Review with git diff/status; promote memories with "
+        "`wakil memory` (coming in Phase 5).[/dim]"
+    )
 
 
 def print_index_result(result: IndexResult) -> None:
