@@ -41,7 +41,29 @@ uv run wakil search "insurance claims routing" --path ~/kb
 
 # Ask a grounded question (requires a model provider, see below)
 uv run wakil query "How do my notes on FNOL relate to graph memory?" --path ~/kb
+
+# Ingest raw material into the knowledge base
+uv run wakil ingest transcript ./raw/meeting.txt --path ~/kb
+uv run wakil ingest article https://example.com/post --path ~/kb
+uv run wakil ingest text ./clipping.md --path ~/kb
 ```
+
+## Ingest
+
+`wakil ingest` turns raw material into knowledge-base records. It extracts
+text (transcripts, `.srt` subtitles, plain text, or web articles via
+readability extraction), dedupes by content hash, finds related existing
+notes, and — when a model provider is configured — produces a summary, key
+points, candidate memories, candidate relationships, and an optional proposed
+Markdown note linked with wikilinks.
+
+Nothing is written until you confirm the preview (`--yes` skips the prompt).
+The raw capture lands under `sources/` with frontmatter; proposed notes go to
+the model-suggested path, falling back to `drafts/` when routing is unclear or
+the path collides. Existing files are never overwritten, and all writes are
+plain files you can review with `git diff`/`git status`. Extracted memories
+are stored as `candidate` state in SQLite for later review and promotion.
+Without a provider, ingest still stores the source and raw capture.
 
 ## Search
 

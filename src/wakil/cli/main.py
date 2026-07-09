@@ -11,6 +11,8 @@ from wakil.config.settings import WorkspaceConfig, find_workspace_root
 from wakil.ui.console import (
     console,
     print_index_result,
+    print_ingest_proposal,
+    print_ingest_result,
     print_query_result,
     print_search_hits,
     print_status,
@@ -21,6 +23,8 @@ app = typer.Typer(
     help="Local-first agent for a personal Markdown knowledge base.",
     no_args_is_help=True,
 )
+ingest_app = typer.Typer(help="Ingest raw sources into the knowledge base.", no_args_is_help=True)
+app.add_typer(ingest_app, name="ingest")
 
 
 def _require_workspace(path: Path) -> Path:
@@ -139,6 +143,82 @@ def query(
         console.print(f"[red]Model error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
     print_query_result(result)
+
+
+def _run_ingest(
+    kind: str, path: Path, yes: bool, file: Path | None = None, url: str | None = None
+) -> None:
+    from wakil.app.ingest_service import IngestError, apply_ingest, prepare_ingest
+    from wakil.llm.client import ModelError, resolve_client
+
+    root = _require_workspace(path)
+    config = WorkspaceConfig.load(root)
+    client = resolve_client()
+    if client is None:
+        console.print(
+            "[yellow]No model provider configured[/yellow] — ingesting without "
+            "summary/memory extraction. Set ANTHROPIC_API_KEY to enable it."
+        )
+    try:
+        with console.status("Preparing ingest..."):
+            proposal = prepare_ingest(config, kind, file=file, url=url, client=client)
+    except (IngestError, ModelError) as exc:
+        console.print(f"[red]Ingest failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if proposal.duplicate_of is not None:
+        console.print(
+            f"[yellow]Already ingested[/yellow] (matches source #{proposal.duplicate_of}); "
+            "nothing to do."
+        )
+        return
+
+    print_ingest_proposal(proposal)
+    if not yes and not typer.confirm("Write these files and record the source?"):
+        console.print("Aborted; nothing was written.")
+        raise typer.Exit(code=0)
+    try:
+        result = apply_ingest(config, proposal)
+    except IngestError as exc:
+        console.print(f"[red]Ingest failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    print_ingest_result(result)
+
+
+@ingest_app.command("transcript")
+def ingest_transcript(
+    file: Annotated[Path, typer.Argument(help="Transcript file (.txt, .md, or .srt).")],
+    path: Annotated[
+        Path, typer.Option("--path", help="Path inside the workspace (defaults to cwd).")
+    ] = Path("."),
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Ingest a meeting or call transcript."""
+    _run_ingest("transcript", path, yes, file=file)
+
+
+@ingest_app.command("text")
+def ingest_text(
+    file: Annotated[Path, typer.Argument(help="Text or Markdown file to ingest.")],
+    path: Annotated[
+        Path, typer.Option("--path", help="Path inside the workspace (defaults to cwd).")
+    ] = Path("."),
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Ingest a plain text file, pasted note, or clipping."""
+    _run_ingest("text", path, yes, file=file)
+
+
+@ingest_app.command("article")
+def ingest_article(
+    url: Annotated[str, typer.Argument(help="Web article URL.")],
+    path: Annotated[
+        Path, typer.Option("--path", help="Path inside the workspace (defaults to cwd).")
+    ] = Path("."),
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Fetch a web article, extract its text, and ingest it."""
+    _run_ingest("article", path, yes, url=url)
 
 
 @app.command()
