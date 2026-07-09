@@ -31,6 +31,8 @@ app = typer.Typer(
 )
 ingest_app = typer.Typer(help="Ingest raw sources into the knowledge base.", no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
+git_app = typer.Typer(help="Git awareness for the knowledge base.", no_args_is_help=True)
+app.add_typer(git_app, name="git")
 
 
 @app.callback()
@@ -175,13 +177,23 @@ def query(
 
 
 def _run_ingest(
-    ctx: typer.Context, kind: str, yes: bool, file: Path | None = None, url: str | None = None
+    ctx: typer.Context,
+    kind: str,
+    yes: bool,
+    file: Path | None = None,
+    url: str | None = None,
+    branch: bool = False,
+    commit: bool = False,
+    pr: bool = False,
 ) -> None:
+    from wakil.app.git_service import GitServiceError, commit_ingest, start_ingest_branch
     from wakil.app.ingest_service import IngestError, apply_ingest, prepare_ingest
     from wakil.llm.client import ModelError, resolve_client
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
+    if pr:
+        branch = True
     client = resolve_client()
     if client is None:
         console.print(
@@ -206,42 +218,141 @@ def _run_ingest(
     if not yes and not typer.confirm("Write these files and record the source?"):
         console.print("Aborted; nothing was written.")
         raise typer.Exit(code=0)
+
+    branch_name: str | None = None
     try:
+        if branch:
+            branch_name = start_ingest_branch(config, proposal.title)
+            console.print(f"Created branch [bold]{branch_name}[/bold]")
         result = apply_ingest(config, proposal)
-    except IngestError as exc:
+    except (IngestError, GitServiceError) as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
     print_ingest_result(result)
+
+    if branch or commit:
+        try:
+            outcome = commit_ingest(
+                config,
+                result.files_written,
+                proposal.title,
+                proposal.summary or None,
+                ingest_run_id=result.ingest_run_id,
+                branch=branch_name,
+                open_pr=pr,
+            )
+        except GitServiceError as exc:
+            console.print(
+                f"[red]Commit failed:[/red] {exc}\n"
+                "[dim]The ingested files are still on disk for manual review.[/dim]"
+            )
+            raise typer.Exit(code=1) from exc
+        location = f" on [bold]{outcome.branch}[/bold]" if outcome.branch else ""
+        console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]{location}")
+        if outcome.pr_url:
+            console.print(f"Opened PR: {outcome.pr_url}")
+
+
+_YES = Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")]
+_BRANCH = Annotated[
+    bool, typer.Option("--branch", "-b", help="Create a wakil/ingest/* branch and commit there.")
+]
+_COMMIT = Annotated[
+    bool, typer.Option("--commit", "-c", help="Commit the ingested files on the current branch.")
+]
+_PR = Annotated[
+    bool, typer.Option("--pr", help="Push the ingest branch and open a PR via gh (implies -b).")
+]
 
 
 @ingest_app.command("transcript")
 def ingest_transcript(
     ctx: typer.Context,
     file: Annotated[Path, typer.Argument(help="Transcript file (.txt, .md, or .srt).")],
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+    yes: _YES = False,
+    branch: _BRANCH = False,
+    commit: _COMMIT = False,
+    pr: _PR = False,
 ) -> None:
     """Ingest a meeting or call transcript."""
-    _run_ingest(ctx, "transcript", yes, file=file)
+    _run_ingest(ctx, "transcript", yes, file=file, branch=branch, commit=commit, pr=pr)
 
 
 @ingest_app.command("text")
 def ingest_text(
     ctx: typer.Context,
     file: Annotated[Path, typer.Argument(help="Text or Markdown file to ingest.")],
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+    yes: _YES = False,
+    branch: _BRANCH = False,
+    commit: _COMMIT = False,
+    pr: _PR = False,
 ) -> None:
     """Ingest a plain text file, pasted note, or clipping."""
-    _run_ingest(ctx, "text", yes, file=file)
+    _run_ingest(ctx, "text", yes, file=file, branch=branch, commit=commit, pr=pr)
 
 
 @ingest_app.command("article")
 def ingest_article(
     ctx: typer.Context,
     url: Annotated[str, typer.Argument(help="Web article URL.")],
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+    yes: _YES = False,
+    branch: _BRANCH = False,
+    commit: _COMMIT = False,
+    pr: _PR = False,
 ) -> None:
     """Fetch a web article, extract its text, and ingest it."""
-    _run_ingest(ctx, "article", yes, url=url)
+    _run_ingest(ctx, "article", yes, url=url, branch=branch, commit=commit, pr=pr)
+
+
+@git_app.command("summary")
+def git_summary(ctx: typer.Context) -> None:
+    """Show branch, pending changes, recent commits, and wakil branches."""
+    from wakil.integrations import git as git_integration
+
+    root = _resolve_workspace(ctx)
+    info = git_integration.inspect_git(root)
+    if not info.is_repo:
+        console.print("[yellow]This workspace is not a git repository.[/yellow]")
+        raise typer.Exit(code=1)
+
+    console.print(f"Branch: [bold]{info.branch}[/bold]")
+    changed = git_integration.changed_files(root)
+    if changed:
+        console.print(f"[yellow]{len(changed)} uncommitted change(s):[/yellow]")
+        for line in changed[:20]:
+            console.print(f"  {line}")
+    else:
+        console.print("[green]Working tree clean[/green]")
+    if info.recent_commits:
+        console.print("[bold]Recent commits:[/bold]")
+        for line in info.recent_commits:
+            console.print(f"  [dim]{line}[/dim]")
+    branches = git_integration.wakil_branches(root)
+    if branches:
+        console.print("[bold]wakil branches:[/bold]")
+        for name in branches:
+            console.print(f"  {name}")
+
+
+@git_app.command("history")
+def git_history(
+    ctx: typer.Context,
+    path: Annotated[str, typer.Argument(help="Workspace-relative file path.")],
+    limit: Annotated[int, typer.Option("--limit", help="Max commits to show.")] = 10,
+) -> None:
+    """Show the commit history of one note or file."""
+    from wakil.integrations import git as git_integration
+
+    root = _resolve_workspace(ctx)
+    if not git_integration.inspect_git(root).is_repo:
+        console.print("[yellow]This workspace is not a git repository.[/yellow]")
+        raise typer.Exit(code=1)
+    entries = git_integration.file_history(root, path, limit=limit)
+    if not entries:
+        console.print(f"No git history for [bold]{path}[/bold].")
+        raise typer.Exit(code=0)
+    for line in entries:
+        console.print(line)
 
 
 @app.command()

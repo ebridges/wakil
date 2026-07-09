@@ -47,6 +47,14 @@ uv run wakil -w kb query "How do my notes on FNOL relate to graph memory?"
 uv run wakil -w kb ingest transcript ./raw/meeting.txt
 uv run wakil -w kb ingest article https://example.com/post
 uv run wakil -w kb ingest text ./clipping.md
+
+# Git-native ingest: commit on a wakil/ingest/* branch, optionally open a PR
+uv run wakil -w kb ingest transcript ./raw/meeting.txt --branch
+uv run wakil -w kb ingest article https://example.com/post --pr
+
+# Git awareness
+uv run wakil -w kb git summary
+uv run wakil -w kb git history concepts/graph-memory.md
 ```
 
 ## Selecting a workspace
@@ -80,6 +88,23 @@ the path collides. Existing files are never overwritten, and all writes are
 plain files you can review with `git diff`/`git status`. Extracted memories
 are stored as `candidate` state in SQLite for later review and promotion.
 Without a provider, ingest still stores the source and raw capture.
+
+## Git-native changes
+
+When the knowledge base is a git repository, ingest can make its changes
+reviewable git history:
+
+- `--commit`/`-c` commits the ingested files on the current branch, staging
+  only the files wakil wrote (your other uncommitted work is untouched);
+- `--branch`/`-b` first checks the working tree is clean, then creates a
+  `wakil/ingest/<date>-<slug>` branch and commits there;
+- `--pr` additionally pushes the branch and opens a pull request via the
+  GitHub CLI (`gh`), when it is installed and an `origin` remote exists.
+
+Commits follow the wakil conventions (`wakil ingest: add ...`) and every
+commit is recorded in the workspace database (`git_changes`). `wakil git
+summary` shows the current branch, pending changes, recent commits, and
+wakil-created branches; `wakil git history <path>` shows one file's history.
 
 ## Search
 
