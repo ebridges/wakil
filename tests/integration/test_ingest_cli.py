@@ -38,12 +38,12 @@ def test_ingest_transcript_with_yes(kb_path: Path, monkeypatch):
     transcript = _init(kb_path)
 
     result = runner.invoke(
-        app, ["ingest", "transcript", str(transcript), "--path", str(kb_path), "--yes"]
+        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes"]
     )
     assert result.exit_code == 0, result.output
     assert "Ingest preview" in result.output
     assert "candidate memories" in result.output
-    assert list((kb_path / "sources" / "transcripts").glob("*.md"))
+    assert list((kb_path / "sources" / "transcripts").glob("2*.md"))
 
 
 def test_ingest_declining_writes_nothing(kb_path: Path, monkeypatch):
@@ -51,7 +51,7 @@ def test_ingest_declining_writes_nothing(kb_path: Path, monkeypatch):
     transcript = _init(kb_path)
 
     result = runner.invoke(
-        app, ["ingest", "transcript", str(transcript), "--path", str(kb_path)], input="n\n"
+        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript)], input="n\n"
     )
     assert result.exit_code == 0
     assert "nothing was written" in result.output
@@ -64,20 +64,20 @@ def test_ingest_without_provider_warns_but_ingests(kb_path: Path, monkeypatch):
     transcript = _init(kb_path)
 
     result = runner.invoke(
-        app, ["ingest", "transcript", str(transcript), "--path", str(kb_path), "--yes"]
+        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes"]
     )
     assert result.exit_code == 0
     assert "No model provider configured" in result.output
-    assert list((kb_path / "sources" / "transcripts").glob("*.md"))
+    assert list((kb_path / "sources" / "transcripts").glob("2*.md"))
 
 
 def test_ingest_duplicate_reports_and_exits(kb_path: Path, monkeypatch):
     monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
     transcript = _init(kb_path)
 
-    runner.invoke(app, ["ingest", "transcript", str(transcript), "--path", str(kb_path), "--yes"])
+    runner.invoke(app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes"])
     result = runner.invoke(
-        app, ["ingest", "transcript", str(transcript), "--path", str(kb_path), "--yes"]
+        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes"]
     )
     assert result.exit_code == 0
     assert "Already ingested" in result.output
@@ -87,7 +87,7 @@ def test_ingest_missing_file_fails(kb_path: Path, monkeypatch):
     monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
     runner.invoke(app, ["init", str(kb_path)])
     result = runner.invoke(
-        app, ["ingest", "transcript", str(kb_path / "nope.txt"), "--path", str(kb_path), "--yes"]
+        app, ["-w", str(kb_path), "ingest", "transcript", str(kb_path / "nope.txt"), "--yes"]
     )
     assert result.exit_code == 1
     assert "Ingest failed" in result.output

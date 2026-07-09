@@ -27,26 +27,42 @@ uv sync
 ## Usage
 
 ```bash
-# Initialize a knowledge-base workspace (creates .wakil/ with config + SQLite db)
-uv run wakil init ~/kb
+# Initialize a knowledge-base workspace (creates .wakil/ with config + SQLite db,
+# and registers the workspace name for -w lookups)
+uv run wakil init ~/kb --name kb
 
 # Show workspace status: notes indexed, git state, QMD availability
-uv run wakil status --path ~/kb
+uv run wakil -w ~/kb status
 
 # Re-index Markdown files after edits
-uv run wakil index --path ~/kb
+uv run wakil -w kb index
 
 # Search the knowledge base (QMD if installed, plus local FTS indexes)
-uv run wakil search "insurance claims routing" --path ~/kb
+uv run wakil -w kb search "insurance claims routing"
 
 # Ask a grounded question (requires a model provider, see below)
-uv run wakil query "How do my notes on FNOL relate to graph memory?" --path ~/kb
+uv run wakil -w kb query "How do my notes on FNOL relate to graph memory?"
 
 # Ingest raw material into the knowledge base
-uv run wakil ingest transcript ./raw/meeting.txt --path ~/kb
-uv run wakil ingest article https://example.com/post --path ~/kb
-uv run wakil ingest text ./clipping.md --path ~/kb
+uv run wakil -w kb ingest transcript ./raw/meeting.txt
+uv run wakil -w kb ingest article https://example.com/post
+uv run wakil -w kb ingest text ./clipping.md
 ```
+
+## Selecting a workspace
+
+Every command accepts a global `-w`/`--workspace` option (before the
+subcommand) naming the workspace to operate on:
+
+- **omitted** — use the current directory, searching upward for a `.wakil/`
+  workspace (so any subdirectory of the knowledge base works);
+- **a directory** — use that path (also searched upward);
+- **a name** — look up a workspace registered by `wakil init` in
+  `~/.config/wakil/workspaces.yaml`, so `wakil -w kb status` works from
+  anywhere.
+
+The `WAKIL_WORKSPACE` environment variable provides the same value as a
+default, e.g. `export WAKIL_WORKSPACE=kb`.
 
 ## Ingest
 
