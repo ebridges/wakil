@@ -33,6 +33,8 @@ ingest_app = typer.Typer(help="Ingest raw sources into the knowledge base.", no_
 app.add_typer(ingest_app, name="ingest")
 git_app = typer.Typer(help="Git awareness for the knowledge base.", no_args_is_help=True)
 app.add_typer(git_app, name="git")
+memory_app = typer.Typer(help="Review and manage the memory lifecycle.", no_args_is_help=True)
+app.add_typer(memory_app, name="memory")
 
 
 @app.callback()
@@ -302,6 +304,113 @@ def ingest_article(
 ) -> None:
     """Fetch a web article, extract its text, and ingest it."""
     _run_ingest(ctx, "article", yes, url=url, branch=branch, commit=commit, pr=pr)
+
+
+def _memory_session(ctx: typer.Context):
+    """(config, session, workspace_id) for memory commands."""
+    from wakil.app.search_service import get_workspace_id
+    from wakil.app.workspace_service import open_session
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    session = open_session(config)
+    workspace_id = get_workspace_id(session, config)
+    if workspace_id is None:
+        session.close()
+        console.print("[red]Workspace database is not initialized; run wakil init first.[/red]")
+        raise typer.Exit(code=1)
+    return session, workspace_id
+
+
+def _transition(ctx: typer.Context, ids: list[int], new_state: str) -> None:
+    from wakil.app.memory_service import MemoryError, transition_memories
+    from wakil.ui.console import print_transitions
+
+    session, workspace_id = _memory_session(ctx)
+    with session:
+        try:
+            results = transition_memories(session, workspace_id, ids, new_state)
+        except MemoryError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        session.commit()
+    print_transitions(results)
+
+
+@memory_app.command("list")
+def memory_list(
+    ctx: typer.Context,
+    state: Annotated[
+        str | None,
+        typer.Option(
+            "--state", help="Filter by state: working|candidate|durable|rejected|archived."
+        ),
+    ] = None,
+    memory_type: Annotated[
+        str | None, typer.Option("--type", help="Filter by memory type (fact, decision, ...).")
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", help="Max memories to show.")] = 50,
+) -> None:
+    """List memories, newest first."""
+    from wakil.app.memory_service import MemoryError, list_memories
+    from wakil.ui.console import print_memories
+
+    session, workspace_id = _memory_session(ctx)
+    with session:
+        try:
+            memories = list_memories(
+                session, workspace_id, state=state, memory_type=memory_type, limit=limit
+            )
+        except MemoryError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        print_memories(memories)
+
+
+@memory_app.command("show")
+def memory_show(
+    ctx: typer.Context,
+    memory_id: Annotated[int, typer.Argument(help="Memory id (see wakil memory list).")],
+) -> None:
+    """Show one memory in full."""
+    from wakil.app.memory_service import MemoryError, get_memory
+    from wakil.ui.console import print_memory_detail
+
+    session, workspace_id = _memory_session(ctx)
+    with session:
+        try:
+            memory = get_memory(session, workspace_id, memory_id)
+        except MemoryError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        print_memory_detail(memory)
+
+
+@memory_app.command("promote")
+def memory_promote(
+    ctx: typer.Context,
+    ids: Annotated[list[int], typer.Argument(help="Memory ids to promote to durable.")],
+) -> None:
+    """Promote memories to durable so they shape future answers."""
+    _transition(ctx, ids, "durable")
+
+
+@memory_app.command("reject")
+def memory_reject(
+    ctx: typer.Context,
+    ids: Annotated[list[int], typer.Argument(help="Memory ids to reject.")],
+) -> None:
+    """Reject memory proposals; rejected memories are excluded from search."""
+    _transition(ctx, ids, "rejected")
+
+
+@memory_app.command("archive")
+def memory_archive(
+    ctx: typer.Context,
+    ids: Annotated[list[int], typer.Argument(help="Memory ids to archive.")],
+) -> None:
+    """Archive memories: kept and searchable, but downranked."""
+    _transition(ctx, ids, "archived")
 
 
 @git_app.command("summary")

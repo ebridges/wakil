@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import select
 
+from wakil.app.memory_service import touch_memories
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import open_session
 from wakil.config.settings import WorkspaceConfig
@@ -58,6 +59,11 @@ def run_query(
             session.commit()
             raise
         run.completed_at = utcnow()
+        # Record usage so memory ranking can favor referenced memories.
+        touch_memories(
+            session,
+            [int(c.ref.split(":", 1)[1]) for c in contexts if c.kind == "memory"],
+        )
         run.notes_used_json = json.dumps([c.ref for c in contexts if c.kind == "note"])
         run.memories_used_json = json.dumps([c.ref for c in contexts if c.kind == "memory"])
         run.sources_used_json = json.dumps([c.ref for c in contexts if c.kind == "source"])

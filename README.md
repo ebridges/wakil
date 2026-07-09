@@ -55,7 +55,29 @@ uv run wakil -w kb ingest article https://example.com/post --pr
 # Git awareness
 uv run wakil -w kb git summary
 uv run wakil -w kb git history concepts/graph-memory.md
+
+# Memory lifecycle
+uv run wakil -w kb memory list --state candidate
+uv run wakil -w kb memory show 3
+uv run wakil -w kb memory promote 3 7
+uv run wakil -w kb memory reject 4
+uv run wakil -w kb memory archive 1
 ```
+
+## Memory lifecycle
+
+Ingests propose memories in `candidate` state; you review and decide:
+
+    working → candidate → durable
+                      ↘ rejected
+    durable → archived
+
+`wakil memory list` (with `--state`/`--type` filters) reviews them, `promote`
+moves them to durable, `reject` removes them from search, and `archive` keeps
+them searchable but downranked. Invalid transitions are refused. Rather than
+deleting, retrieval fades memories: durable ranks first, then candidate, then
+working (fading further after 30 days), then archived. Memories used to
+answer a query get their `last_seen_at` bumped for future ranking.
 
 ## Selecting a workspace
 

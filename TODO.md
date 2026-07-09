@@ -42,9 +42,15 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 
 ## Phase 5: Memory Lifecycle
 
-- [ ] `wakil memory list/promote/reject/archive`
-- [ ] Fading in retrieval ranking (state, importance, freshness, recency)
-- [ ] Memory citations in query answers
+- [x] `wakil memory list/show/promote/reject/archive`
+- [x] Fading in retrieval ranking (state ordering, working memories fade
+      after 30 days, archived downranked, rejected excluded)
+- [x] Memory citations in query answers (memory:<id> refs, last_seen_at
+      bumped when used)
+- [ ] Use last_seen_at/reference counts in ranking (currently recorded but
+      only created_at feeds fading)
+- [ ] `wakil memory add` for manually authored memories
+- [ ] Vector/embedding similarity for memories (optional, per PROMPT)
 
 ## Phase 6: Dream
 

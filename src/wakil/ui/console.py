@@ -140,6 +140,71 @@ def print_ingest_result(result: IngestResult) -> None:
     )
 
 
+_STATE_STYLES = {
+    "durable": "green",
+    "candidate": "yellow",
+    "working": "cyan",
+    "archived": "dim",
+    "rejected": "red",
+}
+
+
+def _styled_state(state: str) -> str:
+    style = _STATE_STYLES.get(state, "white")
+    return f"[{style}]{state}[/{style}]"
+
+
+def print_memories(memories: list) -> None:
+    if not memories:
+        console.print("No memories match.")
+        return
+    table = Table(title="Memories")
+    table.add_column("ID", style="bold", justify="right")
+    table.add_column("State")
+    table.add_column("Type", style="magenta")
+    table.add_column("Content", overflow="fold", max_width=70)
+    table.add_column("Conf", justify="right")
+    table.add_column("Source", style="dim")
+    for memory in memories:
+        conf = f"{memory.confidence:.2f}" if memory.confidence is not None else "-"
+        source = f"source:{memory.source_id}" if memory.source_id else "-"
+        table.add_row(
+            str(memory.id),
+            _styled_state(memory.state),
+            memory.memory_type,
+            memory.content,
+            conf,
+            source,
+        )
+    console.print(table)
+    console.print(
+        "[dim]wakil memory promote|reject|archive <id...> to change states; "
+        "wakil memory show <id> for detail.[/dim]"
+    )
+
+
+def print_memory_detail(memory) -> None:
+    lines = [
+        f"[bold]State:[/bold] {_styled_state(memory.state)}",
+        f"[bold]Type:[/bold] {memory.memory_type}",
+        f"[bold]Confidence:[/bold] {memory.confidence if memory.confidence is not None else '-'}",
+        f"[bold]Source:[/bold] {f'source:{memory.source_id}' if memory.source_id else '-'}",
+        f"[bold]Created:[/bold] {memory.created_at}",
+        f"[bold]Last seen:[/bold] {memory.last_seen_at or '-'}",
+        "",
+        memory.content,
+    ]
+    console.print(Panel("\n".join(lines), title=f"Memory #{memory.id}", border_style="magenta"))
+
+
+def print_transitions(results: list) -> None:
+    for result in results:
+        console.print(
+            f"Memory [bold]#{result.memory_id}[/bold]: "
+            f"{_styled_state(result.old_state)} → {_styled_state(result.new_state)}"
+        )
+
+
 def print_index_result(result: IndexResult) -> None:
     console.print(
         f"Indexed [bold]{result.total}[/bold] notes "
