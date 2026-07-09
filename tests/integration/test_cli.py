@@ -1,0 +1,54 @@
+import subprocess
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from wakil.cli.main import app
+
+runner = CliRunner()
+
+
+def test_init_and_status(kb_path: Path):
+    result = runner.invoke(app, ["init", str(kb_path)])
+    assert result.exit_code == 0
+    assert "8 added" in result.output
+
+    result = runner.invoke(app, ["status", "--path", str(kb_path)])
+    assert result.exit_code == 0
+    assert "kb" in result.output
+    assert "8" in result.output
+
+
+def test_status_from_subdirectory_finds_workspace(kb_path: Path):
+    runner.invoke(app, ["init", str(kb_path)])
+    result = runner.invoke(app, ["status", "--path", str(kb_path / "concepts")])
+    assert result.exit_code == 0
+
+
+def test_status_without_workspace_fails(tmp_path: Path):
+    result = runner.invoke(app, ["status", "--path", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "No wakil workspace found" in result.output
+
+
+def test_index_command_reports_changes(kb_path: Path):
+    runner.invoke(app, ["init", str(kb_path)])
+    (kb_path / "concepts" / "new-idea.md").write_text("# New Idea\n")
+
+    result = runner.invoke(app, ["index", "--path", str(kb_path)])
+    assert result.exit_code == 0
+    assert "1 added" in result.output
+
+
+def test_init_detects_git_repository(kb_path: Path):
+    subprocess.run(["git", "init", "-q"], cwd=kb_path, check=True)
+
+    result = runner.invoke(app, ["init", str(kb_path)])
+    assert result.exit_code == 0
+    assert "branch" in result.output
+
+
+def test_version():
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+    assert "wakil" in result.output
