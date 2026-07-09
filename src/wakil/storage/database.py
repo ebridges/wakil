@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from wakil.storage.fts import ensure_fts
 from wakil.storage.schema import Base
 
 
@@ -15,6 +16,7 @@ def create_db_engine(db_path: Path) -> Engine:
 
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+    ensure_fts(engine)
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
