@@ -166,8 +166,11 @@ def _build_status(
     qmd_info: QmdInfo,
 ) -> WorkspaceStatus:
     def count(model) -> int:
-        return session.scalar(
-            select(func.count()).select_from(model).where(model.workspace_id == workspace_id)
+        return (
+            session.scalar(
+                select(func.count()).select_from(model).where(model.workspace_id == workspace_id)
+            )
+            or 0
         )
 
     special = [name for name in SPECIAL_FILES if (config.root_path / name).is_file()]
