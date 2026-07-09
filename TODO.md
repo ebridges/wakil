@@ -31,11 +31,14 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 
 ## Phase 4: Git-Native Changes
 
-- [ ] Ingest branch creation (`wakil/ingest/<date>-<slug>`)
-- [ ] Commit convention helpers (`wakil ingest:`, `wakil note:`, ...)
-- [ ] Dirty-tree checks before writes
-- [ ] Optional gh-based PR creation
-- [ ] `wakil git summary`
+- [x] Ingest branch creation (`wakil/ingest/<date>-<slug>`)
+- [x] Commit convention helpers (`wakil ingest:`, `wakil note:`, ...)
+- [x] Dirty-tree checks before branching
+- [x] Optional gh-based PR creation (`--pr`)
+- [x] `wakil git summary` and `wakil git history <path>`
+- [ ] Return to the original branch after `--branch` ingest (currently stays
+      on the wakil branch, matching manual git workflows)
+- [ ] `wakil note:`/`wakil link:` commit flows once note editing lands
 
 ## Phase 5: Memory Lifecycle
 
