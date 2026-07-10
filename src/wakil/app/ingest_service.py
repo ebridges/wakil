@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
 from sqlalchemy import select
 
 from wakil.app.search_service import SearchHit, search_workspace
@@ -30,6 +31,7 @@ from wakil.storage.schema import IngestRun, Memory, Relationship, Source, User, 
 
 MAX_SOURCE_CHARS = 24_000
 RELATED_NOTE_LIMIT = 5
+GUIDE_MAX_CHARS = 4_000
 
 _SRT_INDEX_RE = re.compile(r"^\d+$")
 _SRT_TIMING_RE = re.compile(r"^\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}")
@@ -73,6 +75,7 @@ class IngestProposal:
     text: str
     content_hash: str
     raw_file: ProposedFile
+    context: str | None = None  # user-supplied context (attendees, company, ...)
     summary: str = ""
     key_points: list[str] = field(default_factory=list)
     memories: list[CandidateMemory] = field(default_factory=list)
@@ -99,6 +102,7 @@ def prepare_ingest(
     file: Path | None = None,
     url: str | None = None,
     client: ModelClient | None = None,
+    context: str | None = None,
 ) -> IngestProposal:
     if kind in ("transcript", "text"):
         if file is None:
@@ -108,6 +112,8 @@ def prepare_ingest(
         except OSError as exc:
             raise IngestError(f"Could not read {file}: {exc}") from exc
         text = strip_srt(raw) if file.suffix.lower() == ".srt" else raw
+        if kind == "transcript":
+            text = clean_transcript(text)
         origin = str(file)
         title = file.stem.replace("-", " ").replace("_", " ").strip() or file.name
     elif kind == "article":
@@ -130,6 +136,7 @@ def prepare_ingest(
         title=title,
         text=text,
         content_hash=content_hash,
+        context=context,
         raw_file=ProposedFile(path="", content=""),
     )
 
@@ -138,10 +145,15 @@ def prepare_ingest(
         if existing is not None:
             proposal.duplicate_of = existing
             return proposal
+        # Search with the user-supplied context (attendees, company) and the
+        # opening of the document, not just the title, so entity notes
+        # (people/, companies/, ...) and prior meetings surface as candidates
+        # for the model to link.
+        related_query = " ".join(filter(None, [title, context, text[:300]]))
         proposal.related_notes = [
             hit
             for hit in search_workspace(
-                config=config, session=session, query=title, limit=RELATED_NOTE_LIMIT
+                config=config, session=session, query=related_query, limit=RELATED_NOTE_LIMIT
             )
             if hit.kind == "note"
         ]
@@ -185,7 +197,16 @@ def apply_ingest(config: WorkspaceConfig, proposal: IngestProposal) -> IngestRes
             content_hash=proposal.content_hash,
             raw_text_path=proposal.raw_file.path,
             status="ingested",
-            metadata_json=json.dumps({"summary": proposal.summary} if proposal.summary else {}),
+            metadata_json=json.dumps(
+                {
+                    key: value
+                    for key, value in (
+                        ("summary", proposal.summary),
+                        ("context", proposal.context),
+                    )
+                    if value
+                }
+            ),
         )
         session.add(source)
         session.flush()
@@ -254,9 +275,45 @@ def strip_srt(raw: str) -> str:
     return "\n".join(lines)
 
 
+# Bracketed timestamps anywhere; bare timestamps only at line start so times
+# mentioned in speech ("let's meet at 3:30") survive.
+_BRACKET_TS_RE = re.compile(r"[\[(]\d{1,2}:\d{2}(:\d{2})?([,.]\d{1,3})?[\])]")
+_LEADING_TS_RE = re.compile(r"^\s*\d{1,2}:\d{2}(:\d{2})?([,.]\d{1,3})?\s*[-–>]*\s*")
+
+
+def clean_transcript(raw: str) -> str:
+    """Light, deterministic transcript cleanup.
+
+    Removes timestamp noise and normalizes whitespace without touching the
+    spoken content — the raw capture must stay faithful to the source, so no
+    model rewriting happens here.
+    """
+    cleaned_lines: list[str] = []
+    for line in raw.splitlines():
+        line = _BRACKET_TS_RE.sub("", line)
+        line = _LEADING_TS_RE.sub("", line)
+        line = re.sub(r"[ \t]+", " ", line).rstrip()
+        if line or (cleaned_lines and cleaned_lines[-1]):
+            cleaned_lines.append(line)
+    return "\n".join(cleaned_lines).strip()
+
+
 def slugify(value: str, max_length: int = 60) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:max_length].rstrip("-") or "untitled"
+
+
+def load_workspace_guides(config: WorkspaceConfig) -> dict[str, str]:
+    """SCHEMA.md (page shape) and RESOLVER.md (routing) excerpts, when present."""
+    guides = {}
+    for name in ("SCHEMA.md", "RESOLVER.md"):
+        path = config.root_path / name
+        if path.is_file():
+            try:
+                guides[name] = path.read_text(encoding="utf-8", errors="replace")[:GUIDE_MAX_CHARS]
+            except OSError:
+                continue
+    return guides
 
 
 def _enrich_with_model(
@@ -264,7 +321,12 @@ def _enrich_with_model(
 ) -> None:
     related = [(hit.ref, hit.title) for hit in proposal.related_notes]
     prompt = build_ingest_prompt(
-        proposal.source_type, proposal.origin, proposal.text[:MAX_SOURCE_CHARS], related
+        proposal.source_type,
+        proposal.origin,
+        proposal.text[:MAX_SOURCE_CHARS],
+        related,
+        context=proposal.context,
+        guides=load_workspace_guides(config),
     )
     data = parse_ingest_response(client.complete(INGEST_SYSTEM_PROMPT, prompt))
 
@@ -303,17 +365,18 @@ def _build_raw_file(config: WorkspaceConfig, proposal: IngestProposal) -> Propos
     base = f"{date}-{slugify(proposal.title)}"
     path = _unused_path(config.root_path, directory, base)
 
-    frontmatter_lines = [
-        "---",
-        "type: source",
-        f"source_type: {proposal.source_type}",
-        f"origin: {json.dumps(proposal.origin)}",
-        f"title: {json.dumps(proposal.title)}",
-        f"retrieved: {date}",
-        "---",
-        "",
-    ]
-    return ProposedFile(path=str(path), content="\n".join(frontmatter_lines) + proposal.text + "\n")
+    metadata: dict = {
+        "type": "source",
+        "source_type": proposal.source_type,
+        "origin": proposal.origin,
+        "title": proposal.title,
+        "retrieved": date,
+        "status": "raw",
+    }
+    if proposal.context:
+        metadata["context"] = proposal.context
+    frontmatter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
+    return ProposedFile(path=str(path), content=f"---\n{frontmatter}---\n\n" + proposal.text + "\n")
 
 
 def _sanitize_note(config: WorkspaceConfig, proposal: IngestProposal) -> ProposedFile | None:

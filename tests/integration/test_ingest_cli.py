@@ -83,6 +83,39 @@ def test_ingest_duplicate_reports_and_exits(kb_path: Path, monkeypatch):
     assert "Already ingested" in result.output
 
 
+def test_ingest_with_context_option(kb_path: Path, monkeypatch):
+    prompts: list[str] = []
+
+    class RecordingClient:
+        model = "fake-model"
+
+        def complete(self, system, prompt, max_tokens=8192):
+            prompts.append(prompt)
+            return MODEL_JSON
+
+    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: RecordingClient())
+    transcript = _init(kb_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "-w",
+            str(kb_path),
+            "ingest",
+            "transcript",
+            str(transcript),
+            "--context",
+            "Attendees: Jane Doe, Bob (Acme).",
+            "--yes",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Attendees: Jane Doe, Bob (Acme)." in prompts[0]
+    assert "Context: Attendees" in result.output.replace("\n", " ")
+    raw = next((kb_path / "sources" / "transcripts").glob("2*.md")).read_text()
+    assert "Jane Doe" in raw
+
+
 def test_ingest_missing_file_fails(kb_path: Path, monkeypatch):
     monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
     runner.invoke(app, ["init", str(kb_path)])

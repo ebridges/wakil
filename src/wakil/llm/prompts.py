@@ -58,15 +58,26 @@ Rules:
 - Memories must be grounded in the source; do not invent facts.
 - 3-10 memories; relationships only where clearly justified.
 - `subject`/`object` are 0-based indices into the memories array.
-- Link related existing notes with [[wikilinks]] in the proposed note when
-  they are genuinely relevant.
+- Use the user-provided context (attendees, organizations, purpose) to
+  resolve names and identify who and what the source is about.
+- Link entities — people, companies, concepts, projects, and prior meetings —
+  to the existing related notes with [[wikilinks]] wherever they genuinely
+  match; mention entities without a matching note in plain text.
+- When SCHEMA.md guidance is provided, follow its frontmatter fields,
+  filename conventions, and page structure for the proposed note. When
+  RESOLVER.md guidance is provided, follow it to choose the note's path.
 - Set "proposed_note" to null if the source does not merit a durable note.
 - Keep the proposed note faithful to the source; mark uncertainty explicitly.
 """
 
 
 def build_ingest_prompt(
-    source_type: str, origin: str, text: str, related_notes: list[tuple[str, str]]
+    source_type: str,
+    origin: str,
+    text: str,
+    related_notes: list[tuple[str, str]],
+    context: str | None = None,
+    guides: dict[str, str] | None = None,
 ) -> str:
     """related_notes: (path, title) pairs from searching the knowledge base."""
     related = (
@@ -74,12 +85,14 @@ def build_ingest_prompt(
         if related_notes
         else "(none found)"
     )
-    return (
-        f"Source type: {source_type}\n"
-        f"Origin: {origin}\n\n"
-        f"Existing related notes:\n{related}\n\n"
-        f"Source document:\n\n{text}"
-    )
+    parts = [f"Source type: {source_type}", f"Origin: {origin}", ""]
+    if context:
+        parts += ["User-provided context about this source:", context, ""]
+    for name, content in (guides or {}).items():
+        purpose = "page shape and metadata" if name == "SCHEMA.md" else "where notes belong"
+        parts += [f"Workspace guidance from {name} ({purpose}):", content, ""]
+    parts += [f"Existing related notes:\n{related}", "", f"Source document:\n\n{text}"]
+    return "\n".join(parts)
 
 
 def parse_ingest_response(raw: str) -> dict:

@@ -150,6 +150,79 @@ def test_out_of_range_relationships_are_dropped(workspace, transcript):
     assert result.relationships_created == 0
 
 
+def test_context_reaches_prompt_frontmatter_and_search(workspace, kb_path):
+    transcript = kb_path / "standup.txt"
+    transcript.write_text("Discussed the routing design with the team.\n")
+    client = FakeClient()
+
+    proposal = prepare_ingest(
+        workspace,
+        "transcript",
+        file=transcript,
+        client=client,
+        context="Attendees: Jane Doe (Acme Corp), Bob. Weekly claims standup.",
+    )
+
+    # Context guides the model...
+    assert "Jane Doe (Acme Corp)" in client.prompts[0]
+    assert "User-provided context" in client.prompts[0]
+    # ...lands in the raw capture's frontmatter...
+    assert "context: 'Attendees: Jane Doe (Acme Corp)" in proposal.raw_file.content
+    # ...and pulls entity notes into the related-note candidates.
+    assert any(hit.ref == "people/jane-doe.md" for hit in proposal.related_notes)
+
+    # It is persisted on the source record too.
+    result = apply_ingest(workspace, proposal)
+    with open_session(workspace) as session:
+        source = session.get(Source, result.source_id)
+    assert "Jane Doe" in source.metadata_json
+
+
+def test_raw_capture_has_schema_style_metadata(workspace, transcript):
+    proposal = prepare_ingest(workspace, "transcript", file=transcript)
+    content = proposal.raw_file.content
+    assert content.startswith("---\n")
+    assert "type: source" in content
+    assert "source_type: transcript" in content
+    assert "status: raw" in content
+    assert "retrieved:" in content
+
+
+def test_workspace_guides_reach_prompt(workspace, transcript):
+    # The fixture KB ships SCHEMA.md; add a RESOLVER.md as well.
+    (workspace.root_path / "RESOLVER.md").write_text("# Resolver\n\nMeetings go in meetings/.\n")
+    client = FakeClient()
+    prepare_ingest(workspace, "transcript", file=transcript, client=client)
+
+    prompt = client.prompts[0]
+    assert "Workspace guidance from SCHEMA.md" in prompt
+    assert "Workspace guidance from RESOLVER.md" in prompt
+    assert "Meetings go in meetings/" in prompt
+
+
+def test_clean_transcript_strips_timestamp_noise():
+    from wakil.app.ingest_service import clean_transcript
+
+    raw = (
+        "[00:00:03] Jane:   let's start\n"
+        "00:00:07 Bob: agreed,  see (00:01:12) above\n"
+        "\n"
+        "\n"
+        "Jane: meet at 3:30 tomorrow\t\n"
+    )
+    assert clean_transcript(raw) == (
+        "Jane: let's start\nBob: agreed, see above\n\nJane: meet at 3:30 tomorrow"
+    )
+
+
+def test_transcript_ingest_stores_cleaned_text(workspace, kb_path):
+    noisy = kb_path / "noisy.txt"
+    noisy.write_text("[00:00:01] Jane: hello\n00:00:05 Bob: hi\n")
+    proposal = prepare_ingest(workspace, "transcript", file=noisy)
+    assert "Jane: hello\nBob: hi" in proposal.raw_file.content
+    assert "[00:00:01]" not in proposal.raw_file.content
+
+
 def test_strip_srt():
     srt = (
         "1\n00:00:01,000 --> 00:00:03,000\nHello there.\n\n"

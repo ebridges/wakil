@@ -44,7 +44,8 @@ uv run wakil -w kb search "insurance claims routing"
 uv run wakil -w kb query "How do my notes on FNOL relate to graph memory?"
 
 # Ingest raw material into the knowledge base
-uv run wakil -w kb ingest transcript ./raw/meeting.txt
+uv run wakil -w kb ingest transcript ./raw/meeting.txt \
+    --context "Attendees: Jane Doe, Bob (Acme Corp). Weekly claims sync."
 uv run wakil -w kb ingest article https://example.com/post
 uv run wakil -w kb ingest text ./clipping.md
 
@@ -102,6 +103,19 @@ readability extraction), dedupes by content hash, finds related existing
 notes, and — when a model provider is configured — produces a summary, key
 points, candidate memories, candidate relationships, and an optional proposed
 Markdown note linked with wikilinks.
+
+`--context`/`-C` accepts a few lines about the source (attendees, company,
+purpose). It is used to find related entity notes and prior meetings in the
+knowledge base, passed to the model so names resolve to existing
+`people/`/`companies/` notes via wikilinks, and recorded in the raw capture's
+frontmatter and the source record.
+
+Transcripts get light deterministic cleanup before capture — bracketed and
+line-leading timestamps removed, whitespace normalized — with no model
+rewriting, so the raw capture in `sources/transcripts/` stays faithful to the
+source (frontmatter: `type: source`, `status: raw`, origin, retrieval date).
+When the workspace has `SCHEMA.md`/`RESOLVER.md`, their guidance is included
+in the analysis so proposed notes follow the KB's schema and routing rules.
 
 Nothing is written until you confirm the preview (`--yes` skips the prompt).
 The raw capture lands under `sources/` with frontmatter; proposed notes go to

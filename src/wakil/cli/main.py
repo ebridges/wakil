@@ -187,6 +187,7 @@ def _run_ingest(
     branch: bool = False,
     commit: bool = False,
     pr: bool = False,
+    context: str | None = None,
 ) -> None:
     from wakil.app.git_service import GitServiceError, commit_ingest, start_ingest_branch
     from wakil.app.ingest_service import IngestError, apply_ingest, prepare_ingest
@@ -204,7 +205,9 @@ def _run_ingest(
         )
     try:
         with console.status("Preparing ingest..."):
-            proposal = prepare_ingest(config, kind, file=file, url=url, client=client)
+            proposal = prepare_ingest(
+                config, kind, file=file, url=url, client=client, context=context
+            )
     except (IngestError, ModelError) as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -265,45 +268,59 @@ _COMMIT = Annotated[
 _PR = Annotated[
     bool, typer.Option("--pr", help="Push the ingest branch and open a PR via gh (implies -b).")
 ]
+_CONTEXT = Annotated[
+    str | None,
+    typer.Option(
+        "--context",
+        "-C",
+        help="A few lines of context about the source (attendees, company, purpose) "
+        "to guide analysis and entity linking.",
+    ),
+]
 
 
 @ingest_app.command("transcript")
 def ingest_transcript(
     ctx: typer.Context,
     file: Annotated[Path, typer.Argument(help="Transcript file (.txt, .md, or .srt).")],
+    context: _CONTEXT = None,
     yes: _YES = False,
     branch: _BRANCH = False,
     commit: _COMMIT = False,
     pr: _PR = False,
 ) -> None:
     """Ingest a meeting or call transcript."""
-    _run_ingest(ctx, "transcript", yes, file=file, branch=branch, commit=commit, pr=pr)
+    _run_ingest(
+        ctx, "transcript", yes, file=file, branch=branch, commit=commit, pr=pr, context=context
+    )
 
 
 @ingest_app.command("text")
 def ingest_text(
     ctx: typer.Context,
     file: Annotated[Path, typer.Argument(help="Text or Markdown file to ingest.")],
+    context: _CONTEXT = None,
     yes: _YES = False,
     branch: _BRANCH = False,
     commit: _COMMIT = False,
     pr: _PR = False,
 ) -> None:
     """Ingest a plain text file, pasted note, or clipping."""
-    _run_ingest(ctx, "text", yes, file=file, branch=branch, commit=commit, pr=pr)
+    _run_ingest(ctx, "text", yes, file=file, branch=branch, commit=commit, pr=pr, context=context)
 
 
 @ingest_app.command("article")
 def ingest_article(
     ctx: typer.Context,
     url: Annotated[str, typer.Argument(help="Web article URL.")],
+    context: _CONTEXT = None,
     yes: _YES = False,
     branch: _BRANCH = False,
     commit: _COMMIT = False,
     pr: _PR = False,
 ) -> None:
     """Fetch a web article, extract its text, and ingest it."""
-    _run_ingest(ctx, "article", yes, url=url, branch=branch, commit=commit, pr=pr)
+    _run_ingest(ctx, "article", yes, url=url, branch=branch, commit=commit, pr=pr, context=context)
 
 
 def _memory_session(ctx: typer.Context):

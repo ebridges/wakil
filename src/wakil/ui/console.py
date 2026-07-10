@@ -79,13 +79,10 @@ def print_status(status: WorkspaceStatus) -> None:
 
 
 def print_ingest_proposal(proposal: IngestProposal) -> None:
-    console.print(
-        Panel(
-            f"[bold]{proposal.title}[/bold]\n[dim]{proposal.source_type}: {proposal.origin}[/dim]",
-            title="Ingest preview",
-            border_style="cyan",
-        )
-    )
+    header = f"[bold]{proposal.title}[/bold]\n[dim]{proposal.source_type}: {proposal.origin}[/dim]"
+    if proposal.context:
+        header += f"\n[dim]Context: {proposal.context}[/dim]"
+    console.print(Panel(header, title="Ingest preview", border_style="cyan"))
     if proposal.summary:
         console.print(Panel(Markdown(proposal.summary), title="Summary"))
     if proposal.key_points:
