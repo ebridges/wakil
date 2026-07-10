@@ -82,11 +82,16 @@ def commit_ingest(
     ingest_run_id: int | None = None,
     branch: str | None = None,
     open_pr: bool = False,
+    kind: str = "ingest",
 ) -> CommitOutcome:
-    """Commit wakil-written files with the ingest convention; optionally PR."""
+    """Commit wakil-written files with the wakil conventions; optionally PR.
+
+    `kind` selects the commit prefix: "source" for raw captures, "ingest"
+    for enrichment output.
+    """
     if not files:
         raise GitServiceError("Nothing to commit: no files were written.")
-    message = commit_message("ingest", f"add {title}")
+    message = commit_message(kind, f"add {title}")
     if summary:
         message += f"\n\n{summary}"
     try:
@@ -96,9 +101,9 @@ def commit_ingest(
 
     pr_url: str | None = None
     if open_pr:
-        pr_url = _open_pr(config, branch, title, summary, files)
+        pr_url = _open_pr(config, branch, title, summary, files, kind)
 
-    _record_change(config, files, sha, branch, pr_url, title, ingest_run_id)
+    _record_change(config, files, sha, branch, pr_url, title, ingest_run_id, kind)
     return CommitOutcome(branch=branch, commit_sha=sha, message=message, pr_url=pr_url)
 
 
@@ -108,6 +113,7 @@ def _open_pr(
     title: str,
     summary: str | None,
     files: list[str],
+    kind: str = "ingest",
 ) -> str:
     if branch is None:
         raise GitServiceError("--pr requires --branch.")
@@ -123,7 +129,7 @@ def _open_pr(
     try:
         git.push_branch(config.root_path, branch)
         return create_pull_request(
-            config.root_path, commit_message("ingest", f"add {title}"), "\n".join(body_lines)
+            config.root_path, commit_message(kind, f"add {title}"), "\n".join(body_lines)
         )
     except (git.GitError, GhError) as exc:
         raise GitServiceError(str(exc)) from exc
@@ -137,6 +143,7 @@ def _record_change(
     pr_url: str | None,
     title: str,
     ingest_run_id: int | None,
+    kind: str = "ingest",
 ) -> None:
     with open_session(config) as session:
         workspace_id = session.scalar(
@@ -145,11 +152,11 @@ def _record_change(
         session.add(
             GitChange(
                 workspace_id=workspace_id,
-                operation="ingest-commit",
+                operation=f"{kind}-commit",
                 branch_name=branch,
                 commit_sha=sha,
                 pr_url=pr_url,
-                summary=f"ingest: {title}",
+                summary=f"{kind}: {title}",
                 metadata_json=json.dumps({"files": files}),
             )
         )

@@ -44,7 +44,7 @@ def test_ingest_with_branch_commits_on_wakil_branch(git_kb, monkeypatch):
 
     branch = _git(git_kb, "rev-parse", "--abbrev-ref", "HEAD")
     assert branch.startswith("wakil/ingest/")
-    assert _git(git_kb, "log", "-1", "--format=%s").startswith("wakil ingest: add")
+    assert _git(git_kb, "log", "-1", "--format=%s").startswith("wakil source: add")
     assert _git(git_kb, "status", "--porcelain") == ""
 
 
@@ -76,7 +76,7 @@ def test_ingest_commit_on_current_branch(git_kb, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     assert _git(git_kb, "rev-parse", "--abbrev-ref", "HEAD") == "main"
-    assert _git(git_kb, "log", "-1", "--format=%s").startswith("wakil ingest: add")
+    assert _git(git_kb, "log", "-1", "--format=%s").startswith("wakil source: add")
 
 
 def test_git_summary(git_kb):

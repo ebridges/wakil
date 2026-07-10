@@ -11,9 +11,11 @@ from wakil.config.registry import lookup_workspace, register_workspace
 from wakil.config.settings import WorkspaceConfig, find_workspace_root, is_initialized
 from wakil.ui.console import (
     console,
+    print_capture_proposal,
+    print_capture_result,
+    print_enrichment_proposal,
+    print_enrichment_result,
     print_index_result,
-    print_ingest_proposal,
-    print_ingest_result,
     print_query_result,
     print_search_hits,
     print_status,
@@ -178,6 +180,41 @@ def query(
     print_query_result(result)
 
 
+def _commit_written_files(
+    config: WorkspaceConfig,
+    files: list[str],
+    title: str,
+    summary: str | None,
+    ingest_run_id: int,
+    branch_name: str | None,
+    pr: bool,
+    kind: str,
+) -> None:
+    from wakil.app.git_service import GitServiceError, commit_ingest
+
+    try:
+        outcome = commit_ingest(
+            config,
+            files,
+            title,
+            summary,
+            ingest_run_id=ingest_run_id,
+            branch=branch_name,
+            open_pr=pr,
+            kind=kind,
+        )
+    except GitServiceError as exc:
+        console.print(
+            f"[red]Commit failed:[/red] {exc}\n"
+            "[dim]The written files are still on disk for manual review.[/dim]"
+        )
+        raise typer.Exit(code=1) from exc
+    location = f" on [bold]{outcome.branch}[/bold]" if outcome.branch else ""
+    console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]{location}")
+    if outcome.pr_url:
+        console.print(f"Opened PR: {outcome.pr_url}")
+
+
 def _run_ingest(
     ctx: typer.Context,
     kind: str,
@@ -189,26 +226,18 @@ def _run_ingest(
     pr: bool = False,
     context: str | None = None,
 ) -> None:
-    from wakil.app.git_service import GitServiceError, commit_ingest, start_ingest_branch
-    from wakil.app.ingest_service import IngestError, apply_ingest, prepare_ingest
-    from wakil.llm.client import ModelError, resolve_client
+    """Step 1: capture the raw source. Deterministic — no model involved."""
+    from wakil.app.git_service import GitServiceError, start_ingest_branch
+    from wakil.app.ingest_service import IngestError, apply_capture, prepare_capture
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
     if pr:
         branch = True
-    client = resolve_client()
-    if client is None:
-        console.print(
-            "[yellow]No model provider configured[/yellow] — ingesting without "
-            "summary/memory extraction. Set ANTHROPIC_API_KEY to enable it."
-        )
     try:
-        with console.status("Preparing ingest..."):
-            proposal = prepare_ingest(
-                config, kind, file=file, url=url, client=client, context=context
-            )
-    except (IngestError, ModelError) as exc:
+        with console.status("Preparing capture..."):
+            proposal = prepare_capture(config, kind, file=file, url=url, context=context)
+    except IngestError as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
@@ -219,8 +248,8 @@ def _run_ingest(
         )
         return
 
-    print_ingest_proposal(proposal)
-    if not yes and not typer.confirm("Write these files and record the source?"):
+    print_capture_proposal(proposal)
+    if not yes and not typer.confirm("Write this raw capture and record the source?"):
         console.print("Aborted; nothing was written.")
         raise typer.Exit(code=0)
 
@@ -229,33 +258,105 @@ def _run_ingest(
         if branch:
             branch_name = start_ingest_branch(config, proposal.title)
             console.print(f"Created branch [bold]{branch_name}[/bold]")
-        result = apply_ingest(config, proposal)
+        result = apply_capture(config, proposal)
     except (IngestError, GitServiceError) as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
-    print_ingest_result(result)
+    print_capture_result(result)
 
     if branch or commit:
-        try:
-            outcome = commit_ingest(
-                config,
-                result.files_written,
-                proposal.title,
-                proposal.summary or None,
-                ingest_run_id=result.ingest_run_id,
-                branch=branch_name,
-                open_pr=pr,
-            )
-        except GitServiceError as exc:
-            console.print(
-                f"[red]Commit failed:[/red] {exc}\n"
-                "[dim]The ingested files are still on disk for manual review.[/dim]"
-            )
-            raise typer.Exit(code=1) from exc
-        location = f" on [bold]{outcome.branch}[/bold]" if outcome.branch else ""
-        console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]{location}")
-        if outcome.pr_url:
-            console.print(f"Opened PR: {outcome.pr_url}")
+        _commit_written_files(
+            config,
+            [result.raw_file_path],
+            proposal.title,
+            None,
+            result.ingest_run_id,
+            branch_name,
+            pr,
+            kind="source",
+        )
+
+
+@app.command()
+def enrich(
+    ctx: typer.Context,
+    source_id: Annotated[int, typer.Argument(help="Source id from the capture step.")],
+    context: Annotated[
+        str | None,
+        typer.Option(
+            "--context",
+            "-C",
+            help="Extra context (attendees, company, purpose); defaults to the "
+            "context given at capture time.",
+        ),
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-analyze a source that was already enriched.")
+    ] = False,
+    branch: Annotated[
+        bool,
+        typer.Option("--branch", "-b", help="Create a wakil/ingest/* branch and commit there."),
+    ] = False,
+    commit: Annotated[
+        bool, typer.Option("--commit", "-c", help="Commit written files on the current branch.")
+    ] = False,
+    pr: Annotated[
+        bool, typer.Option("--pr", help="Push the branch and open a PR via gh (implies -b).")
+    ] = False,
+) -> None:
+    """Step 2: analyze a captured source and link it into the knowledge base."""
+    from wakil.app.git_service import GitServiceError, start_ingest_branch
+    from wakil.app.ingest_service import IngestError, apply_enrichment, prepare_enrichment
+    from wakil.llm.client import ModelError, resolve_client
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    if pr:
+        branch = True
+    client = resolve_client()
+    if client is None:
+        console.print(
+            "[red]Enrichment needs a model provider.[/red] Set [bold]ANTHROPIC_API_KEY[/bold] "
+            "(or OPENAI_API_KEY + WAKIL_MODEL for an OpenAI-compatible endpoint)."
+        )
+        raise typer.Exit(code=1)
+    try:
+        with console.status(f"Analyzing source #{source_id} with {client.model}..."):
+            proposal = prepare_enrichment(config, source_id, client, context=context, force=force)
+    except (IngestError, ModelError) as exc:
+        console.print(f"[red]Enrichment failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    print_enrichment_proposal(proposal)
+    if not yes and not typer.confirm("Apply this enrichment (write note, record memories)?"):
+        console.print("Aborted; nothing was written.")
+        raise typer.Exit(code=0)
+
+    branch_name: str | None = None
+    try:
+        if branch:
+            branch_name = start_ingest_branch(config, proposal.title)
+            console.print(f"Created branch [bold]{branch_name}[/bold]")
+        result = apply_enrichment(config, proposal)
+    except (IngestError, GitServiceError) as exc:
+        console.print(f"[red]Enrichment failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    print_enrichment_result(result)
+
+    if (branch or commit) and result.files_written:
+        _commit_written_files(
+            config,
+            result.files_written,
+            proposal.title,
+            proposal.summary or None,
+            result.ingest_run_id,
+            branch_name,
+            pr,
+            kind="ingest",
+        )
+    elif branch or commit:
+        console.print("[dim]No files were written; nothing to commit.[/dim]")
 
 
 _YES = Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")]

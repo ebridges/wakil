@@ -6,7 +6,13 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
-from wakil.app.ingest_service import IngestProposal, IngestResult
+from wakil.app.ingest_service import (
+    CaptureProposal,
+    CaptureResult,
+    EnrichmentProposal,
+    EnrichmentResult,
+    ProposedFile,
+)
 from wakil.app.query_service import QueryResult
 from wakil.app.search_service import SearchHit
 from wakil.app.workspace_service import IndexResult, WorkspaceStatus
@@ -78,11 +84,45 @@ def print_status(status: WorkspaceStatus) -> None:
             console.print(f"  [dim]{line}[/dim]")
 
 
-def print_ingest_proposal(proposal: IngestProposal) -> None:
+def _print_file_preview(proposed: ProposedFile) -> None:
+    preview = proposed.content[:1500]
+    if len(proposed.content) > 1500:
+        preview += "\n…"
+    console.print(
+        Panel(
+            Syntax(preview, "markdown", background_color="default"),
+            title=f"NEW {proposed.path}",
+            border_style="green",
+        )
+    )
+
+
+def print_capture_proposal(proposal: CaptureProposal) -> None:
     header = f"[bold]{proposal.title}[/bold]\n[dim]{proposal.source_type}: {proposal.origin}[/dim]"
+    if proposal.meeting_date:
+        header += f"\n[dim]Meeting date: {proposal.meeting_date}[/dim]"
     if proposal.context:
         header += f"\n[dim]Context: {proposal.context}[/dim]"
-    console.print(Panel(header, title="Ingest preview", border_style="cyan"))
+    console.print(Panel(header, title="Capture preview", border_style="cyan"))
+    console.print("[bold]Raw capture:[/bold]")
+    _print_file_preview(proposal.raw_file)
+
+
+def print_capture_result(result: CaptureResult) -> None:
+    console.print(
+        f"Captured source [bold]#{result.source_id}[/bold]: [green]+ {result.raw_file_path}[/green]"
+    )
+    console.print(
+        f"[dim]Analyze and link it into the knowledge base with "
+        f"`wakil enrich {result.source_id}`.[/dim]"
+    )
+
+
+def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
+    header = f"[bold]{proposal.title}[/bold]\n[dim]source #{proposal.source_id}[/dim]"
+    if proposal.context:
+        header += f"\n[dim]Context: {proposal.context}[/dim]"
+    console.print(Panel(header, title="Enrichment preview", border_style="cyan"))
     if proposal.summary:
         console.print(Panel(Markdown(proposal.summary), title="Summary"))
     if proposal.key_points:
@@ -107,24 +147,14 @@ def print_ingest_proposal(proposal: IngestProposal) -> None:
         console.print("[bold]Candidate relationships:[/bold]")
         for rel in proposal.relationships:
             console.print(f"  [{rel.subject_index}] --{rel.predicate}--> [{rel.object_index}]")
-
-    console.print("[bold]Proposed files:[/bold]")
-    for proposed in filter(None, [proposal.raw_file, proposal.proposed_note]):
-        preview = proposed.content[:1500]
-        if len(proposed.content) > 1500:
-            preview += "\n…"
-        console.print(
-            Panel(
-                Syntax(preview, "markdown", background_color="default"),
-                title=f"NEW {proposed.path}",
-                border_style="green",
-            )
-        )
+    if proposal.proposed_note is not None:
+        console.print("[bold]Proposed note:[/bold]")
+        _print_file_preview(proposal.proposed_note)
 
 
-def print_ingest_result(result: IngestResult) -> None:
+def print_enrichment_result(result: EnrichmentResult) -> None:
     console.print(
-        f"Ingested source [bold]#{result.source_id}[/bold]: "
+        f"Enriched source [bold]#{result.source_id}[/bold]: "
         f"{len(result.files_written)} file(s) written, "
         f"[magenta]{result.memories_created}[/magenta] candidate memories, "
         f"{result.relationships_created} relationships."
@@ -132,8 +162,8 @@ def print_ingest_result(result: IngestResult) -> None:
     for path in result.files_written:
         console.print(f"  [green]+ {path}[/green]")
     console.print(
-        "[dim]Review with git diff/status; promote memories with "
-        "`wakil memory` (coming in Phase 5).[/dim]"
+        "[dim]Review files with git diff/status; review memories with "
+        "`wakil memory list --state candidate`.[/dim]"
     )
 
 

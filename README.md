@@ -43,11 +43,14 @@ uv run wakil -w kb search "insurance claims routing"
 # Ask a grounded question (requires a model provider, see below)
 uv run wakil -w kb query "How do my notes on FNOL relate to graph memory?"
 
-# Ingest raw material into the knowledge base
+# Step 1 — capture raw material (deterministic, no model)
 uv run wakil -w kb ingest transcript ./raw/meeting.txt \
     --context "Attendees: Jane Doe, Bob (Acme Corp). Weekly claims sync."
 uv run wakil -w kb ingest article https://example.com/post
 uv run wakil -w kb ingest text ./clipping.md
+
+# Step 2 — analyze the captured source and link it into the KB
+uv run wakil -w kb enrich 1
 
 # Git-native ingest: commit on a wakil/ingest/* branch, optionally open a PR
 uv run wakil -w kb ingest transcript ./raw/meeting.txt --branch
@@ -97,33 +100,34 @@ default, e.g. `export WAKIL_WORKSPACE=kb`.
 
 ## Ingest
 
-`wakil ingest` turns raw material into knowledge-base records. It extracts
-text (transcripts, `.srt` subtitles, plain text, or web articles via
-readability extraction), dedupes by content hash, finds related existing
-notes, and — when a model provider is configured — produces a summary, key
-points, candidate memories, candidate relationships, and an optional proposed
-Markdown note linked with wikilinks.
+Ingest is two explicit steps.
 
-`--context`/`-C` accepts a few lines about the source (attendees, company,
-purpose). It is used to find related entity notes and prior meetings in the
-knowledge base, passed to the model so names resolve to existing
-`people/`/`companies/` notes via wikilinks, and recorded in the raw capture's
-frontmatter and the source record.
+**Step 1 — capture** (`wakil ingest transcript|text|article`) is fully
+deterministic; no model is involved. Text is extracted (transcripts get light
+cleanup: bracketed and line-leading timestamps removed, whitespace normalized
+— never model rewriting), deduped by content hash, and written under
+`sources/` as a raw capture. Transcript frontmatter follows the KB schema:
+if `SCHEMA.md` contains a yaml template in a transcript/source section, its
+fields are used (known fields like the meeting date and create date are
+filled in); otherwise exactly two fields are written — `created` and
+`meeting_date` (inferred from the filename or the transcript's opening
+lines). `--context`/`-C` accepts a few lines about the source (attendees,
+company, purpose) and is stored on the source record for step 2.
 
-Transcripts get light deterministic cleanup before capture — bracketed and
-line-leading timestamps removed, whitespace normalized — with no model
-rewriting, so the raw capture in `sources/transcripts/` stays faithful to the
-source (frontmatter: `type: source`, `status: raw`, origin, retrieval date).
-When the workspace has `SCHEMA.md`/`RESOLVER.md`, their guidance is included
-in the analysis so proposed notes follow the KB's schema and routing rules.
+**Step 2 — enrichment** (`wakil enrich <source-id>`) analyzes a captured
+source with the model: summary, key points, candidate memories and
+relationships, and a proposed KB note. The capture-time context (or a fresh
+`--context`) plus the opening of the source drive a search for related
+entity notes (`people/`, `companies/`, `concepts/`) and prior meetings, which
+the model links with [[wikilinks]]. `SCHEMA.md`/`RESOLVER.md` guidance is
+included so the note follows the KB's page shape and routing rules. Re-running
+requires `--force`.
 
-Nothing is written until you confirm the preview (`--yes` skips the prompt).
-The raw capture lands under `sources/` with frontmatter; proposed notes go to
-the model-suggested path, falling back to `drafts/` when routing is unclear or
-the path collides. Existing files are never overwritten, and all writes are
-plain files you can review with `git diff`/`git status`. Extracted memories
-are stored as `candidate` state in SQLite for later review and promotion.
-Without a provider, ingest still stores the source and raw capture.
+Both steps preview before writing (`--yes` skips the prompt) and accept
+`--branch`/`--commit`/`--pr`; captures commit as `wakil source:`, enrichment
+as `wakil ingest:`. Proposed notes fall back to `drafts/` when routing is
+unclear or the path collides; existing files are never overwritten. Extracted
+memories are stored as `candidate` state for review with `wakil memory`.
 
 ## Git-native changes
 
