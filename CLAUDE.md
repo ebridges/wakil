@@ -1,3 +1,5 @@
+# Agent guidance
+
 ## Project
 
 This repository contains `wakil`, a local-first Python CLI agent for working with a personal Markdown knowledge base.
@@ -60,7 +62,6 @@ optional embeddings later
 optional Neo4J deep dive later
 ```
 
-
 ---
 
 ## Prime Directive
@@ -69,7 +70,7 @@ Build the smallest useful version of `wakil` that advances the local knowledge-w
 
 Before adding abstraction, ask:
 
-```
+```question
 Does this clearly improve local Markdown knowledge work for one user?
 ```
 
@@ -83,7 +84,7 @@ Prefer simple, explicit, boring Python code over clever frameworks or speculativ
 
 Prefer:
 
-```
+```text
 simple local workflows
 Markdown as source of truth
 SQLite as operational store
@@ -99,7 +100,7 @@ small composable services
 
 Avoid:
 
-```
+```text
 remote runtimes
 complex permissions
 large agent frameworks
