@@ -212,7 +212,7 @@ several of wakil's stated design biases at once.
 
 But the *decomposition* — classify / extract / resolve entities / enforce
 invariants / finalize — doesn't depend on the mechanism, and wakil already
-has three of the five pieces, by accident rather than by design:
+has most of the five pieces, by accident rather than by design:
 
 - `prepare_ingest` / `apply_ingest`
   (`src/wakil/app/ingest_service.py`) is already the extract-then-review-gate
@@ -223,9 +223,11 @@ has three of the five pieces, by accident rather than by design:
   top of `prepare_ingest` are a thin classify step — thin because
   classification is a CLI argument the user supplies (`wakil ingest
   transcript ...`), not inferred from content.
-- `_enrich_with_model` is a shared, type-agnostic extraction/entity step: one
-  prompt, called once regardless of `kind`, that produces the summary, key
-  points, candidate memories, candidate relationships, and proposed note.
+- `_enrich_with_model` is today a single shared call doing double duty —
+  extraction and entity handling at once. The proposal below splits it into
+  two, because "resolve entities" and "extract judgment" are different
+  questions with different contracts, and conflating them is exactly the
+  kind of thing that gets harder to maintain as more source kinds arrive.
 
 The risk isn't the current three source kinds (`transcript`, `article`,
 `text`). It's what happens on kind four, five, and six — PDFs, tweets, a
@@ -236,34 +238,62 @@ which will have to learn every new kind's extraction quirks in one place.
 That's the exact monolith-accretion failure the worked example's per-type
 skill files exist to avoid — just arriving in Python instead of markdown.
 
+The resolution, after working through it further: keep the DAG's *topology*
+fixed and code-sequenced — never agent-decided — and let each node's
+*judgment* be supplied by a skill file (prose, no schema in it) that code
+loads and folds into a model call. This captures the worked example's real
+asset — accumulated, editable judgment: anti-patterns, decision trees,
+"quote the exchange verbatim" heuristics — without crossing into
+agent-decided delegation. GBrain's own skill docs are full of anti-pattern
+warnings ("a meeting is NOT fully ingested until enrich runs for every
+entity," stated as a rule that has to be repeated) precisely because control
+flow there is agent-decided and therefore unreliable. A fixed topology
+doesn't have that failure mode: a step that must run, runs, because code
+calls it, not because an agent remembered to.
+
 ## Proposal: a concrete model for wakil
 
-Keep what's already correctly scoped, split what's about to accrete, and
-don't import machinery wakil doesn't need.
+Three companion specs in this same directory now cover pieces of this in
+more depth than belongs here — `entity-model.md` (the Compiled Truth /
+Timeline data model and command surface), `entity-resolution.md` (routing
+constraints, from a critical read of the target vault's own `RESOLVER.md`),
+and `entity-metadata.md` (the actual per-type frontmatter schema, from a
+census of the real vault). This section stays at the pipeline-shape level
+and points at those for content-level detail; see
+`docs/ingestion-refactor-spec.md` for how all four combine into one plan.
 
 **Keep `prepare_ingest` / `apply_ingest` as-is.** The two-phase
 extract-then-review-gate shape is the right shape. Nothing here should
 change.
 
-**Split the `kind` branch into per-kind extractors.** Today `prepare_ingest`
-holds an `if kind in ("transcript", "text"): ... elif kind == "article":
-...` ladder, and `RAW_DIRS` is a parallel dict keyed the same way. As kinds
-are added (PDF, tweet, webhook capture), pull each branch out into its own
-small function behind one shared interface — something like `def
-extract(source) -> RawSource` returning text, title, and origin — one module
-per kind (e.g. `wakil/app/extractors/{transcript,article,text,pdf,tweet}.py`).
-This is the Python-native analogue of the worked example's per-type skill
-file: a new kind means adding one new module, not lengthening a shared
-branch. `RAW_DIRS` collapses into a constant each extractor owns instead of a
-dict every kind has to register into centrally.
+**Split the `kind` branch into per-kind extractors, each pairing a
+mechanical step with a judgment skill.** Today `prepare_ingest` holds an `if
+kind in ("transcript", "text"): ... elif kind == "article": ...` ladder, and
+`RAW_DIRS` is a parallel dict keyed the same way. As kinds are added (PDF,
+tweet, webhook capture), pull each branch into its own pair: a small
+mechanical function (`raw bytes/URL -> text + title + origin` — fetch,
+parse, OCR, no model call) plus a `wakil/skills/<kind>/SKILL.md` file
+holding only judgment content (heuristics, anti-patterns, worked examples —
+no schema in it). Code loads the skill file's prose, folds it into a model
+call, and validates the response against a shared Pydantic contract
+(`ExtractionOutput`) — never a hand-duplicated JSON example per kind. A new
+kind means a new mechanical function plus a new prose file, not a
+lengthened branch or a bloated shared prompt.
 
-**Keep `_enrich_with_model` as the one shared step every kind funnels
-into.** This is wakil's analogue of the worked example's `enrich` — a single
-place where "find or create the entities and candidate memories this content
-touches" happens, regardless of what produced the text. Do not split this
-per-kind. The value of a shared entity-resolution step is precisely that
-it's shared; giving each kind its own enrichment prompt variant reintroduces
-the duplication that a shared `enrich` step exists to prevent.
+**Split entity resolution out of `_enrich_with_model` into its own
+always-invoked node**, distinct from extraction. This is wakil's analogue of
+the worked example's shared `enrich` skill, and the reason it's a separate
+step rather than folded into extraction's prompt: extraction's job is "what
+does this source say," entity-resolution's job is "does this already have a
+page, should it be created, updated, or skipped" — a different question,
+against a different contract (`EntityResolution`, not `ExtractionOutput`),
+that needs the target entity's existing note as context in a way extraction
+doesn't. Every kind's proposal passes through this one node unconditionally
+— never optional, never something a kind-specific skill can skip — which is
+what actually fixes the "entity propagation is the step most agents skip"
+failure mode structurally instead of documenting it as a warning. Its
+output feeds `entity-model.md`'s `stub_entities` / timeline-append
+mechanics directly.
 
 **Leave classification as an explicit CLI argument.** `wakil ingest
 transcript ./raw/meeting.txt` is already better suited to wakil's stated
@@ -272,16 +302,30 @@ commands" beats "hidden inference" per `CLAUDE.md`. Don't build a classifier.
 This is a place where wakil's current design is already the right call
 relative to the worked example, not a gap to close.
 
-**Name the existing invariants, and add the one that's missing.**
+**Entity schema moves from documentation to an enforced, data-driven
+contract — for new writes only.** `entity-metadata.md`'s census found that a
+strict schema would reject a large share of the *existing* vault's files
+(`project` violates its own "no `title:`" rule at 100%). The resolution:
+`schema/entities/*.yaml`, one file per type, instantiating
+`entity-metadata.md`'s already-corrected schema blocks, hard-validated
+against **new** proposals only — reading and indexing existing files stays
+exactly as tolerant as `Note.frontmatter_json` already is. Existing content
+doesn't stay permanently un-migrated, though — see
+`docs/ingestion-refactor-spec.md` for the dedicated migration path.
+
+**Name the existing invariants, and add what's missing.**
 `ingest_service.py` already enforces content-hash dedup
 (`content_hash` lookup against `Source`), refuses to overwrite an existing
 file (`apply_ingest`'s `target.exists()` check), and sandboxes proposed note
-paths inside the workspace (`_sanitize_note`). What's missing is the worked
-example's notability gate: a check, before proposing a *new* note file
-(as opposed to just a candidate memory on an entity that already has a page),
-of whether this content actually warrants its own file. Add one explicit
-`validate_proposal()` step between `prepare_ingest` and `apply_ingest` that
-groups these checks in one place, so the set of invariants a proposal must
+paths inside the workspace (`_sanitize_note`). Missing, and now specified by
+`entity-resolution.md`'s critical read of `RESOLVER.md`: a notability check
+before proposing a *new* note, routing modeled as 1:N (one source can touch
+several entities, not one destination), no first-match-wins over free-text
+category tests (an ambiguous case surfaces to the user instead of being
+silently resolved to the first textual match), and a hard stop — not a
+best-guess frontmatter block — when a proposed type has no schema. One
+explicit `validate_proposal()` step between `prepare_ingest` and
+`apply_ingest` groups all of these, so the set of invariants a proposal must
 satisfy is visible and testable independent of any one extractor.
 
 **The raw-then-enriched pattern already exists — this validates the general
@@ -308,11 +352,11 @@ worker. Not a gap to close now; a shape to reuse later.
 
 ## Summary map
 
-| Concern | GBrain mechanism | wakil mechanism (today / proposed) |
+| Concern | GBrain mechanism | wakil mechanism (proposed) |
 | --- | --- | --- |
 | Classify | `ingest` router infers content type, delegates | Explicit `kind` CLI argument — already the better fit for wakil's biases |
-| Extract (type-specific) | One markdown skill per content type (`meeting-ingestion`, `article-enrichment`, `pdf-ingest`, `voice-note-ingest`, `idea-ingest`, `media-ingest`) | `if kind in (...)` ladder in `prepare_ingest` today; proposed: one extractor module per kind behind a shared interface |
-| Resolve entities | Shared `enrich` skill, called by every type-specific skill | `_enrich_with_model` — already shared and type-agnostic; keep as-is |
-| Enforce invariants | `brain-ops` / `conventions/quality.md` / `_brain-filing-rules.md`: citations, back-link Iron Law, schema compliance, notability gate | Content-hash dedup, no-overwrite, path sandboxing exist today; proposed: add a notability-style `validate_proposal()` gate |
+| Extract (type-specific) | One markdown skill per content type (`meeting-ingestion`, `article-enrichment`, `pdf-ingest`, `voice-note-ingest`, `idea-ingest`, `media-ingest`) | Fixed DAG node: mechanical extractor + `wakil/skills/<kind>/SKILL.md` (prose only) + `ExtractionOutput` Pydantic contract |
+| Resolve entities | Shared `enrich` skill, agent-decided whether/when to call it | A separate, always-invoked DAG node (code-guaranteed, not agent-remembered) producing `EntityResolution` results and `stub_entities` |
+| Enforce invariants | `brain-ops` / `conventions/quality.md` / `_brain-filing-rules.md`: citations, back-link Iron Law, schema compliance, notability gate | `validate_proposal()`: dedup, `schema/entities/*.yaml` validation (new writes only), notability, 1:N routing, hard stop on missing schema |
 | Finalize | `kb-commit` — conventional, signed commit | `--commit` / `--branch` / `--pr` in `git_service.py` — already more rigorous |
 | Adjacent maintenance | `maintain` skill: backlink repair, stale detection, dream-cycle re-synthesis | None yet; proposed: a future explicit `wakil doctor`/`wakil maintain`, kept out of the ingest hot path |
