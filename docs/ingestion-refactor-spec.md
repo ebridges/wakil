@@ -21,12 +21,26 @@ compose into one implementation plan, fills the one genuine gap between them
 
 ## Scope
 
-**In scope:** restructuring `prepare_ingest`/`apply_ingest` into the fixed
-DAG `ingestion-model.md` proposes; a data-driven, code-validated entity
+**Already shipped, assumed as the foundation below:** `ingest_service.py`
+no longer has a single `prepare_ingest`/`apply_ingest` pair. It was split
+into two commands, one deterministic and one model-driven: `wakil ingest`
+(`prepare_capture`/`apply_capture` — extract, dedupe, write the raw source
+under `sources/`, no model call, `Source.status="raw"`) and `wakil enrich
+<source-id>` (`prepare_enrichment`/`apply_enrichment` — model analysis of an
+already-captured source, run separately and re-runnable via `--force`,
+`Source.status="enriched"`). That split also shipped a `context` CLI option,
+deterministic `clean_transcript()`, `infer_meeting_date()`, and SCHEMA.md/
+RESOLVER.md-aware guidance folded into the enrichment prompt
+(`load_workspace_guides`). This spec builds inside that shape rather than
+against it — see the Architecture section for how the DAG maps onto it.
+
+**In scope:** restructuring `prepare_enrichment`/`apply_enrichment` into the
+fixed DAG `ingestion-model.md` proposes (capture stays as-is — it's already
+the correctly-scoped mechanical step); a data-driven, code-validated entity
 schema layer; splitting entity resolution out as its own always-invoked
-step; a migration tool that brings the existing vault's ~2,500 files into
-conformance with the corrected schema (not indefinite tolerance); the DB
-schema changes `entity-model.md` specifies.
+step within enrichment; a migration tool that brings the existing vault's
+~2,500 files into conformance with the corrected schema (not indefinite
+tolerance); the DB schema changes `entity-model.md` specifies.
 
 **Explicitly deferred**, each for a reason already settled in prior
 discussion, not because it's out of scope forever:
@@ -50,19 +64,37 @@ discussion, not because it's out of scope forever:
 
 ```mermaid
 flowchart TD
-    CLI["wakil ingest &lt;kind&gt; &lt;file|url&gt;"] --> MECH
-    MECH["mechanical extractor\n(fetch / read / parse -> text + title + origin)\nno model call"] --> JUDGE
-    JUDGE["extraction judgment\nskills/&lt;kind&gt;/SKILL.md + ExtractionOutput"] --> RESOLVE
-    RESOLVE["entity resolution (always invoked)\nskills/entity-resolve/SKILL.md + EntityResolution"] --> VALIDATE
-    VALIDATE["validate_proposal()\ndedup, schema check (new writes only),\nnotability, 1:N routing, hard-stop on missing schema"] --> PREVIEW
-    PREVIEW["preview / --yes confirm"] --> APPLY
-    APPLY["apply_ingest: write files + DB rows"] --> FINALIZE
+    subgraph Capture["wakil ingest &lt;kind&gt; (unchanged, already correct)"]
+        MECH["prepare_capture / apply_capture\nfetch/read/parse, clean_transcript, infer_meeting_date\nno model call -> Source.status='raw'"]
+    end
+
+    MECH -.->|"source id"| ENRICHCMD
+
+    subgraph Enrichment["wakil enrich &lt;source-id&gt; (this spec's target)"]
+        ENRICHCMD["prepare_enrichment"] --> JUDGE
+        JUDGE["extraction judgment\nskills/&lt;kind&gt;/SKILL.md + ExtractionOutput"] --> RESOLVE
+        RESOLVE["entity resolution (always invoked, 2nd model call)\nskills/entity-resolve/SKILL.md + EntityResolution"] --> VALIDATE
+        VALIDATE["validate_proposal()\ndedup, schema check (new writes only),\nnotability, 1:N routing, hard-stop on missing schema"] --> PREVIEW
+        PREVIEW["preview / --yes confirm"] --> APPLY
+        APPLY["apply_enrichment: write files + DB rows\n-> Source.status='enriched'"]
+    end
+
+    APPLY --> FINALIZE
     FINALIZE["--commit / --branch / --pr\n(git_service.py, unchanged)"]
 ```
 
-Classification stays what it is today — the `kind` CLI argument — and isn't
-a DAG node in the diagram above; everything downstream of it is fixed
-topology, sequenced by code, never agent-decided.
+Classification (the `kind` recorded at capture, e.g. `transcript`/`article`/
+`text`) isn't a DAG node — it's read from the `Source` row and used to pick
+which `skills/<kind>/SKILL.md` file to load. Capture already correctly
+isolates the mechanical, kind-specific concern (SRT stripping, transcript
+cleanup, date inference) with no model call and needs no further
+restructuring. Everything from `prepare_enrichment` onward is fixed
+topology, sequenced by code, never agent-decided — and note this is now
+**two model calls, not one**: judgment-extraction and entity-resolution are
+separate calls within the same `prepare_enrichment` invocation, still one
+preview, still gated on one confirm. That's consistent with keeping
+orchestration in code you can read top to bottom, as opposed to an agent
+deciding whether to make a second call.
 
 ## New components
 
@@ -124,14 +156,22 @@ migration adding the two columns above. This is infrastructure wakil hasn't
 needed until now — call it out as its own step, not folded silently into
 the ingest-pipeline work.
 
-### 3. Ingest pipeline restructuring
+### 3. Enrichment pipeline restructuring
+
+Everything below targets `prepare_enrichment`/`apply_enrichment` and the
+`EnrichmentProposal`/`EnrichmentResult` dataclasses. `prepare_capture`/
+`apply_capture`/`CaptureProposal`/`CaptureResult` are untouched — capture
+already is the correctly-scoped mechanical step.
 
 - `src/wakil/skills/{transcript,text,article}/SKILL.md` — the judgment
   content currently embedded in `INGEST_SYSTEM_PROMPT` (`llm/prompts.py`),
-  rewritten as prose per kind, with the JSON-shape block removed (it moves
-  to code, generated from a Pydantic model, so it can never drift out of
-  sync with the validator the way today's prompt-vs-`parse_ingest_response`
-  duplication can).
+  rewritten as prose per `source.source_type`, with the JSON-shape block
+  removed (it moves to code, generated from a Pydantic model, so it can
+  never drift out of sync with the validator the way today's
+  prompt-vs-`parse_ingest_response` duplication can). Capture already
+  absorbed the mechanical kind-specific work, so these files carry
+  judgment only — e.g. a transcript's "find the resolution, don't anchor on
+  the first option" vs. an article's "quotable lines, not paraphrase."
 - `src/wakil/skills/entity-resolve/SKILL.md` — new judgment content, not a
   rewrite of anything existing: how to decide create/update/skip for a
   mentioned entity, the notability heuristic, how to propose a frontmatter
@@ -150,20 +190,23 @@ the ingest-pipeline work.
   `validate_model_response(raw, schema) -> BaseModel`: strip code fences
   (kept), `Schema.model_validate_json`, catch `ValidationError`, retry once
   with the error appended to the prompt, and on a second failure mark that
-  node's result as visibly failed in the proposal (never silently coerce to
+  call's result as visibly failed in the proposal (never silently coerce to
   an empty shape — today's behavior on malformed output, and a real gap
-  independent of anything else in this spec).
-- `IngestProposal` gains `stub_entities: list[ProposedFile]` (per
+  independent of anything else in this spec). Both calls in
+  `prepare_enrichment` (extraction, then entity resolution) use this.
+- `EnrichmentProposal` gains `stub_entities: list[ProposedFile]` (per
   `entity-model.md`) and `entity_resolutions: list[EntityResolution]` so the
   preview can render what the resolution step decided, not just the final
   file list.
 - New `validate_proposal(proposal) -> list[ValidationError]` between
-  `prepare_ingest` and `apply_ingest`, implementing `entity-resolution.md`'s
-  three constraints plus the schema check: content-hash dedup (relocated
-  from inline, not new), `schema/entities/*.yaml` validation on every
-  proposed new file, a notability check surfaced from
-  `EntityResolution.action`, 1:N routing (one proposal, many target files —
-  already `IngestProposal`'s shape, just now enforced rather than assumed),
+  `prepare_enrichment` and `apply_enrichment`, implementing
+  `entity-resolution.md`'s three constraints plus the schema check:
+  content-hash dedup (already handled at capture time via `content_hash` on
+  `Source` — not re-added here, just noted as already covered upstream),
+  `schema/entities/*.yaml` validation on every proposed new file, a
+  notability check surfaced from `EntityResolution.action`, 1:N routing (one
+  proposal, many target files — already `EnrichmentProposal`'s shape via
+  `proposed_note` + `stub_entities`, just now enforced rather than assumed),
   and a hard stop (not a best-guess write) when a proposed `type:` has no
   matching schema file.
 
@@ -213,18 +256,20 @@ layer from A.
 ## Testing strategy
 
 - Extend `tests/unit/test_ingest_service.py`: mock `ModelClient` to return
-  fixed JSON matching `ExtractionOutput`/`EntityResolution`; add explicit
-  coverage for the validate→retry→visible-failure path on malformed
-  output, which today's `parse_ingest_response` fallback has no visible
-  test for.
+  fixed JSON matching `ExtractionOutput`/`EntityResolution` for the two
+  calls inside `prepare_enrichment`; add explicit coverage for the
+  validate→retry→visible-failure path on malformed output, which today's
+  `parse_ingest_response` fallback has no visible test for. `prepare_capture`/
+  `apply_capture` tests are unaffected — no change needed there.
 - New `tests/unit/test_schema_loader.py` — YAML parsing, required/forbidden
   field checks, enum validation.
 - New `tests/unit/test_entity_resolution.py` — the resolution node's
   create/update/skip decisions against fixture existing notes.
 - New `tests/unit/test_schema_migrate.py` — dry-run diff generation against
   one fixture file per cheap-tier fix type.
-- Extend `tests/integration/test_ingest_cli.py` for the new preview shape
-  (`stub_entities`, entity resolutions shown before confirm).
+- Extend `tests/integration/test_ingest_cli.py`'s `wakil enrich` coverage
+  for the new preview shape (`stub_entities`, entity resolutions shown
+  before confirm).
 
 ## Critical files
 
@@ -237,9 +282,10 @@ layer from A.
 - `src/wakil/llm/schemas.py`, `src/wakil/llm/skill_loader.py` — new
 - `src/wakil/llm/prompts.py` — `INGEST_SYSTEM_PROMPT`/`parse_ingest_response`
   retired in favor of the above
-- `src/wakil/app/ingest_service.py` — `prepare_ingest` split into DAG steps,
-  `IngestProposal.stub_entities`/`entity_resolutions`, new
-  `validate_proposal()`
+- `src/wakil/app/ingest_service.py` — `prepare_enrichment`/`apply_enrichment`
+  split into DAG steps, `EnrichmentProposal.stub_entities`/
+  `entity_resolutions`, new `validate_proposal()`. `prepare_capture`/
+  `apply_capture` untouched.
 - `src/wakil/app/schema_migrate_service.py` (or similar) — new, the
   migration tool's logic
 - `src/wakil/cli/main.py` — new `wakil schema migrate` command

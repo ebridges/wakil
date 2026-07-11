@@ -262,6 +262,16 @@ census of the real vault). This section stays at the pipeline-shape level
 and points at those for content-level detail; see
 `docs/ingestion-refactor-spec.md` for how all four combine into one plan.
 
+One naming note: the prose below still says `prepare_ingest`/`apply_ingest`
+because that was the shape at the time of writing. `ingest_service.py` has
+since split into a deterministic `wakil ingest` capture step
+(`prepare_capture`/`apply_capture`, unaffected by anything here) and a
+separate, model-driven `wakil enrich <source-id>` step
+(`prepare_enrichment`/`apply_enrichment`). Everything below maps onto the
+enrichment half. `docs/ingestion-refactor-spec.md` uses the current names
+throughout — treat it, not this paragraph's illustrative names, as the
+accurate reference.
+
 **Keep `prepare_ingest` / `apply_ingest` as-is.** The two-phase
 extract-then-review-gate shape is the right shape. Nothing here should
 change.
