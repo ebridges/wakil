@@ -11,9 +11,11 @@ from wakil.config.registry import lookup_workspace, register_workspace
 from wakil.config.settings import WorkspaceConfig, find_workspace_root, is_initialized
 from wakil.ui.console import (
     console,
+    print_capture_proposal,
+    print_capture_result,
+    print_enrichment_proposal,
+    print_enrichment_result,
     print_index_result,
-    print_ingest_proposal,
-    print_ingest_result,
     print_query_result,
     print_search_hits,
     print_status,
@@ -33,6 +35,8 @@ ingest_app = typer.Typer(help="Ingest raw sources into the knowledge base.", no_
 app.add_typer(ingest_app, name="ingest")
 git_app = typer.Typer(help="Git awareness for the knowledge base.", no_args_is_help=True)
 app.add_typer(git_app, name="git")
+memory_app = typer.Typer(help="Review and manage the memory lifecycle.", no_args_is_help=True)
+app.add_typer(memory_app, name="memory")
 
 
 @app.callback()
@@ -176,6 +180,41 @@ def query(
     print_query_result(result)
 
 
+def _commit_written_files(
+    config: WorkspaceConfig,
+    files: list[str],
+    title: str,
+    summary: str | None,
+    ingest_run_id: int,
+    branch_name: str | None,
+    pr: bool,
+    kind: str,
+) -> None:
+    from wakil.app.git_service import GitServiceError, commit_ingest
+
+    try:
+        outcome = commit_ingest(
+            config,
+            files,
+            title,
+            summary,
+            ingest_run_id=ingest_run_id,
+            branch=branch_name,
+            open_pr=pr,
+            kind=kind,
+        )
+    except GitServiceError as exc:
+        console.print(
+            f"[red]Commit failed:[/red] {exc}\n"
+            "[dim]The written files are still on disk for manual review.[/dim]"
+        )
+        raise typer.Exit(code=1) from exc
+    location = f" on [bold]{outcome.branch}[/bold]" if outcome.branch else ""
+    console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]{location}")
+    if outcome.pr_url:
+        console.print(f"Opened PR: {outcome.pr_url}")
+
+
 def _run_ingest(
     ctx: typer.Context,
     kind: str,
@@ -185,25 +224,20 @@ def _run_ingest(
     branch: bool = False,
     commit: bool = False,
     pr: bool = False,
+    context: str | None = None,
 ) -> None:
-    from wakil.app.git_service import GitServiceError, commit_ingest, start_ingest_branch
-    from wakil.app.ingest_service import IngestError, apply_ingest, prepare_ingest
-    from wakil.llm.client import ModelError, resolve_client
+    """Step 1: capture the raw source. Deterministic — no model involved."""
+    from wakil.app.git_service import GitServiceError, start_ingest_branch
+    from wakil.app.ingest_service import IngestError, apply_capture, prepare_capture
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
     if pr:
         branch = True
-    client = resolve_client()
-    if client is None:
-        console.print(
-            "[yellow]No model provider configured[/yellow] — ingesting without "
-            "summary/memory extraction. Set ANTHROPIC_API_KEY to enable it."
-        )
     try:
-        with console.status("Preparing ingest..."):
-            proposal = prepare_ingest(config, kind, file=file, url=url, client=client)
-    except (IngestError, ModelError) as exc:
+        with console.status("Preparing capture..."):
+            proposal = prepare_capture(config, kind, file=file, url=url, context=context)
+    except IngestError as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
@@ -214,8 +248,8 @@ def _run_ingest(
         )
         return
 
-    print_ingest_proposal(proposal)
-    if not yes and not typer.confirm("Write these files and record the source?"):
+    print_capture_proposal(proposal)
+    if not yes and not typer.confirm("Write this raw capture and record the source?"):
         console.print("Aborted; nothing was written.")
         raise typer.Exit(code=0)
 
@@ -224,33 +258,105 @@ def _run_ingest(
         if branch:
             branch_name = start_ingest_branch(config, proposal.title)
             console.print(f"Created branch [bold]{branch_name}[/bold]")
-        result = apply_ingest(config, proposal)
+        result = apply_capture(config, proposal)
     except (IngestError, GitServiceError) as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
-    print_ingest_result(result)
+    print_capture_result(result)
 
     if branch or commit:
-        try:
-            outcome = commit_ingest(
-                config,
-                result.files_written,
-                proposal.title,
-                proposal.summary or None,
-                ingest_run_id=result.ingest_run_id,
-                branch=branch_name,
-                open_pr=pr,
-            )
-        except GitServiceError as exc:
-            console.print(
-                f"[red]Commit failed:[/red] {exc}\n"
-                "[dim]The ingested files are still on disk for manual review.[/dim]"
-            )
-            raise typer.Exit(code=1) from exc
-        location = f" on [bold]{outcome.branch}[/bold]" if outcome.branch else ""
-        console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]{location}")
-        if outcome.pr_url:
-            console.print(f"Opened PR: {outcome.pr_url}")
+        _commit_written_files(
+            config,
+            [result.raw_file_path],
+            proposal.title,
+            None,
+            result.ingest_run_id,
+            branch_name,
+            pr,
+            kind="source",
+        )
+
+
+@app.command()
+def enrich(
+    ctx: typer.Context,
+    source_id: Annotated[int, typer.Argument(help="Source id from the capture step.")],
+    context: Annotated[
+        str | None,
+        typer.Option(
+            "--context",
+            "-C",
+            help="Extra context (attendees, company, purpose); defaults to the "
+            "context given at capture time.",
+        ),
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-analyze a source that was already enriched.")
+    ] = False,
+    branch: Annotated[
+        bool,
+        typer.Option("--branch", "-b", help="Create a wakil/ingest/* branch and commit there."),
+    ] = False,
+    commit: Annotated[
+        bool, typer.Option("--commit", "-c", help="Commit written files on the current branch.")
+    ] = False,
+    pr: Annotated[
+        bool, typer.Option("--pr", help="Push the branch and open a PR via gh (implies -b).")
+    ] = False,
+) -> None:
+    """Step 2: analyze a captured source and link it into the knowledge base."""
+    from wakil.app.git_service import GitServiceError, start_ingest_branch
+    from wakil.app.ingest_service import IngestError, apply_enrichment, prepare_enrichment
+    from wakil.llm.client import ModelError, resolve_client
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    if pr:
+        branch = True
+    client = resolve_client()
+    if client is None:
+        console.print(
+            "[red]Enrichment needs a model provider.[/red] Set [bold]ANTHROPIC_API_KEY[/bold] "
+            "(or OPENAI_API_KEY + WAKIL_MODEL for an OpenAI-compatible endpoint)."
+        )
+        raise typer.Exit(code=1)
+    try:
+        with console.status(f"Analyzing source #{source_id} with {client.model}..."):
+            proposal = prepare_enrichment(config, source_id, client, context=context, force=force)
+    except (IngestError, ModelError) as exc:
+        console.print(f"[red]Enrichment failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    print_enrichment_proposal(proposal)
+    if not yes and not typer.confirm("Apply this enrichment (write note, record memories)?"):
+        console.print("Aborted; nothing was written.")
+        raise typer.Exit(code=0)
+
+    branch_name: str | None = None
+    try:
+        if branch:
+            branch_name = start_ingest_branch(config, proposal.title)
+            console.print(f"Created branch [bold]{branch_name}[/bold]")
+        result = apply_enrichment(config, proposal)
+    except (IngestError, GitServiceError) as exc:
+        console.print(f"[red]Enrichment failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    print_enrichment_result(result)
+
+    if (branch or commit) and result.files_written:
+        _commit_written_files(
+            config,
+            result.files_written,
+            proposal.title,
+            proposal.summary or None,
+            result.ingest_run_id,
+            branch_name,
+            pr,
+            kind="ingest",
+        )
+    elif branch or commit:
+        console.print("[dim]No files were written; nothing to commit.[/dim]")
 
 
 _YES = Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")]
@@ -263,45 +369,166 @@ _COMMIT = Annotated[
 _PR = Annotated[
     bool, typer.Option("--pr", help="Push the ingest branch and open a PR via gh (implies -b).")
 ]
+_CONTEXT = Annotated[
+    str | None,
+    typer.Option(
+        "--context",
+        "-C",
+        help="A few lines of context about the source (attendees, company, purpose) "
+        "to guide analysis and entity linking.",
+    ),
+]
 
 
 @ingest_app.command("transcript")
 def ingest_transcript(
     ctx: typer.Context,
     file: Annotated[Path, typer.Argument(help="Transcript file (.txt, .md, or .srt).")],
+    context: _CONTEXT = None,
     yes: _YES = False,
     branch: _BRANCH = False,
     commit: _COMMIT = False,
     pr: _PR = False,
 ) -> None:
     """Ingest a meeting or call transcript."""
-    _run_ingest(ctx, "transcript", yes, file=file, branch=branch, commit=commit, pr=pr)
+    _run_ingest(
+        ctx, "transcript", yes, file=file, branch=branch, commit=commit, pr=pr, context=context
+    )
 
 
 @ingest_app.command("text")
 def ingest_text(
     ctx: typer.Context,
     file: Annotated[Path, typer.Argument(help="Text or Markdown file to ingest.")],
+    context: _CONTEXT = None,
     yes: _YES = False,
     branch: _BRANCH = False,
     commit: _COMMIT = False,
     pr: _PR = False,
 ) -> None:
     """Ingest a plain text file, pasted note, or clipping."""
-    _run_ingest(ctx, "text", yes, file=file, branch=branch, commit=commit, pr=pr)
+    _run_ingest(ctx, "text", yes, file=file, branch=branch, commit=commit, pr=pr, context=context)
 
 
 @ingest_app.command("article")
 def ingest_article(
     ctx: typer.Context,
     url: Annotated[str, typer.Argument(help="Web article URL.")],
+    context: _CONTEXT = None,
     yes: _YES = False,
     branch: _BRANCH = False,
     commit: _COMMIT = False,
     pr: _PR = False,
 ) -> None:
     """Fetch a web article, extract its text, and ingest it."""
-    _run_ingest(ctx, "article", yes, url=url, branch=branch, commit=commit, pr=pr)
+    _run_ingest(ctx, "article", yes, url=url, branch=branch, commit=commit, pr=pr, context=context)
+
+
+def _memory_session(ctx: typer.Context):
+    """(config, session, workspace_id) for memory commands."""
+    from wakil.app.search_service import get_workspace_id
+    from wakil.app.workspace_service import open_session
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    session = open_session(config)
+    workspace_id = get_workspace_id(session, config)
+    if workspace_id is None:
+        session.close()
+        console.print("[red]Workspace database is not initialized; run wakil init first.[/red]")
+        raise typer.Exit(code=1)
+    return session, workspace_id
+
+
+def _transition(ctx: typer.Context, ids: list[int], new_state: str) -> None:
+    from wakil.app.memory_service import MemoryError, transition_memories
+    from wakil.ui.console import print_transitions
+
+    session, workspace_id = _memory_session(ctx)
+    with session:
+        try:
+            results = transition_memories(session, workspace_id, ids, new_state)
+        except MemoryError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        session.commit()
+    print_transitions(results)
+
+
+@memory_app.command("list")
+def memory_list(
+    ctx: typer.Context,
+    state: Annotated[
+        str | None,
+        typer.Option(
+            "--state", help="Filter by state: working|candidate|durable|rejected|archived."
+        ),
+    ] = None,
+    memory_type: Annotated[
+        str | None, typer.Option("--type", help="Filter by memory type (fact, decision, ...).")
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", help="Max memories to show.")] = 50,
+) -> None:
+    """List memories, newest first."""
+    from wakil.app.memory_service import MemoryError, list_memories
+    from wakil.ui.console import print_memories
+
+    session, workspace_id = _memory_session(ctx)
+    with session:
+        try:
+            memories = list_memories(
+                session, workspace_id, state=state, memory_type=memory_type, limit=limit
+            )
+        except MemoryError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        print_memories(memories)
+
+
+@memory_app.command("show")
+def memory_show(
+    ctx: typer.Context,
+    memory_id: Annotated[int, typer.Argument(help="Memory id (see wakil memory list).")],
+) -> None:
+    """Show one memory in full."""
+    from wakil.app.memory_service import MemoryError, get_memory
+    from wakil.ui.console import print_memory_detail
+
+    session, workspace_id = _memory_session(ctx)
+    with session:
+        try:
+            memory = get_memory(session, workspace_id, memory_id)
+        except MemoryError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        print_memory_detail(memory)
+
+
+@memory_app.command("promote")
+def memory_promote(
+    ctx: typer.Context,
+    ids: Annotated[list[int], typer.Argument(help="Memory ids to promote to durable.")],
+) -> None:
+    """Promote memories to durable so they shape future answers."""
+    _transition(ctx, ids, "durable")
+
+
+@memory_app.command("reject")
+def memory_reject(
+    ctx: typer.Context,
+    ids: Annotated[list[int], typer.Argument(help="Memory ids to reject.")],
+) -> None:
+    """Reject memory proposals; rejected memories are excluded from search."""
+    _transition(ctx, ids, "rejected")
+
+
+@memory_app.command("archive")
+def memory_archive(
+    ctx: typer.Context,
+    ids: Annotated[list[int], typer.Argument(help="Memory ids to archive.")],
+) -> None:
+    """Archive memories: kept and searchable, but downranked."""
+    _transition(ctx, ids, "archived")
 
 
 @git_app.command("summary")

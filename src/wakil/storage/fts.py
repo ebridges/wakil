@@ -78,7 +78,9 @@ def search_memories(session: Session, workspace_id: int, query: str, limit: int 
         SELECT 'memory:' || m.id AS ref,
                coalesce(m.summary, substr(m.content, 1, 80)) AS title,
                snippet(memories_fts, 0, '', '', '…', 12) AS snippet,
-               bm25(memories_fts) AS score
+               bm25(memories_fts) AS score,
+               m.state AS state,
+               m.created_at AS created_at
         FROM memories_fts JOIN memories m ON m.id = memories_fts.rowid
         WHERE memories_fts MATCH :match AND m.workspace_id = :workspace_id
           AND m.state != 'rejected'

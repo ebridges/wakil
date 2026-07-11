@@ -6,7 +6,13 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
-from wakil.app.ingest_service import IngestProposal, IngestResult
+from wakil.app.ingest_service import (
+    CaptureProposal,
+    CaptureResult,
+    EnrichmentProposal,
+    EnrichmentResult,
+    ProposedFile,
+)
 from wakil.app.query_service import QueryResult
 from wakil.app.search_service import SearchHit
 from wakil.app.workspace_service import IndexResult, WorkspaceStatus
@@ -78,14 +84,45 @@ def print_status(status: WorkspaceStatus) -> None:
             console.print(f"  [dim]{line}[/dim]")
 
 
-def print_ingest_proposal(proposal: IngestProposal) -> None:
+def _print_file_preview(proposed: ProposedFile) -> None:
+    preview = proposed.content[:1500]
+    if len(proposed.content) > 1500:
+        preview += "\n…"
     console.print(
         Panel(
-            f"[bold]{proposal.title}[/bold]\n[dim]{proposal.source_type}: {proposal.origin}[/dim]",
-            title="Ingest preview",
-            border_style="cyan",
+            Syntax(preview, "markdown", background_color="default"),
+            title=f"NEW {proposed.path}",
+            border_style="green",
         )
     )
+
+
+def print_capture_proposal(proposal: CaptureProposal) -> None:
+    header = f"[bold]{proposal.title}[/bold]\n[dim]{proposal.source_type}: {proposal.origin}[/dim]"
+    if proposal.meeting_date:
+        header += f"\n[dim]Meeting date: {proposal.meeting_date}[/dim]"
+    if proposal.context:
+        header += f"\n[dim]Context: {proposal.context}[/dim]"
+    console.print(Panel(header, title="Capture preview", border_style="cyan"))
+    console.print("[bold]Raw capture:[/bold]")
+    _print_file_preview(proposal.raw_file)
+
+
+def print_capture_result(result: CaptureResult) -> None:
+    console.print(
+        f"Captured source [bold]#{result.source_id}[/bold]: [green]+ {result.raw_file_path}[/green]"
+    )
+    console.print(
+        f"[dim]Analyze and link it into the knowledge base with "
+        f"`wakil enrich {result.source_id}`.[/dim]"
+    )
+
+
+def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
+    header = f"[bold]{proposal.title}[/bold]\n[dim]source #{proposal.source_id}[/dim]"
+    if proposal.context:
+        header += f"\n[dim]Context: {proposal.context}[/dim]"
+    console.print(Panel(header, title="Enrichment preview", border_style="cyan"))
     if proposal.summary:
         console.print(Panel(Markdown(proposal.summary), title="Summary"))
     if proposal.key_points:
@@ -110,24 +147,14 @@ def print_ingest_proposal(proposal: IngestProposal) -> None:
         console.print("[bold]Candidate relationships:[/bold]")
         for rel in proposal.relationships:
             console.print(f"  [{rel.subject_index}] --{rel.predicate}--> [{rel.object_index}]")
-
-    console.print("[bold]Proposed files:[/bold]")
-    for proposed in filter(None, [proposal.raw_file, proposal.proposed_note]):
-        preview = proposed.content[:1500]
-        if len(proposed.content) > 1500:
-            preview += "\n…"
-        console.print(
-            Panel(
-                Syntax(preview, "markdown", background_color="default"),
-                title=f"NEW {proposed.path}",
-                border_style="green",
-            )
-        )
+    if proposal.proposed_note is not None:
+        console.print("[bold]Proposed note:[/bold]")
+        _print_file_preview(proposal.proposed_note)
 
 
-def print_ingest_result(result: IngestResult) -> None:
+def print_enrichment_result(result: EnrichmentResult) -> None:
     console.print(
-        f"Ingested source [bold]#{result.source_id}[/bold]: "
+        f"Enriched source [bold]#{result.source_id}[/bold]: "
         f"{len(result.files_written)} file(s) written, "
         f"[magenta]{result.memories_created}[/magenta] candidate memories, "
         f"{result.relationships_created} relationships."
@@ -135,9 +162,74 @@ def print_ingest_result(result: IngestResult) -> None:
     for path in result.files_written:
         console.print(f"  [green]+ {path}[/green]")
     console.print(
-        "[dim]Review with git diff/status; promote memories with "
-        "`wakil memory` (coming in Phase 5).[/dim]"
+        "[dim]Review files with git diff/status; review memories with "
+        "`wakil memory list --state candidate`.[/dim]"
     )
+
+
+_STATE_STYLES = {
+    "durable": "green",
+    "candidate": "yellow",
+    "working": "cyan",
+    "archived": "dim",
+    "rejected": "red",
+}
+
+
+def _styled_state(state: str) -> str:
+    style = _STATE_STYLES.get(state, "white")
+    return f"[{style}]{state}[/{style}]"
+
+
+def print_memories(memories: list) -> None:
+    if not memories:
+        console.print("No memories match.")
+        return
+    table = Table(title="Memories")
+    table.add_column("ID", style="bold", justify="right")
+    table.add_column("State")
+    table.add_column("Type", style="magenta")
+    table.add_column("Content", overflow="fold", max_width=70)
+    table.add_column("Conf", justify="right")
+    table.add_column("Source", style="dim")
+    for memory in memories:
+        conf = f"{memory.confidence:.2f}" if memory.confidence is not None else "-"
+        source = f"source:{memory.source_id}" if memory.source_id else "-"
+        table.add_row(
+            str(memory.id),
+            _styled_state(memory.state),
+            memory.memory_type,
+            memory.content,
+            conf,
+            source,
+        )
+    console.print(table)
+    console.print(
+        "[dim]wakil memory promote|reject|archive <id...> to change states; "
+        "wakil memory show <id> for detail.[/dim]"
+    )
+
+
+def print_memory_detail(memory) -> None:
+    lines = [
+        f"[bold]State:[/bold] {_styled_state(memory.state)}",
+        f"[bold]Type:[/bold] {memory.memory_type}",
+        f"[bold]Confidence:[/bold] {memory.confidence if memory.confidence is not None else '-'}",
+        f"[bold]Source:[/bold] {f'source:{memory.source_id}' if memory.source_id else '-'}",
+        f"[bold]Created:[/bold] {memory.created_at}",
+        f"[bold]Last seen:[/bold] {memory.last_seen_at or '-'}",
+        "",
+        memory.content,
+    ]
+    console.print(Panel("\n".join(lines), title=f"Memory #{memory.id}", border_style="magenta"))
+
+
+def print_transitions(results: list) -> None:
+    for result in results:
+        console.print(
+            f"Memory [bold]#{result.memory_id}[/bold]: "
+            f"{_styled_state(result.old_state)} → {_styled_state(result.new_state)}"
+        )
 
 
 def print_index_result(result: IndexResult) -> None:

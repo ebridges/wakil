@@ -43,10 +43,14 @@ uv run wakil -w kb search "insurance claims routing"
 # Ask a grounded question (requires a model provider, see below)
 uv run wakil -w kb query "How do my notes on FNOL relate to graph memory?"
 
-# Ingest raw material into the knowledge base
-uv run wakil -w kb ingest transcript ./raw/meeting.txt
+# Step 1 — capture raw material (deterministic, no model)
+uv run wakil -w kb ingest transcript ./raw/meeting.txt \
+    --context "Attendees: Jane Doe, Bob (Acme Corp). Weekly claims sync."
 uv run wakil -w kb ingest article https://example.com/post
 uv run wakil -w kb ingest text ./clipping.md
+
+# Step 2 — analyze the captured source and link it into the KB
+uv run wakil -w kb enrich 1
 
 # Git-native ingest: commit on a wakil/ingest/* branch, optionally open a PR
 uv run wakil -w kb ingest transcript ./raw/meeting.txt --branch
@@ -55,7 +59,29 @@ uv run wakil -w kb ingest article https://example.com/post --pr
 # Git awareness
 uv run wakil -w kb git summary
 uv run wakil -w kb git history concepts/graph-memory.md
+
+# Memory lifecycle
+uv run wakil -w kb memory list --state candidate
+uv run wakil -w kb memory show 3
+uv run wakil -w kb memory promote 3 7
+uv run wakil -w kb memory reject 4
+uv run wakil -w kb memory archive 1
 ```
+
+## Memory lifecycle
+
+Ingests propose memories in `candidate` state; you review and decide:
+
+    working → candidate → durable
+                      ↘ rejected
+    durable → archived
+
+`wakil memory list` (with `--state`/`--type` filters) reviews them, `promote`
+moves them to durable, `reject` removes them from search, and `archive` keeps
+them searchable but downranked. Invalid transitions are refused. Rather than
+deleting, retrieval fades memories: durable ranks first, then candidate, then
+working (fading further after 30 days), then archived. Memories used to
+answer a query get their `last_seen_at` bumped for future ranking.
 
 ## Selecting a workspace
 
@@ -74,20 +100,34 @@ default, e.g. `export WAKIL_WORKSPACE=kb`.
 
 ## Ingest
 
-`wakil ingest` turns raw material into knowledge-base records. It extracts
-text (transcripts, `.srt` subtitles, plain text, or web articles via
-readability extraction), dedupes by content hash, finds related existing
-notes, and — when a model provider is configured — produces a summary, key
-points, candidate memories, candidate relationships, and an optional proposed
-Markdown note linked with wikilinks.
+Ingest is two explicit steps.
 
-Nothing is written until you confirm the preview (`--yes` skips the prompt).
-The raw capture lands under `sources/` with frontmatter; proposed notes go to
-the model-suggested path, falling back to `drafts/` when routing is unclear or
-the path collides. Existing files are never overwritten, and all writes are
-plain files you can review with `git diff`/`git status`. Extracted memories
-are stored as `candidate` state in SQLite for later review and promotion.
-Without a provider, ingest still stores the source and raw capture.
+**Step 1 — capture** (`wakil ingest transcript|text|article`) is fully
+deterministic; no model is involved. Text is extracted (transcripts get light
+cleanup: bracketed and line-leading timestamps removed, whitespace normalized
+— never model rewriting), deduped by content hash, and written under
+`sources/` as a raw capture. Transcript frontmatter follows the KB schema:
+if `SCHEMA.md` contains a yaml template in a transcript/source section, its
+fields are used (known fields like the meeting date and create date are
+filled in); otherwise exactly two fields are written — `created` and
+`meeting_date` (inferred from the filename or the transcript's opening
+lines). `--context`/`-C` accepts a few lines about the source (attendees,
+company, purpose) and is stored on the source record for step 2.
+
+**Step 2 — enrichment** (`wakil enrich <source-id>`) analyzes a captured
+source with the model: summary, key points, candidate memories and
+relationships, and a proposed KB note. The capture-time context (or a fresh
+`--context`) plus the opening of the source drive a search for related
+entity notes (`people/`, `companies/`, `concepts/`) and prior meetings, which
+the model links with [[wikilinks]]. `SCHEMA.md`/`RESOLVER.md` guidance is
+included so the note follows the KB's page shape and routing rules. Re-running
+requires `--force`.
+
+Both steps preview before writing (`--yes` skips the prompt) and accept
+`--branch`/`--commit`/`--pr`; captures commit as `wakil source:`, enrichment
+as `wakil ingest:`. Proposed notes fall back to `drafts/` when routing is
+unclear or the path collides; existing files are never overwritten. Extracted
+memories are stored as `candidate` state for review with `wakil memory`.
 
 ## Git-native changes
 

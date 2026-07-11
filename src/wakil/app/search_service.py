@@ -1,10 +1,12 @@
 """Hybrid search: QMD over the Markdown knowledge base + SQLite FTS."""
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from wakil.app.memory_service import retrieval_rank
 from wakil.config.settings import WorkspaceConfig
 from wakil.integrations.qmd import qmd_search
 from wakil.storage import fts
@@ -19,6 +21,7 @@ class SearchHit:
     snippet: str
     engine: str  # qmd | fts
     score: float | None = None
+    state: str | None = None  # memory lifecycle state, for memory hits
 
 
 def get_workspace_id(session: Session, config: WorkspaceConfig) -> int | None:
@@ -58,12 +61,30 @@ def search_workspace(
         if row["ref"] in seen_notes:
             continue
         hits.append(_fts_hit("note", row))
-    for row in fts.search_memories(session, workspace_id, query, limit=limit):
-        hits.append(_fts_hit("memory", row))
+    hits.extend(_ranked_memory_hits(fts.search_memories(session, workspace_id, query, limit=limit)))
     for row in fts.search_sources(session, workspace_id, query, limit=limit):
         hits.append(_fts_hit("source", row))
 
     return hits
+
+
+def _ranked_memory_hits(rows: list[dict]) -> list[SearchHit]:
+    """Order memory hits by lifecycle rank (durable first, faded/archived last),
+    breaking ties with the bm25 relevance score."""
+
+    def sort_key(row: dict) -> tuple[float, float]:
+        return (retrieval_rank(row["state"], _parse_dt(row["created_at"])), row["score"])
+
+    return [_fts_hit("memory", row) for row in sorted(rows, key=sort_key)]
+
+
+def _parse_dt(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _fts_hit(kind: str, row: dict) -> SearchHit:
@@ -74,4 +95,5 @@ def _fts_hit(kind: str, row: dict) -> SearchHit:
         snippet=row["snippet"] or "",
         engine="fts",
         score=row["score"],
+        state=row.get("state"),
     )
