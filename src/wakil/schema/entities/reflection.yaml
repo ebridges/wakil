@@ -1,0 +1,13 @@
+# Transcribed from docs/entity-metadata.md "reflection" block (validated, not
+# drifted). Directory is ideas/reflections per entity-resolution.md's
+# recommendation 6 — the D-expensive migration moves existing files there.
+type: reflection
+directory: ideas/reflections
+category: document
+fields:
+  title: {required: true, kind: string}
+  date: {required: true, kind: date}
+  week: {required: false, kind: string}
+  related: {required: false, kind: list}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}

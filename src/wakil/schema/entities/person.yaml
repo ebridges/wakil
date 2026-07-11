@@ -1,0 +1,19 @@
+# Transcribed from docs/ingestion-refactor-spec.md (worked example) /
+# docs/entity-metadata.md "person" block.
+type: person
+directory: people
+category: identity        # identity | document | hybrid — entity-metadata.md's 3-way split
+fields:
+  name: {required: true, kind: string}
+  aliases: {required: false, kind: list}
+  company: {required: false, kind: ref, ref_type: company}
+  role: {required: false, kind: string}
+  status: {required: true, kind: enum, values: [active, former, candidate, prospect, contact]}
+  relationship: {required: false, kind: enum, values: [coworker, report, manager, candidate, recruiter, vendor, mentor]}
+  linkedin: {required: false, kind: string}
+  github: {required: false, kind: string}
+  email: {required: false, kind: string}
+  end-date: {required: false, kind: date}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}
+  updated: {required: true, kind: date}

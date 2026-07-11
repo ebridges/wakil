@@ -1,0 +1,17 @@
+# Transcribed from docs/entity-metadata.md "organization" block (NEW — was
+# borrowing concept's schema; ~104 real files declare type: concept and are
+# retyped by the cheap-tier migration).
+type: organization
+directory: organization
+category: hybrid
+fields:
+  name: {required: true, kind: string}
+  title: {required: false, kind: string}
+  aliases: {required: false, kind: list}
+  domain: {required: false, kind: string}
+  company: {required: false, kind: ref, ref_type: company}
+  maturity: {required: false, kind: enum, values: [seed, developing, stable]}
+  related: {required: false, kind: list}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}
+  updated: {required: true, kind: date}

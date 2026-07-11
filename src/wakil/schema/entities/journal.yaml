@@ -1,0 +1,19 @@
+# Transcribed from docs/entity-metadata.md "journal" block — documentation
+# catching up to practice (all core fields at 300/300 in the census).
+# workstream/status/company are the legitimate minority-case extension (14%).
+type: journal
+directory: journal
+category: document
+fields:
+  date: {required: true, kind: date}
+  week: {required: true, kind: string}
+  day: {required: true, kind: enum, values: [mon, tue, wed, thu, fri, sat, sun]}
+  year: {required: true, kind: int}
+  title: {required: true, kind: string}
+  topics: {required: true, kind: list}
+  people: {required: false, kind: list}
+  tags: {required: true, kind: list}
+  created: {required: true, kind: date}
+  workstream: {required: false, kind: string}
+  status: {required: false, kind: string}
+  company: {required: false, kind: ref, ref_type: company}

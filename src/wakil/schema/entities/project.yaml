@@ -1,0 +1,22 @@
+# Transcribed from docs/entity-metadata.md "project" block. Hybrid: title is
+# permitted alongside name (the audit's corrected rule — 100% of real files
+# carry it). The learning-agenda curriculum container is a plain project
+# (company: personal, workstream: learning) per the same doc — no separate type.
+# The 9-file team RACI cluster (product_lead, layer, ...) is a tolerated
+# free-form extension, not schema.
+type: project
+directory: projects
+category: hybrid
+fields:
+  name: {required: true, kind: string}
+  title: {required: false, kind: string}
+  company: {required: false, kind: ref, ref_type: company}
+  status: {required: false, kind: enum, values: [active, paused, completed, archived]}
+  owner: {required: false, kind: string}
+  stakeholders: {required: false, kind: list}
+  workstream: {required: false, kind: string}
+  start-date: {required: false, kind: date}
+  end-date: {required: false, kind: date}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}
+  updated: {required: true, kind: date}
