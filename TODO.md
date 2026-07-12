@@ -67,8 +67,11 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 - [x] Phase B: Alembic setup (baseline anchor + upgrade-on-open for legacy
       DBs) + `Memory.event_date`,
       `Relationship.subject_note_id`/`object_note_id`
-- [ ] Phase D-cheap: `wakil schema migrate` (casing/naming normalization,
-      organization/ retyping, title-caser artifacts)
+- [x] Phase D-cheap: `wakil schema migrate` — cheap-tier fixes (field
+      renames like `end_date`→`end-date`, exact-duplicate drops with
+      ambiguity skips, organization/ retyping, title-caser repair, quoted
+      `type:` normalization) behind per-type confirm / `--dry-run` /
+      `--yes` / `--commit`
 - [ ] Phase C: enrichment DAG (skills/*/SKILL.md, Pydantic output contracts,
       entity-resolution node, `validate_proposal()`)
 - [ ] Phase D-expensive: learning-agenda retyping + reflections move

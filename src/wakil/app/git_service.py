@@ -74,6 +74,25 @@ def start_ingest_branch(config: WorkspaceConfig, title: str) -> str:
     return name
 
 
+def commit_change(
+    config: WorkspaceConfig,
+    files: list[str],
+    kind: str,
+    description: str,
+) -> CommitOutcome:
+    """Commit wakil-written files on the current branch with a wakil
+    convention message (e.g. `wakil chore: normalize person frontmatter`)."""
+    if not files:
+        raise GitServiceError("Nothing to commit: no files were written.")
+    message = commit_message(kind, description)
+    try:
+        sha = git.stage_and_commit(config.root_path, files, message)
+    except git.GitError as exc:
+        raise GitServiceError(str(exc)) from exc
+    _record_change(config, files, sha, None, None, description, None, kind)
+    return CommitOutcome(branch=None, commit_sha=sha, message=message)
+
+
 def commit_ingest(
     config: WorkspaceConfig,
     files: list[str],

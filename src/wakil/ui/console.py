@@ -167,6 +167,37 @@ def print_enrichment_result(result: EnrichmentResult) -> None:
     )
 
 
+def print_migration_plan(plan) -> None:
+    if plan.total_files == 0:
+        console.print("[green]All indexed notes already conform — nothing to migrate.[/green]")
+    else:
+        table = Table(title="Schema migration plan (cheap tier)")
+        table.add_column("Type", style="bold")
+        table.add_column("Files", justify="right")
+        table.add_column("Fixes", overflow="fold")
+        for entity_type, proposals in sorted(plan.by_type.items()):
+            fix_kinds: dict[str, int] = {}
+            for proposal in proposals:
+                for fix in proposal.fixes:
+                    fix_kinds[fix] = fix_kinds.get(fix, 0) + 1
+            summary = "\n".join(f"{count}× {fix}" for fix, count in sorted(fix_kinds.items()))
+            table.add_row(entity_type, str(len(proposals)), summary)
+        console.print(table)
+    for note in plan.skipped:
+        console.print(f"[yellow]skipped:[/yellow] {note}")
+
+
+def print_migration_diffs(proposals) -> None:
+    for proposal in proposals:
+        console.print(
+            Panel(
+                Syntax(proposal.diff(), "diff", background_color="default"),
+                title=proposal.path,
+                border_style="cyan",
+            )
+        )
+
+
 _STATE_STYLES = {
     "durable": "green",
     "candidate": "yellow",
