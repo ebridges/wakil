@@ -5,7 +5,7 @@ schema can serve multiple users later. Markdown stays the source of truth;
 these tables index, cache, and record operational history.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -89,6 +89,9 @@ class Memory(Base):
     state: Mapped[str] = mapped_column(String(20), default="working")
     importance: Mapped[float | None] = mapped_column(default=None)
     freshness: Mapped[float | None] = mapped_column(default=None)
+    # When the described event happened (Timeline ordering) — distinct from
+    # created_at, which records when this row was written (entity-model.md).
+    event_date: Mapped[date | None] = mapped_column(default=None)
     last_seen_at: Mapped[datetime | None] = mapped_column(default=None)
     metadata_json: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -103,6 +106,13 @@ class Relationship(Base):
     subject_memory_id: Mapped[int] = mapped_column(ForeignKey("memories.id"))
     predicate: Mapped[str] = mapped_column(String(50))
     object_memory_id: Mapped[int] = mapped_column(ForeignKey("memories.id"))
+    # Note↔Note structural edges (wikilinks/backlinks) are a different thing
+    # from Memory↔Memory semantic edges; these columns widen the table to
+    # carry both, mirroring the nullable-provenance pattern of source_id/
+    # note_id (entity-model.md). Backlinks become a live query
+    # (WHERE object_note_id = X), never stored prose.
+    subject_note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id"), default=None)
+    object_note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id"), default=None)
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"), default=None)
     note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id"), default=None)
     confidence: Mapped[float | None] = mapped_column(default=None)
