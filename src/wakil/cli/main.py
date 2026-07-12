@@ -37,6 +37,8 @@ git_app = typer.Typer(help="Git awareness for the knowledge base.", no_args_is_h
 app.add_typer(git_app, name="git")
 memory_app = typer.Typer(help="Review and manage the memory lifecycle.", no_args_is_help=True)
 app.add_typer(memory_app, name="memory")
+schema_app = typer.Typer(help="Entity schema tools for the knowledge base.", no_args_is_help=True)
+app.add_typer(schema_app, name="schema")
 
 
 @app.callback()
@@ -529,6 +531,81 @@ def memory_archive(
 ) -> None:
     """Archive memories: kept and searchable, but downranked."""
     _transition(ctx, ids, "archived")
+
+
+@schema_app.command("migrate")
+def schema_migrate(
+    ctx: typer.Context,
+    entity_type: Annotated[
+        str | None, typer.Option("--type", help="Migrate only notes of this entity type.")
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show the plan and diffs; write nothing.")
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Apply every proposed fix without prompting.")
+    ] = False,
+    commit: Annotated[
+        bool,
+        typer.Option("--commit", "-c", help="Commit each type's fixes (wakil chore: ...)."),
+    ] = False,
+) -> None:
+    """Propose cheap-tier frontmatter fixes and apply them per type on confirm."""
+    from wakil.app.git_service import GitServiceError, commit_change
+    from wakil.app.schema_migrate_service import (
+        MigrateError,
+        apply_migrations,
+        plan_schema_migration,
+    )
+    from wakil.ui.console import print_migration_diffs, print_migration_plan
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    try:
+        with console.status("Scanning indexed notes..."):
+            plan = plan_schema_migration(config, entity_type=entity_type)
+    except MigrateError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    print_migration_plan(plan)
+    if plan.total_files == 0:
+        return
+    if dry_run:
+        for proposals in plan.by_type.values():
+            print_migration_diffs(proposals)
+        console.print("[dim]Dry run: nothing was written.[/dim]")
+        return
+
+    for type_name, proposals in sorted(plan.by_type.items()):
+        if not yes:
+            applied = False
+            while True:
+                answer = typer.prompt(
+                    f"Apply {len(proposals)} fix(es) to {type_name} files? [y/N/d=show diffs]",
+                    default="n",
+                ).lower()
+                if answer == "d":
+                    print_migration_diffs(proposals)
+                    continue
+                applied = answer == "y"
+                break
+            if not applied:
+                console.print(f"[dim]Skipped {type_name}.[/dim]")
+                continue
+        written, stale = apply_migrations(config, proposals)
+        for message in stale:
+            console.print(f"[yellow]{message}[/yellow]")
+        console.print(f"Rewrote [bold]{len(written)}[/bold] {type_name} file(s).")
+        if commit and written:
+            try:
+                outcome = commit_change(
+                    config, written, "chore", f"normalize {type_name} frontmatter"
+                )
+            except GitServiceError as exc:
+                console.print(f"[red]Commit failed:[/red] {exc}")
+                raise typer.Exit(code=1) from exc
+            console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]")
 
 
 @git_app.command("summary")
