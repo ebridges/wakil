@@ -6,9 +6,12 @@ hash, and written under sources/ as a raw capture with frontmatter shaped by
 the KB's SCHEMA.md when it defines a template for transcripts/sources —
 otherwise transcripts get exactly two fields: create date and meeting date.
 
-Step 2, enrichment (`wakil enrich <source-id>`): the captured source is
-analyzed by the model — summary, candidate memories and relationships, and a
-proposed KB note linking entities and history — and applied after review.
+Step 2, enrichment (`wakil enrich <source-id>`): a fixed, code-sequenced DAG
+(docs/ingestion-refactor-spec.md) — an extraction model call (judgment from
+skills/<kind>/SKILL.md against the ExtractionOutput contract), then an
+always-invoked entity-resolution model call (skills/entity-resolve/SKILL.md
+against EntityResolution), then `validate_proposal()` gating every proposed
+new file against the entity schemas, then one preview/confirm, then apply.
 
 Each step is itself two-phase (prepare → preview/confirm → apply): prepare
 touches nothing, files are only ever created (never overwritten), and DB rows
@@ -19,7 +22,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import frontmatter as frontmatter_lib
@@ -31,7 +34,17 @@ from wakil.app.workspace_service import index_notes, open_session
 from wakil.config.settings import WorkspaceConfig
 from wakil.integrations.web import fetch_article
 from wakil.llm.client import ModelClient
-from wakil.llm.prompts import INGEST_SYSTEM_PROMPT, build_ingest_prompt, parse_ingest_response
+from wakil.llm.prompts import build_extraction_prompt, build_resolution_prompt
+from wakil.llm.schemas import (
+    EntityResolution,
+    EntityResolutionOutput,
+    ExtractionOutput,
+    ModelContractError,
+    complete_with_contract,
+)
+from wakil.llm.skill_loader import SkillLoadError, build_system_prompt, load_skill
+from wakil.schema.loader import load_entity_schemas
+from wakil.schema.validate import validate_frontmatter
 from wakil.storage.schema import IngestRun, Memory, Relationship, Source, User, Workspace, utcnow
 
 MAX_SOURCE_CHARS = 24_000
@@ -63,6 +76,8 @@ class CandidateMemory:
     memory_type: str
     content: str
     confidence: float | None = None
+    # The dated event's own date (memory_type="event"), for Timeline ordering.
+    event_date: date | None = None
 
 
 @dataclass
@@ -103,7 +118,24 @@ class EnrichmentProposal:
     relationships: list[CandidateRelationship] = field(default_factory=list)
     proposed_note: ProposedFile | None = None
     related_notes: list[SearchHit] = field(default_factory=list)
+    # What the entity-resolution step decided, and the stub pages it implies.
+    entity_resolutions: list[EntityResolution] = field(default_factory=list)
+    stub_entities: list[ProposedFile] = field(default_factory=list)
+    # Visible degradations (a failed resolution call, a downgraded create) —
+    # shown in the preview, never silently swallowed.
+    warnings: list[str] = field(default_factory=list)
     model: str | None = None
+
+
+@dataclass
+class ProposalIssue:
+    """A validation failure that blocks apply (hard stop, not best-guess)."""
+
+    location: str  # proposed file path or "entity:<name>"
+    message: str
+
+    def __str__(self) -> str:
+        return f"{self.location}: {self.message}"
 
 
 @dataclass
@@ -264,60 +296,240 @@ def prepare_enrichment(
     proposal = EnrichmentProposal(
         source_id=source_id, title=title, context=context, related_notes=related_notes
     )
+    proposal.model = client.model
+    guides = load_workspace_guides(config)
+    related_pairs = [(hit.ref, hit.title) for hit in related_notes]
+    source_text = text[:MAX_SOURCE_CHARS]
 
-    prompt = build_ingest_prompt(
+    # DAG node 1: extraction judgment (skills/<kind>/SKILL.md + ExtractionOutput).
+    extraction = _run_extraction(
+        client,
         source.source_type,
         source.origin or title,
-        text[:MAX_SOURCE_CHARS],
-        [(hit.ref, hit.title) for hit in related_notes],
-        context=context,
-        guides=load_workspace_guides(config),
+        source_text,
+        related_pairs,
+        proposal,
+        guides,
     )
-    data = parse_ingest_response(client.complete(INGEST_SYSTEM_PROMPT, prompt))
-
-    proposal.model = client.model
-    if isinstance(data.get("title"), str) and data["title"].strip():
-        proposal.title = data["title"].strip()
-    proposal.summary = str(data.get("summary") or "")
-    proposal.key_points = [str(p) for p in data.get("key_points", [])]
+    if extraction.title and extraction.title.strip():
+        proposal.title = extraction.title.strip()
+    proposal.summary = extraction.summary
+    proposal.key_points = list(extraction.key_points)
     proposal.memories = [
         CandidateMemory(
-            memory_type=str(m.get("type") or "fact"),
-            content=str(m["content"]),
-            confidence=_clamp01(m.get("confidence")),
+            memory_type=m.type or "fact",
+            content=m.content,
+            confidence=_clamp01(m.confidence),
+            event_date=m.event_date,
         )
-        for m in data["memories"]
+        for m in extraction.memories
+        if m.content.strip()
     ]
     proposal.relationships = [
-        CandidateRelationship(
-            subject_index=int(r["subject"]),
-            predicate=str(r["predicate"]),
-            object_index=int(r["object"]),
-        )
-        for r in data["relationships"]
-        if isinstance(r.get("subject"), int) and isinstance(r.get("object"), int)
+        CandidateRelationship(subject_index=r.subject, predicate=r.predicate, object_index=r.object)
+        for r in extraction.relationships
     ]
-    if data["proposed_note"] is not None:
+    if extraction.proposed_note is not None:
         proposal.proposed_note = _sanitize_note(
             config,
             ProposedFile(
-                path=str(data["proposed_note"]["path"]),
-                content=str(data["proposed_note"]["markdown"]),
+                path=extraction.proposed_note.path,
+                content=extraction.proposed_note.markdown,
             ),
             proposal.title,
         )
+
+    # DAG node 2: entity resolution — always invoked, never optional.
+    _run_entity_resolution(config, client, source_text, related_pairs, proposal, guides)
     return proposal
 
 
-def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> EnrichmentResult:
-    files_written: list[str] = []
+def _run_extraction(
+    client: ModelClient,
+    source_type: str,
+    origin: str,
+    text: str,
+    related_pairs: list[tuple[str, str]],
+    proposal: EnrichmentProposal,
+    guides: dict[str, str],
+) -> ExtractionOutput:
+    try:
+        skill = load_skill(source_type)
+    except SkillLoadError:
+        skill = load_skill("text")  # unknown kinds get the generic clipping judgment
+    system = build_system_prompt(skill, ExtractionOutput)
+    prompt = build_extraction_prompt(
+        source_type, origin, text, related_pairs, context=proposal.context, guides=guides
+    )
+    try:
+        return complete_with_contract(client, system, prompt, ExtractionOutput)
+    except ModelContractError as exc:
+        # Nothing downstream can run without extraction: fail visibly here.
+        raise IngestError(f"Enrichment extraction failed: {exc}") from exc
+
+
+def _run_entity_resolution(
+    config: WorkspaceConfig,
+    client: ModelClient,
+    text: str,
+    related_pairs: list[tuple[str, str]],
+    proposal: EnrichmentProposal,
+    guides: dict[str, str],
+) -> None:
+    """Second model call plus stub-page construction; degrades visibly."""
+    skill = load_skill("entity-resolve")
+    system = build_system_prompt(skill, EntityResolutionOutput)
+    prompt = build_resolution_prompt(
+        text,
+        proposal.summary,
+        proposal.proposed_note.content if proposal.proposed_note else None,
+        related_pairs,
+        load_entity_schemas(),
+        context=proposal.context,
+        guides=guides,
+    )
+    try:
+        resolution = complete_with_contract(client, system, prompt, EntityResolutionOutput)
+    except ModelContractError as exc:
+        proposal.warnings.append(f"Entity resolution failed; no entity pages proposed: {exc}")
+        return
+    proposal.entity_resolutions = list(resolution.entities)
+    proposal.stub_entities = _build_stub_entities(config, proposal)
+
+
+def _build_stub_entities(
+    config: WorkspaceConfig, proposal: EnrichmentProposal
+) -> list[ProposedFile]:
+    """One stub page per notable new entity (action=create), schema-routed.
+
+    Unknown entity types and types without a canonical directory build no
+    stub here — validate_proposal() reports them as hard stops instead of
+    best-guessing a location or frontmatter shape.
+    """
+    schemas = load_entity_schemas()
+    today = datetime.now(UTC).date().isoformat()
+    stubs: list[ProposedFile] = []
+    taken = {proposal.proposed_note.path} if proposal.proposed_note else set()
+
+    for resolution in proposal.entity_resolutions:
+        if resolution.action != "create":
+            continue
+        schema = schemas.get(resolution.entity_type)
+        if schema is None or schema.directory is None:
+            continue  # surfaced by validate_proposal
+        path = f"{schema.directory}/{slugify(resolution.name)}.md"
+        if (config.root_path / path).exists():
+            proposal.warnings.append(
+                f"{resolution.name}: {path} already exists — not creating a duplicate page"
+            )
+            continue
+        if path in taken:
+            continue
+        taken.add(path)
+
+        proposed = dict(resolution.proposed_frontmatter or {})
+        proposed.pop("type", None)
+        label_field = "title" if schema.category == "document" else "name"
+        metadata: dict = {
+            "type": resolution.entity_type,
+            label_field: proposed.pop(label_field, None) or resolution.name,
+        }
+        metadata.update(proposed)
+        for date_field in ("created", "updated"):
+            if date_field in schema.fields and not metadata.get(date_field):
+                metadata[date_field] = today
+        stubs.append(ProposedFile(path=path, content=_stub_content(metadata, resolution.name)))
+    return stubs
+
+
+def _stub_content(metadata: dict, name: str) -> str:
+    """Compiled Truth / Timeline skeleton per docs/entity-model.md."""
+    frontmatter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
+    return (
+        f"---\n{frontmatter}---\n\n"
+        f"# {name}\n\n"
+        "## Compiled Truth\n\n"
+        "_Synthesized current state — rewrite when facts change._\n\n"
+        "## Open Threads\n\n"
+        "---\n\n"
+        "## Timeline / Log\n"
+    )
+
+
+def validate_proposal(proposal: EnrichmentProposal) -> list[ProposalIssue]:
+    """Invariant gate between prepare and apply; any issue blocks the write.
+
+    Implements entity-resolution.md's constraints plus the schema check:
+    every proposed new file must carry frontmatter valid against its entity
+    schema; a type with no schema (or no canonical directory) is a hard stop,
+    not a best-guess write; no two proposed files may share a path. Routing
+    is 1:N by construction (proposed_note + stub_entities), and content-hash
+    dedup is already enforced upstream at capture time.
+    """
+    issues: list[ProposalIssue] = []
+    schemas = load_entity_schemas()
+
+    proposed_files = list(proposal.stub_entities)
     if proposal.proposed_note is not None:
-        target = config.root_path / proposal.proposed_note.path
+        proposed_files.insert(0, proposal.proposed_note)
+
+    seen_paths: set[str] = set()
+    for proposed in proposed_files:
+        if proposed.path in seen_paths:
+            issues.append(ProposalIssue(proposed.path, "duplicate proposed path"))
+        seen_paths.add(proposed.path)
+        try:
+            metadata = frontmatter_lib.loads(proposed.content).metadata
+        except Exception:
+            metadata = {}
+        entity_type = metadata.get("type") if isinstance(metadata, dict) else None
+        if not isinstance(entity_type, str) or not entity_type:
+            issues.append(ProposalIssue(proposed.path, "proposed file has no `type:` frontmatter"))
+            continue
+        for error in validate_frontmatter(entity_type, metadata):
+            issues.append(ProposalIssue(proposed.path, str(error)))
+
+    # Creates that could not even build a stub: missing schema or directory.
+    for resolution in proposal.entity_resolutions:
+        if resolution.action != "create":
+            continue
+        schema = schemas.get(resolution.entity_type)
+        if schema is None:
+            issues.append(
+                ProposalIssue(
+                    f"entity:{resolution.name}",
+                    f"no entity schema defines type '{resolution.entity_type}' "
+                    f"(known: {', '.join(sorted(schemas))})",
+                )
+            )
+        elif schema.directory is None:
+            issues.append(
+                ProposalIssue(
+                    f"entity:{resolution.name}",
+                    f"type '{resolution.entity_type}' has no canonical directory to "
+                    "route a new page into",
+                )
+            )
+    return issues
+
+
+def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> EnrichmentResult:
+    issues = validate_proposal(proposal)
+    if issues:
+        detail = "; ".join(str(issue) for issue in issues)
+        raise IngestError(f"Proposal failed validation, nothing was written: {detail}")
+
+    files_written: list[str] = []
+    proposed_files = list(proposal.stub_entities)
+    if proposal.proposed_note is not None:
+        proposed_files.insert(0, proposal.proposed_note)
+    for proposed in proposed_files:
+        target = config.root_path / proposed.path
         if target.exists():
-            raise IngestError(f"Refusing to overwrite existing file: {proposal.proposed_note.path}")
+            raise IngestError(f"Refusing to overwrite existing file: {proposed.path}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(proposal.proposed_note.content, encoding="utf-8")
-        files_written.append(proposal.proposed_note.path)
+        target.write_text(proposed.content, encoding="utf-8")
+        files_written.append(proposed.path)
 
     with open_session(config) as session:
         workspace_id, user_id = _require_workspace_ids(session, config)
@@ -333,6 +545,7 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
                 memory_type=candidate.memory_type,
                 content=candidate.content,
                 confidence=candidate.confidence,
+                event_date=candidate.event_date,
                 state="candidate",
                 source_id=source.id,
             )

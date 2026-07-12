@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from wakil.app.ingest_service import (
     slugify,
     strip_srt,
     transcript_frontmatter_template,
+    validate_proposal,
 )
 from wakil.app.workspace_service import init_workspace, open_session
 from wakil.config.settings import WorkspaceConfig
@@ -27,29 +29,62 @@ MODEL_JSON = {
     "memories": [
         {"type": "decision", "content": "Team will prototype FNOL routing.", "confidence": 0.9},
         {"type": "fact", "content": "Jane Doe owns the routing design.", "confidence": 0.8},
+        {
+            "type": "event",
+            "content": "Kickoff meeting for the FNOL routing prototype.",
+            "confidence": 0.9,
+            "event_date": "2026-07-09",
+        },
     ],
     "relationships": [{"subject": 0, "predicate": "related_to", "object": 1}],
     "proposed_note": {
         "path": "meetings/2026/2026-07-09-claims-kickoff.md",
         "markdown": (
-            "---\ntype: meeting\ntitle: Claims Kickoff\n---\n\n"
+            "---\ntype: meeting\ntitle: Claims Kickoff\ndate: 2026-07-09\n"
+            "created: 2026-07-09\n---\n\n"
             "# Claims Kickoff\n\nAttended by [[people/jane-doe.md]]. "
             "See [[concepts/claims-routing.md]].\n"
         ),
     },
 }
 
+RESOLUTION_JSON = {
+    "entities": [
+        {
+            "name": "Dana Prieto",
+            "entity_type": "person",
+            "action": "create",
+            "confidence": 0.85,
+            "proposed_frontmatter": {"status": "active", "role": "Claims platform lead"},
+        },
+        {
+            "name": "Jane Doe",
+            "entity_type": "person",
+            "action": "update",
+            "target_note_path": "people/jane-doe.md",
+            "confidence": 0.95,
+            "proposed_frontmatter": {"role": "Routing design owner"},
+        },
+        {"name": "Acme", "entity_type": "company", "action": "skip", "confidence": 0.4},
+    ]
+}
+
 
 class FakeClient:
+    """Scripted responses, one per model call (extraction, then resolution)."""
+
     model = "fake-model"
 
-    def __init__(self, payload=None):
-        self.payload = payload if payload is not None else MODEL_JSON
-        self.prompts: list[str] = []
+    def __init__(self, payloads=None):
+        if payloads is None:
+            payloads = [MODEL_JSON, RESOLUTION_JSON]
+        self.queue = [json.dumps(p) if isinstance(p, dict) else p for p in payloads]
+        self.calls: list[tuple[str, str]] = []
 
     def complete(self, system, prompt, max_tokens=8192):
-        self.prompts.append(prompt)
-        return json.dumps(self.payload) if isinstance(self.payload, dict) else self.payload
+        self.calls.append((system, prompt))
+        assert self.queue, "FakeClient ran out of scripted responses"
+        return self.queue.pop(0)
 
 
 @pytest.fixture
@@ -148,20 +183,38 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
 
     proposal = prepare_enrichment(workspace, source_id, client)
 
-    # Capture-time context is reused and entity notes surface as candidates.
-    prompt = client.prompts[0]
-    assert "Jane Doe (Acme)" in prompt
+    # Two model calls: extraction with the transcript skill, then entity
+    # resolution — always invoked, with the type catalog in its prompt.
+    assert len(client.calls) == 2
+    extraction_system, extraction_prompt = client.calls[0]
+    resolution_system, resolution_prompt = client.calls[1]
+    assert "Find the resolution, not the first option" in extraction_system
+    assert '"ExtractionOutput"' in extraction_system  # contract schema injected
+    assert "Jane Doe (Acme)" in extraction_prompt
+    assert "entity-resolution step" in resolution_system
+    assert "Known entity types" in resolution_prompt
+    assert "person" in resolution_prompt
+
     assert any(hit.ref == "people/jane-doe.md" for hit in proposal.related_notes)
     # The raw capture itself is not offered as a related note.
     assert all("sources/transcripts" not in hit.ref for hit in proposal.related_notes)
     assert proposal.title == "Claims Kickoff Meeting"
-    assert len(proposal.memories) == 2
+    assert len(proposal.memories) == 3
     assert proposal.proposed_note.path == "meetings/2026/2026-07-09-claims-kickoff.md"
+    # Resolution results: one stub for the new person, none for update/skip.
+    assert [r.action for r in proposal.entity_resolutions] == ["create", "update", "skip"]
+    assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
+    assert validate_proposal(proposal) == []
 
     result = apply_enrichment(workspace, proposal)
     root = workspace.root_path
     assert (root / "meetings/2026/2026-07-09-claims-kickoff.md").exists()
-    assert result.memories_created == 2
+    assert (root / "people/dana-prieto.md").exists()
+    assert result.files_written == [
+        "meetings/2026/2026-07-09-claims-kickoff.md",
+        "people/dana-prieto.md",
+    ]
+    assert result.memories_created == 3
     assert result.relationships_created == 1
 
     with open_session(workspace) as session:
@@ -170,6 +223,9 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
         assert source.title == "Claims Kickoff Meeting"
         memories = list(session.scalars(select(Memory)))
         assert all(m.state == "candidate" and m.source_id == source_id for m in memories)
+        # The dated event carries its own date for Timeline ordering.
+        event = next(m for m in memories if m.memory_type == "event")
+        assert event.event_date == date(2026, 7, 9)
         assert session.scalar(select(Relationship)) is not None
 
 
@@ -192,17 +248,46 @@ def test_enrichment_refuses_double_run_without_force(workspace, transcript):
 def test_enrichment_unsafe_note_path_falls_back_to_drafts(workspace, transcript):
     source_id = _capture(workspace, transcript)
     payload = dict(MODEL_JSON, proposed_note={"path": "../escape.md", "markdown": "# Escape\n"})
-    proposal = prepare_enrichment(workspace, source_id, FakeClient(payload))
+    proposal = prepare_enrichment(workspace, source_id, FakeClient([payload, RESOLUTION_JSON]))
     assert proposal.proposed_note.path.startswith("drafts/")
 
 
-def test_enrichment_malformed_output_degrades(workspace, transcript):
+def test_extraction_retry_then_success(workspace, transcript):
     source_id = _capture(workspace, transcript)
-    proposal = prepare_enrichment(workspace, source_id, FakeClient("not json at all"))
-    assert proposal.summary == "not json at all"
-    assert proposal.memories == []
-    assert proposal.proposed_note is None
-    apply_enrichment(workspace, proposal)  # still applicable
+    client = FakeClient(["not json at all", MODEL_JSON, RESOLUTION_JSON])
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    # Call 2 is the retry: same extraction system prompt, error appended.
+    assert len(client.calls) == 3
+    assert client.calls[1][0] == client.calls[0][0]
+    assert "was not valid" in client.calls[1][1]
+    assert proposal.summary == MODEL_JSON["summary"]
+
+
+def test_extraction_double_failure_is_visible(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    client = FakeClient(["not json", "still not json"])
+
+    # Never silently coerced to an empty proposal — the failure surfaces.
+    with pytest.raises(IngestError, match="extraction failed"):
+        prepare_enrichment(workspace, source_id, client)
+    assert len(client.calls) == 2
+
+
+def test_resolution_double_failure_degrades_visibly(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, "bad", "still bad"])
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert len(client.calls) == 3
+    assert proposal.entity_resolutions == []
+    assert proposal.stub_entities == []
+    assert any("Entity resolution failed" in warning for warning in proposal.warnings)
+    # Extraction results survive and remain applicable.
+    assert proposal.summary == MODEL_JSON["summary"]
+    apply_enrichment(workspace, proposal)
 
 
 def test_enrichment_guides_reach_prompt(workspace, transcript):
@@ -211,11 +296,13 @@ def test_enrichment_guides_reach_prompt(workspace, transcript):
     client = FakeClient()
     prepare_enrichment(workspace, source_id, client)
 
-    prompt = client.prompts[0]
+    prompt = client.calls[0][1]
     assert "Workspace guidance from SCHEMA.md" in prompt
     assert "Workspace guidance from RESOLVER.md" in prompt
     # Frontmatter is stripped from the analyzed text.
     assert "meeting_date:" not in prompt
+    # Routing guidance also reaches the resolution call.
+    assert "Workspace guidance from RESOLVER.md" in client.calls[1][1]
 
 
 # --------------------------------------------------------------------------

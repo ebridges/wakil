@@ -114,14 +114,31 @@ filled in); otherwise exactly two fields are written — `created` and
 lines). `--context`/`-C` accepts a few lines about the source (attendees,
 company, purpose) and is stored on the source record for step 2.
 
-**Step 2 — enrichment** (`wakil enrich <source-id>`) analyzes a captured
-source with the model: summary, key points, candidate memories and
-relationships, and a proposed KB note. The capture-time context (or a fresh
-`--context`) plus the opening of the source drive a search for related
-entity notes (`people/`, `companies/`, `concepts/`) and prior meetings, which
-the model links with [[wikilinks]]. `SCHEMA.md`/`RESOLVER.md` guidance is
-included so the note follows the KB's page shape and routing rules. Re-running
-requires `--force`.
+**Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
+code-sequenced pipeline of two model calls, one preview, one confirm:
+
+1. **Extraction** — judgment prose from `skills/<kind>/SKILL.md` (transcript,
+   article, or text) produces the summary, key points, candidate memories
+   (dated events carry their own `event_date`), relationships, and a proposed
+   KB note. The capture-time context (or a fresh `--context`) plus the
+   opening of the source drive a search for related entity notes and prior
+   meetings, which the model links with [[wikilinks]].
+   `SCHEMA.md`/`RESOLVER.md` guidance is included so the note follows the
+   KB's page shape and routing rules.
+2. **Entity resolution** — always invoked, never optional: for each entity
+   the source touched, the model decides create/update/skip against the
+   existing notes and the shipped entity schemas. Notable new entities
+   (action `create`) become stub pages with schema-valid frontmatter and a
+   Compiled Truth / Timeline skeleton, routed into the type's canonical
+   directory; the decisions are shown in the preview before anything is
+   written.
+
+Model output is validated against Pydantic contracts (the same JSON Schema
+shown to the model), retried once on a validation failure, and fails visibly
+— never silently coerced. Before apply, `validate_proposal()` checks every
+proposed file's frontmatter against the entity schemas; a proposed `type:`
+with no schema is a hard stop, not a best-guess write. Re-running requires
+`--force`.
 
 Both steps preview before writing (`--yes` skips the prompt) and accept
 `--branch`/`--commit`/`--pr`; captures commit as `wakil source:`, enrichment

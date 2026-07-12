@@ -72,8 +72,14 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
       ambiguity skips, organization/ retyping, title-caser repair, quoted
       `type:` normalization) behind per-type confirm / `--dry-run` /
       `--yes` / `--commit`
-- [ ] Phase C: enrichment DAG (skills/*/SKILL.md, Pydantic output contracts,
-      entity-resolution node, `validate_proposal()`)
+- [x] Phase C: enrichment DAG — skills/{transcript,article,text,
+      entity-resolve}/SKILL.md (prose judgment only), Pydantic contracts
+      (`ExtractionOutput`/`EntityResolution`) injected into the system
+      prompt via `model_json_schema()`, validate + one retry + visible
+      failure (retired `INGEST_SYSTEM_PROMPT`/`parse_ingest_response`),
+      always-invoked entity-resolution call producing `stub_entities`,
+      `validate_proposal()` (schema check on new writes, hard stop on
+      missing schema, 1:N routing), `Memory.event_date` persisted
 - [ ] Phase D-expensive: learning-agenda retyping + reflections move
 - Deferred per spec: `wakil entity compile`, memory-vocabulary
   reconciliation, provider-native structured output, runtime plugin loading

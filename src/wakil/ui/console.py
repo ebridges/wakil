@@ -12,6 +12,7 @@ from wakil.app.ingest_service import (
     EnrichmentProposal,
     EnrichmentResult,
     ProposedFile,
+    slugify,
 )
 from wakil.app.query_service import QueryResult
 from wakil.app.search_service import SearchHit
@@ -147,9 +148,48 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
         console.print("[bold]Candidate relationships:[/bold]")
         for rel in proposal.relationships:
             console.print(f"  [{rel.subject_index}] --{rel.predicate}--> [{rel.object_index}]")
+    if proposal.entity_resolutions:
+        stub_by_slug = {stub.path.rsplit("/", 1)[-1]: stub.path for stub in proposal.stub_entities}
+        table = Table(title="Entity resolution")
+        table.add_column("Entity", style="bold")
+        table.add_column("Type")
+        table.add_column("Action")
+        table.add_column("Target", overflow="fold")
+        table.add_column("Conf", justify="right")
+        for res in proposal.entity_resolutions:
+            style = _ACTION_STYLES.get(res.action, "white")
+            if res.action == "update":
+                target = res.target_note_path or "-"
+            elif res.action == "create":
+                target = stub_by_slug.get(f"{slugify(res.name)}.md", "-")
+            else:
+                target = "-"
+            conf = f"{res.confidence:.2f}" if res.confidence is not None else "-"
+            table.add_row(
+                res.name, res.entity_type, f"[{style}]{res.action}[/{style}]", target, conf
+            )
+        console.print(table)
+    if proposal.stub_entities:
+        console.print(f"[bold]New entity pages ({len(proposal.stub_entities)}):[/bold]")
+        for stub in proposal.stub_entities:
+            _print_file_preview(stub)
     if proposal.proposed_note is not None:
         console.print("[bold]Proposed note:[/bold]")
         _print_file_preview(proposal.proposed_note)
+    for warning in proposal.warnings:
+        console.print(f"[yellow]warning:[/yellow] {warning}")
+
+
+_ACTION_STYLES = {"create": "green", "update": "cyan", "skip": "dim"}
+
+
+def print_proposal_issues(issues) -> None:
+    console.print("[red bold]Proposal failed validation — it cannot be applied:[/red bold]")
+    for issue in issues:
+        console.print(f"  [red]✗[/red] {issue}")
+    console.print(
+        "[dim]Nothing was written. Fix the gap (or re-run enrichment) and try again.[/dim]"
+    )
 
 
 def print_enrichment_result(result: EnrichmentResult) -> None:
