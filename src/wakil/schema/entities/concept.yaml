@@ -1,0 +1,19 @@
+# Transcribed from docs/entity-metadata.md "concept" block. Hybrid: title
+# permitted alongside name (98% of real files). `curriculum` is the
+# learning-agenda topic-leaf extension — a leaf is "concept's schema plus one
+# field" pointing at its projects/personal/<curriculum> container, per the
+# same doc's recommendation 3 (no separate learning-agenda type).
+type: concept
+directory: concepts
+category: hybrid
+fields:
+  name: {required: true, kind: string}
+  title: {required: false, kind: string}
+  aliases: {required: false, kind: list}
+  domain: {required: false, kind: string}
+  curriculum: {required: false, kind: ref, ref_type: project}
+  maturity: {required: false, kind: enum, values: [seed, developing, stable]}
+  related: {required: false, kind: list}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}
+  updated: {required: true, kind: date}

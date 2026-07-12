@@ -1,0 +1,35 @@
+# Base source schema per the target vault's documented block (title, origin,
+# url, captured, tags — note `captured`, not wakil's old `retrieved`), plus
+# per-origin sub-schemas per docs/entity-metadata.md recommendation 4:
+# "extend the email-thread precedent with two or three more origin-keyed
+# sub-schemas, each declaring only the fields real files of that origin
+# actually use." Sub-schema fields below are derived from the census counts
+# (author 34, published 67, description 37, recording_url 28,
+# readwise_id/readwise_updated 26), using the canonical spelling from the
+# cheap-tier normalization (author not authors, url not link).
+type: source
+directory: sources
+category: document
+fields:
+  title: {required: true, kind: string}
+  origin: {required: true, kind: enum, values: [transcript, article, twitter, export, manual]}
+  url: {required: false, kind: string}
+  captured: {required: true, kind: date}
+  tags: {required: false, kind: list}
+  created: {required: false, kind: date}
+origins:
+  article:
+    author: {required: false, kind: string}
+    published: {required: false, kind: date}
+    description: {required: false, kind: string}
+  transcript:
+    recording_url: {required: false, kind: string}
+    company: {required: false, kind: ref, ref_type: company}
+    meeting_date: {required: false, kind: date}
+  twitter:
+    author: {required: false, kind: string}
+  export:
+    author: {required: false, kind: string}
+    published: {required: false, kind: date}
+    readwise_id: {required: false, kind: string}
+    readwise_updated: {required: false, kind: string}

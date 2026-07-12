@@ -1,0 +1,9 @@
+# Transcribed from docs/entity-metadata.md "index" block (NEW — MOC /
+# navigation pages, e.g. reflections/index.md). No canonical directory.
+type: index
+directory: null
+category: document
+fields:
+  title: {required: true, kind: string}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}

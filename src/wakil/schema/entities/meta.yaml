@@ -1,0 +1,10 @@
+# Transcribed from docs/entity-metadata.md "meta" block (NEW — collapses
+# `meta` and `documentation` into one value). Vault-infrastructure pages have
+# no single canonical directory.
+type: meta
+directory: null
+category: document
+fields:
+  title: {required: true, kind: string}
+  created: {required: true, kind: date}
+  updated: {required: false, kind: date}

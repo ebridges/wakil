@@ -1,0 +1,14 @@
+# Transcribed from docs/entity-metadata.md "idea" block (NEW — closes
+# entity-resolution.md finding #1's missing schema; promoted_to closes
+# finding #3's missing promotion path).
+type: idea
+directory: ideas
+category: hybrid
+fields:
+  name: {required: true, kind: string}
+  title: {required: false, kind: string}
+  status: {required: true, kind: enum, values: [draft, active, shelved, promoted]}
+  promoted_to: {required: false, kind: ref, ref_type: project}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}
+  updated: {required: true, kind: date}

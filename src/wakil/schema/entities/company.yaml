@@ -1,0 +1,17 @@
+# Transcribed from docs/entity-metadata.md "company" block (unchanged by the audit).
+type: company
+directory: companies
+category: identity
+fields:
+  name: {required: true, kind: string}
+  aliases: {required: false, kind: list}
+  category: {required: true, kind: enum, values: [employer, vendor, interview-target, prospect, partner, consulting-client]}
+  status: {required: false, kind: enum, values: [current, former, active, inactive]}
+  website: {required: false, kind: string}
+  industry: {required: false, kind: string}
+  stage: {required: false, kind: string}
+  interview-dates: {required: false, kind: list}
+  key-people: {required: false, kind: list}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}
+  updated: {required: true, kind: date}

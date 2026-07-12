@@ -57,6 +57,23 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 - [ ] `wakil dream --recent` report-only synthesis
 - [ ] Topic-based dream, `--write-report` mode
 
+## Ingestion/entity refactor (docs/ingestion-refactor-spec.md)
+
+- [x] Phase A: entity schema layer — `schema/entities/*.yaml` (13 types
+      transcribed from docs/entity-metadata.md, incl. per-origin source
+      sub-schemas), cached loader, `validate_frontmatter()` for new writes
+      only (identity/document/hybrid name-title rules, unknown type =
+      explicit error, extras tolerated)
+- [ ] Phase B: Alembic setup + `Memory.event_date`,
+      `Relationship.subject_note_id`/`object_note_id`
+- [ ] Phase D-cheap: `wakil schema migrate` (casing/naming normalization,
+      organization/ retyping, title-caser artifacts)
+- [ ] Phase C: enrichment DAG (skills/*/SKILL.md, Pydantic output contracts,
+      entity-resolution node, `validate_proposal()`)
+- [ ] Phase D-expensive: learning-agenda retyping + reflections move
+- Deferred per spec: `wakil entity compile`, memory-vocabulary
+  reconciliation, provider-native structured output, runtime plugin loading
+
 ## Cross-cutting
 
 - [ ] Read and prioritize `AGENTS.md`, `SCHEMA.md`, `RESOLVER.md` as workspace

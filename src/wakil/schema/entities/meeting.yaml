@@ -1,0 +1,20 @@
+# Transcribed from docs/entity-metadata.md "meeting" block. Document type:
+# title only, no name. `status: raw|synthesized` formalizes
+# entity-resolution.md finding #9 (already informal in 18 real files).
+type: meeting
+directory: meetings
+category: document
+fields:
+  title: {required: true, kind: string}
+  date: {required: true, kind: date}
+  source: {required: false, kind: enum, values: [transcript, notes, slack, manual]}
+  status: {required: false, kind: enum, values: [raw, synthesized]}
+  attendees: {required: false, kind: list}
+  company: {required: false, kind: ref, ref_type: company}
+  project: {required: false, kind: ref, ref_type: project}
+  decisions: {required: false, kind: list}
+  action-items: {required: false, kind: list}
+  transcript: {required: false, kind: string}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}
+  updated: {required: false, kind: date}

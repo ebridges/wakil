@@ -1,0 +1,17 @@
+# Transcribed from docs/entity-metadata.md "assessment" block — the cleanest
+# "update schema to match reality" case: company/workstream/status/end-date
+# are near-universal (93-96%) in real files and now documented.
+type: assessment
+directory: sensitive
+category: document
+fields:
+  subject: {required: true, kind: string}
+  period: {required: false, kind: string}
+  sensitive: {required: true, kind: bool}
+  company: {required: false, kind: ref, ref_type: company}
+  workstream: {required: false, kind: string}
+  status: {required: false, kind: string}
+  end-date: {required: false, kind: date}
+  tags: {required: false, kind: list}
+  created: {required: true, kind: date}
+  updated: {required: false, kind: date}
