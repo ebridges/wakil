@@ -64,7 +64,8 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
       sub-schemas), cached loader, `validate_frontmatter()` for new writes
       only (identity/document/hybrid name-title rules, unknown type =
       explicit error, extras tolerated)
-- [ ] Phase B: Alembic setup + `Memory.event_date`,
+- [x] Phase B: Alembic setup (baseline anchor + upgrade-on-open for legacy
+      DBs) + `Memory.event_date`,
       `Relationship.subject_note_id`/`object_note_id`
 - [ ] Phase D-cheap: `wakil schema migrate` (casing/naming normalization,
       organization/ retyping, title-caser artifacts)
@@ -79,7 +80,8 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 - [ ] Read and prioritize `AGENTS.md`, `SCHEMA.md`, `RESOLVER.md` as workspace
       context in queries and note proposals (detection is done)
 - [ ] Skills loader for Claude-format `SKILL.md` files
-- [ ] Alembic migrations once the schema starts evolving (create_all is enough for now)
+- [x] Alembic migrations once the schema starts evolving (landed with the
+      ingestion/entity refactor Phase B)
 - [ ] Docs: QMD integration, memory lifecycle, git workflow
 - [ ] Wikilink/tag extraction during indexing (feeds relationship discovery)
 
