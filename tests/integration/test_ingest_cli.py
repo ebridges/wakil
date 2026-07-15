@@ -7,7 +7,7 @@ from wakil.cli.main import app
 
 runner = CliRunner()
 
-MODEL_JSON = json.dumps(
+EXTRACTION_JSON = json.dumps(
     {
         "title": "Meeting Notes",
         "summary": "A short meeting about routing.",
@@ -16,17 +16,44 @@ MODEL_JSON = json.dumps(
         "relationships": [],
         "proposed_note": {
             "path": "meetings/2026/2026-07-09-routing.md",
-            "markdown": "---\ntype: meeting\n---\n\n# Routing\n",
+            "markdown": (
+                "---\ntype: meeting\ntitle: Routing\ndate: 2026-07-09\n"
+                "created: 2026-07-09\n---\n\n# Routing\n"
+            ),
         },
     }
 )
 
+RESOLUTION_JSON = json.dumps(
+    {
+        "entities": [
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.9,
+                "proposed_frontmatter": {"status": "active"},
+            }
+        ]
+    }
+)
+
+BAD_RESOLUTION_JSON = json.dumps(
+    {"entities": [{"name": "The Guild", "entity_type": "guild", "action": "create"}]}
+)
+
 
 class FakeClient:
+    """Extraction then resolution, one scripted payload per call."""
+
     model = "fake-model"
 
+    def __init__(self, payloads=(EXTRACTION_JSON, RESOLUTION_JSON)):
+        self.queue = list(payloads)
+
     def complete(self, system, prompt, max_tokens=8192):
-        return MODEL_JSON
+        assert self.queue, "FakeClient ran out of scripted responses"
+        return self.queue.pop(0)
 
 
 def _init(kb_path: Path) -> Path:
@@ -89,13 +116,33 @@ def test_enrich_flow(kb_path: Path, monkeypatch):
     result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes"])
     assert result.exit_code == 0, result.output
     assert "Enrichment preview" in result.output
+    assert "Entity resolution" in result.output  # decisions shown before confirm
+    assert "Dana Prieto" in result.output
     assert "candidate memories" in result.output
     assert (kb_path / "meetings" / "2026" / "2026-07-09-routing.md").exists()
+    assert (kb_path / "people" / "dana-prieto.md").exists()  # stub created
 
     # Second run refuses without --force.
     result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes"])
     assert result.exit_code == 1
     assert "already enriched" in result.output
+
+
+def test_enrich_blocked_on_schema_gap(kb_path: Path, monkeypatch):
+    # An entity type with no schema is a hard stop: preview shows the gap,
+    # nothing is written, even with --yes.
+    monkeypatch.setattr(
+        "wakil.llm.client.resolve_client",
+        lambda: FakeClient((EXTRACTION_JSON, BAD_RESOLUTION_JSON)),
+    )
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes"])
+    assert result.exit_code == 1
+    assert "failed validation" in result.output
+    assert "guild" in result.output
+    assert not (kb_path / "meetings" / "2026" / "2026-07-09-routing.md").exists()
 
 
 def test_enrich_requires_provider(kb_path: Path, monkeypatch):

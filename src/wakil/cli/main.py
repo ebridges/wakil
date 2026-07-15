@@ -16,6 +16,7 @@ from wakil.ui.console import (
     print_enrichment_proposal,
     print_enrichment_result,
     print_index_result,
+    print_proposal_issues,
     print_query_result,
     print_search_hits,
     print_status,
@@ -309,7 +310,12 @@ def enrich(
 ) -> None:
     """Step 2: analyze a captured source and link it into the knowledge base."""
     from wakil.app.git_service import GitServiceError, start_ingest_branch
-    from wakil.app.ingest_service import IngestError, apply_enrichment, prepare_enrichment
+    from wakil.app.ingest_service import (
+        IngestError,
+        apply_enrichment,
+        prepare_enrichment,
+        validate_proposal,
+    )
     from wakil.llm.client import ModelError, resolve_client
 
     root = _resolve_workspace(ctx)
@@ -331,7 +337,11 @@ def enrich(
         raise typer.Exit(code=1) from exc
 
     print_enrichment_proposal(proposal)
-    if not yes and not typer.confirm("Apply this enrichment (write note, record memories)?"):
+    issues = validate_proposal(proposal)
+    if issues:
+        print_proposal_issues(issues)
+        raise typer.Exit(code=1)
+    if not yes and not typer.confirm("Apply this enrichment (write files, record memories)?"):
         console.print("Aborted; nothing was written.")
         raise typer.Exit(code=0)
 
