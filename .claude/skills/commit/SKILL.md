@@ -9,6 +9,11 @@ Group the working tree's pending changes into one or more **logical change sets*
 create a commit for each, with a Conventional Commits message prefixed by a relevant
 emoji.
 
+Having a coherent history of logical changes implemented in sequence is a core value
+of this system. As a result, you must analyze the working tree's pending changes to
+group them appropriately. **Failing to do this analysis and decomposition of the changes
+is a violation of a core value of the system**.
+
 ## When to use
 
 The user asks to "commit", "commit these changes", "split into logical commits",
@@ -18,7 +23,7 @@ The user asks to "commit", "commit these changes", "split into logical commits",
 
 1. **Survey the changes.** Run these in parallel:
    - `git status --porcelain=v1` — see staged, unstaged, and untracked files.
-   - `git diff` and `git diff --staged` — understand *what* changed, not just which files.
+   - `git diff` and `git diff --staged` — understand _what_ changed, not just which files.
    - `git log --oneline -10` — match the repo's existing message style/scopes.
    - `git branch --show-current` — if on the default branch (`main`/`master`) and the
      user has not said to commit there, branch first or ask.
@@ -62,26 +67,26 @@ The user asks to "commit", "commit these changes", "split into logical commits",
   subject line.
 - **Breaking changes**: append `!` after the type/scope (`feat(api)!:`) and/or a
   `BREAKING CHANGE:` footer.
-- **Body** (optional): explain *why*, wrapped at ~72 cols. Add it when the change isn't
+- **Body** (optional): explain _why_, wrapped at ~72 cols. Add it when the change isn't
   self-explanatory.
 - Respect any repo conventions found in `git log` (e.g. an issue/ticket ID footer this
   repo uses — match it).
 
 ### Emoji per type (gitmoji-aligned)
 
-| Type | Emoji | |
-| --- | --- | --- |
-| `feat` | ✨ | new feature |
-| `fix` | 🐛 | bug fix |
-| `docs` | 📝 | documentation |
-| `style` | 🎨 | formatting / code style |
-| `refactor` | ♻️ | refactor, no behavior change |
-| `perf` | ⚡️ | performance |
-| `test` | ✅ | tests |
-| `build` | 📦 | build system / dependencies |
-| `ci` | 👷 | CI config |
-| `chore` | 🔧 | tooling / config / misc |
-| `revert` | ⏪️ | revert a change |
+| Type       | Emoji |                              |
+| ---------- | ----- | ---------------------------- |
+| `feat`     | ✨    | new feature                  |
+| `fix`      | 🐛    | bug fix                      |
+| `docs`     | 📝    | documentation                |
+| `style`    | 🎨    | formatting / code style      |
+| `refactor` | ♻️    | refactor, no behavior change |
+| `perf`     | ⚡️    | performance                  |
+| `test`     | ✅    | tests                        |
+| `build`    | 📦    | build system / dependencies  |
+| `ci`       | 👷    | CI config                    |
+| `chore`    | 🔧    | tooling / config / misc      |
+| `revert`   | ⏪️    | revert a change              |
 
 Other useful ones: 🚀 deploy, 🔒️ security fix, ➕ add dependency, ➖ remove dependency,
 🚚 move/rename files, 🔥 remove code/files, 🚧 work in progress.
