@@ -41,26 +41,43 @@ An unrecognized kind is a hard error there (`GitServiceError: unknown commit
 kind: ...`), not a warning — treat the list above as closed, don't invent a new
 kind for a commit this skill produces.
 
+When this skill constructs a manual `git commit` message by hand (as opposed
+to a wakil CLI `--commit` flag doing it), prefix the subject line with the
+kind's emoji: `<emoji> wakil <kind>: <description>`. This is a presentation
+layer this skill adds on top of `commit_message()`'s output — the function
+itself still returns the bare `wakil <kind>: <description>` string, so
+anything parsing commit subjects programmatically is unaffected.
+
+| Kind      | Emoji | Use for                                                    |
+| --------- | ----- | ----------------------------------------------------------- |
+| `source`  | 📥    | raw capture landing in the KB, before processing             |
+| `ingest`  | 🧠    | enrichment output — raw capture turned into structured knowledge |
+| `note`    | 📝    | manual note edit or note-revision result                     |
+| `link`    | 🔗    | cross-reference / back-link addition or repair                |
+| `chore`   | 🔧    | tooling, config, schema fixes                                 |
+| `memory`  | 💾    | memory-lifecycle change (candidate → active, retirement)      |
+| `dream`   | 💭    | reserved: periodic re-synthesis/consolidation pass output     |
+
 What each kind is for, going by how wakil's own code already uses them:
 
-- **`source`** — a raw capture added under `sources/`, before enrichment.
+- **📥 `source`** — a raw capture added under `sources/`, before enrichment.
   `commit_ingest`'s docstring: *"'source' for raw captures, 'ingest' for
   enrichment output."*
-- **`ingest`** — enrichment output: the note(s)/entities a `wakil enrich` run
+- **🧠 `ingest`** — enrichment output: the note(s)/entities a `wakil enrich` run
   produced from a source. Under this skill, use it for a manually-applied
   enrichment result you're committing by hand.
-- **`note`** — a manual edit to an existing note, or a `note-revision` result:
+- **📝 `note`** — a manual edit to an existing note, or a `note-revision` result:
   a State (Compiled Truth) rewrite, a Timeline append, a prose fix. This is
   the kind you'll reach for most often under this skill.
-- **`link`** — adding or repairing cross-references/back-links without
+- **🔗 `link`** — adding or repairing cross-references/back-links without
   otherwise changing a note's content.
-- **`chore`** — tooling, config, schema fixes. This is the kind
+- **🔧 `chore`** — tooling, config, schema fixes. This is the kind
   `schema_migrate_service.py` itself uses (see `note-conformance`'s
   "Mechanical fixes" section) — reuse it for the same class of change when
   committing a migrate run by hand.
-- **`memory`** — a memory-lifecycle change (candidate → active promotion,
+- **💾 `memory`** — a memory-lifecycle change (candidate → active promotion,
   a memory record's retirement) as described in `docs/memory-model.md`.
-- **`dream`** — reserved for output of a periodic re-synthesis/consolidation
+- **💭 `dream`** — reserved for output of a periodic re-synthesis/consolidation
   pass once `wakil dream` ships (tracked in `TODO.md`'s `wakil dream`
   entries). Until then, no wakil command produces this kind — use `note` or
   `ingest` for anything currently generated.
@@ -68,8 +85,9 @@ What each kind is for, going by how wakil's own code already uses them:
 There is no general-purpose `wakil commit` CLI command — `commit_message()` is
 a library function invoked by `ingest`/`enrich`/`schema migrate`'s own
 `--commit` flag and by this skill's manual `git commit` calls alike. Match its
-output exactly (`wakil <kind>: <description>`) rather than inventing a
-different shape for a hand-run commit.
+output exactly (`wakil <kind>: <description>`) as the base subject, adding
+only the emoji prefix described above, rather than inventing a different
+shape for a hand-run commit.
 
 ## Procedure
 
@@ -110,13 +128,14 @@ different shape for a hand-run commit.
       lower bar than the code it's filling a gap around.
 
 - [ ] Step 6: **Write the message to describe the knowledge change, not the
-      file list.** The subject line is `wakil <kind>: <description>` in
-      imperative, lowercase-first, no trailing period. The description names
-      what changed about the knowledge base ("resynthesize Acme Corp state
-      after Q3 update-call transcript", not "update acme-corp.md"). Add a
-      body when the change isn't self-explanatory from the subject alone —
-      what triggered it, what source it came from, what was added versus
-      revised.
+      file list.** The subject line is `<emoji> wakil <kind>: <description>`
+      in imperative, lowercase-first, no trailing period — the emoji is
+      whichever one the commit convention table maps to `kind`, not a
+      judgment call. The description names what changed about the knowledge
+      base ("resynthesize Acme Corp state after Q3 update-call transcript",
+      not "update acme-corp.md"). Add a body when the change isn't
+      self-explanatory from the subject alone — what triggered it, what
+      source it came from, what was added versus revised.
 
 - [ ] Step 7: **Commit each group, then re-verify.** After each commit, `git
       status --porcelain` again before staging the next group — confirm only
@@ -128,7 +147,7 @@ different shape for a hand-run commit.
 ## Examples
 
 ```
-wakil note: resynthesize Acme Corp state from Q3 update call
+📝 wakil note: resynthesize Acme Corp state from Q3 update call
 
 State section re-derived from the existing page plus the 2026-07-14
 transcript; prior distilled history and Timeline entries preserved,
@@ -136,18 +155,18 @@ not replaced.
 ```
 
 ```
-wakil link: back-link Jane Doe from the Acme Corp Q3 meeting note
+🔗 wakil link: back-link Jane Doe from the Acme Corp Q3 meeting note
 ```
 
 ```
-wakil chore: apply schema migrate field renames for organization/ notes
+🔧 wakil chore: apply schema migrate field renames for organization/ notes
 
 end_date -> end-date, start_date -> start-date across 6 files, per
 `wakil schema migrate --dry-run --type organization`.
 ```
 
 ```
-wakil source: add raw transcript for 2026-07-14 Acme Corp update call
+📥 wakil source: add raw transcript for 2026-07-14 Acme Corp update call
 ```
 
 ## Related skills

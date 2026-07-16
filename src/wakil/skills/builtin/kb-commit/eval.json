@@ -14,7 +14,7 @@
         "Names `wakil git summary` as the first step to survey branch and pending-change state before doing anything else.",
         "Inspects the actual diff (e.g. `git diff people/jane-doe.md`) rather than stopping at `git status --porcelain` or `git diff --stat` to decide what happened.",
         "Proposes commit kind `note` for this manual content edit, a valid member of COMMIT_PREFIXES, not `ingest` or an invented kind.",
-        "Uses the exact message form `wakil note: <description>` with a description naming the knowledge change (e.g. resynthesizing Jane Doe's state from the update call), not a filename-referencing message like 'update jane-doe.md'.",
+        "Uses the message form `📝 wakil note: <description>` — the note kind's required emoji prefix followed by wakil's `wakil note: <description>` form — with a description naming the knowledge change (e.g. resynthesizing Jane Doe's state from the update call), not a filename-referencing message like 'update jane-doe.md'.",
         "States the proposed change set (message plus files) and asks for explicit confirmation before running `git commit`, rather than claiming the commit is already made.",
         "Does NOT stage unrelated files or run a blanket `git add -A` for this single-file change."
       ],
