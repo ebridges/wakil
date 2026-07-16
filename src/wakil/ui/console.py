@@ -17,6 +17,7 @@ from wakil.app.ingest_service import (
 from wakil.app.query_service import QueryResult
 from wakil.app.search_service import SearchHit
 from wakil.app.workspace_service import IndexResult, WorkspaceStatus
+from wakil.skills.lint import LintFinding
 from wakil.skills.models import ResolvedSkill, RootIssue, SkillRoot
 
 console = Console()
@@ -402,3 +403,18 @@ def print_skill_validation(
         console.print("[green]All skills valid.[/green]")
     else:
         console.print(f"[red]{total_issues} issue(s) found.[/red]")
+
+
+def print_skill_lint(findings: list[LintFinding]) -> None:
+    """Content-quality lint findings, most-affected skills grouped together."""
+    if not findings:
+        console.print("[green]No lint findings.[/green]")
+        return
+    table = Table(title="Skill lint")
+    table.add_column("Skill", style="bold")
+    table.add_column("Check", style="yellow")
+    table.add_column("Message", overflow="fold")
+    for finding in findings:
+        table.add_row(finding.skill, finding.check, finding.message)
+    console.print(table)
+    console.print(f"[red]{len(findings)} finding(s).[/red]")

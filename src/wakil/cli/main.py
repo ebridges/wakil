@@ -20,6 +20,7 @@ from wakil.ui.console import (
     print_query_result,
     print_root_issues,
     print_search_hits,
+    print_skill_lint,
     print_skill_list,
     print_skill_validation,
     print_skill_which,
@@ -768,6 +769,44 @@ def skills_validate(
 
     print_skill_validation(root_resolution.issues, results)
     if root_resolution.issues or any(not ok for _, ok, _ in results):
+        raise typer.Exit(code=1)
+
+
+@skills_app.command("lint")
+def skills_lint(
+    ctx: typer.Context,
+    name: Annotated[
+        str | None,
+        typer.Argument(help="Lint only this skill (defaults to every discovered skill)."),
+    ] = None,
+) -> None:
+    """Run deterministic content-quality checks against the skill catalog.
+
+    Extends `skills validate`'s structural checks (frontmatter parses, name
+    matches directory, skill_api supported) with content-quality checks: body
+    length, description shape, time-sensitive phrasing, dangling
+    cross-references, and orphaned support files. No model calls, no network.
+    """
+    from wakil.skills.errors import SkillResolutionError
+    from wakil.skills.lint import LintFinding, builtin_catalog_names, lint_skill
+    from wakil.skills.resolver import default_context, discover_skill_names, resolve_skill
+
+    root = _resolve_workspace(ctx)
+    context = default_context(root)
+    catalog_names = builtin_catalog_names(context.builtin_skill_root)
+
+    names = [name] if name else discover_skill_names(context)
+    findings: list[LintFinding] = []
+    for candidate in names:
+        try:
+            resolved = resolve_skill(candidate, context)
+        except SkillResolutionError as exc:
+            findings.append(LintFinding(candidate, "resolution", f"{exc.reason}: {exc}"))
+            continue
+        findings.extend(lint_skill(resolved, catalog_names))
+
+    print_skill_lint(findings)
+    if findings:
         raise typer.Exit(code=1)
 
 
