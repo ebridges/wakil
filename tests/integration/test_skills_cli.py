@@ -39,12 +39,16 @@ def test_skills_list_reports_kb_local_source(kb_path: Path):
     assert "kb-local" in result.output
 
 
-def test_skills_list_with_no_skills(kb_path: Path):
+def test_skills_list_with_no_overrides_shows_builtin_catalog(kb_path: Path):
+    """With no kb-local or user-level skills, the shipped builtin catalog still lists."""
     runner.invoke(app, ["init", str(kb_path)])
 
     result = runner.invoke(app, ["-w", str(kb_path), "skills", "list"])
     assert result.exit_code == 0
-    assert "No skills found" in result.output
+    assert "No skills found" not in result.output
+    assert "kb-commit" in result.output
+    assert "note-conformance" in result.output
+    assert result.output.count("builtin") >= 12
 
 
 def test_skills_which_reports_selected_path(kb_path: Path):
