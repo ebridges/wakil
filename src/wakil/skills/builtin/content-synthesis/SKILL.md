@@ -56,6 +56,14 @@ This applies whether the "sentence" is a line from an article, a passage
 from a book chapter, or an idea recorded across several of the user's own
 notes — preserve the original phrasing, don't smooth it into generic prose.
 
+**Example.** Source: "Revenue grew 340% in Q3 while headcount stayed flat
+at 12 people."
+
+- Bad (paraphrase): The company saw strong revenue growth in Q3 without
+  adding staff.
+- Good (verbatim quote): Per the source, "Revenue grew 340% in Q3 while
+  headcount stayed flat at 12 people."
+
 ## "Why it matters" ties to specific knowledge, never a generic statement
 
 A synthesized note that says content is "relevant to the user's interests"
@@ -86,31 +94,33 @@ there — and left alone that produces duplication and no synthesis at all,
 just a pile of stubs. Run this as a deliberate pass, not on every new
 mention:
 
-1. **Dedup.** Before adding a new concept note, check whether an existing
-   one already covers the same idea — near-identical titles, overlapping
-   opening paragraphs, or the same idea under different phrasing. Merge
-   into the existing note (per `note-revision`'s State-vs-Timeline
-   discipline) rather than creating a near-duplicate.
-2. **Tier.** Not every concept note deserves the same depth of synthesis.
-   Use rough heuristics to judge how developed an idea is: how many
-   distinct sources reference it, how long a span it's been mentioned over,
-   and how many separate contexts (not just repeats of the same
-   conversation) it's shown up in. A concept mentioned once, in passing,
-   stays a stub — a single quote and its source is enough. A concept that
-   keeps recurring across sources and months is worth the next step.
-   Where the workspace's concept schema defines a maturity field (wakil's
-   own `concept` entity type has one: `maturity: seed | developing |
-   stable`), let that field carry the tier rather than inventing a parallel
-   one — a concept graduates from `seed` toward `stable` as it accumulates
-   the evidence above.
-3. **Synthesize.** For concepts that clear the bar, write the synthesis:
-   how the idea has developed or sharpened across its sources, its most
-   precise articulation (quoted verbatim), and what it means in context —
-   not just a restatement that it was mentioned several times.
-4. **Cluster.** Once several concepts are synthesized, look for the
-   relationships between them — which ideas are siblings, which one
-   developed out of another — and connect them via the note's `related`
-   field or an explicit link, rather than leaving a flat, unconnected list.
+- [ ] Step 1: **Dedup.** Before adding a new concept note, check whether an
+      existing one already covers the same idea — near-identical titles,
+      overlapping opening paragraphs, or the same idea under different
+      phrasing. Merge into the existing note (per `note-revision`'s
+      State-vs-Timeline discipline) rather than creating a near-duplicate.
+- [ ] Step 2: **Tier.** Not every concept note deserves the same depth of
+      synthesis. Use rough heuristics to judge how developed an idea is: how
+      many distinct sources reference it, how long a span it's been
+      mentioned over, and how many separate contexts (not just repeats of
+      the same conversation) it's shown up in. A concept mentioned once, in
+      passing, stays a stub — a single quote and its source is enough. A
+      concept that keeps recurring across sources and months is worth the
+      next step. Where the workspace's concept schema defines a maturity
+      field (wakil's own `concept` entity type has one: `maturity: seed |
+      developing | stable`), let that field carry the tier rather than
+      inventing a parallel one — a concept graduates from `seed` toward
+      `stable` as it accumulates the evidence above.
+- [ ] Step 3: **Synthesize.** For concepts that clear the bar, write the
+      synthesis: how the idea has developed or sharpened across its
+      sources, its most precise articulation (quoted verbatim), and what it
+      means in context — not just a restatement that it was mentioned
+      several times.
+- [ ] Step 4: **Cluster.** Once several concepts are synthesized, look for
+      the relationships between them — which ideas are siblings, which one
+      developed out of another — and connect them via the note's `related`
+      field or an explicit link, rather than leaving a flat, unconnected
+      list.
 
 Run this pipeline on a cadence — after a batch of new material lands, or
 periodically — not as a reflex triggered by every single new mention; the
@@ -122,23 +132,23 @@ pass can't see.
 A book, a lengthy report, or any source too long to read start-to-finish
 before synthesizing needs triage before depth:
 
-1. **Triage before deep-reading.** Skim each section or chapter's opening
-   against the task at hand — the question being answered, the note being
-   written, the problem the synthesis needs to serve — and rate its
-   relevance (high/medium/low) before committing to a full read. Read the
-   high-relevance sections in full; skim or skip the rest. Reading
-   everything at the same depth wastes the budget that should go toward the
-   parts that actually matter.
-2. **Quote over paraphrase, especially for the sections that mattered
-   enough to read in full.** The same discipline as above applies at
-   greater scale here — a long document's most load-bearing sentences are
-   easy to lose in a paraphrase-heavy summary; preserve the ones that would
-   change what the reader believes or does.
-3. **Break recommendations into short/medium/long-term when the synthesis
-   is meant to drive action**, rather than a single flat list. A synthesis
-   that mixes "do this today" with "worth revisiting in a year" without
-   distinguishing them is harder to act on than one that separates them
-   explicitly.
+- [ ] Step 1: **Triage before deep-reading.** Skim each section or
+      chapter's opening against the task at hand — the question being
+      answered, the note being written, the problem the synthesis needs to
+      serve — and rate its relevance (high/medium/low) before committing to
+      a full read. Read the high-relevance sections in full; skim or skip
+      the rest. Reading everything at the same depth wastes the budget that
+      should go toward the parts that actually matter.
+- [ ] Step 2: **Quote over paraphrase, especially for the sections that
+      mattered enough to read in full.** The same discipline as above
+      applies at greater scale here — a long document's most load-bearing
+      sentences are easy to lose in a paraphrase-heavy summary; preserve
+      the ones that would change what the reader believes or does.
+- [ ] Step 3: **Break recommendations into short/medium/long-term when the
+      synthesis is meant to drive action**, rather than a single flat list.
+      A synthesis that mixes "do this today" with "worth revisiting in a
+      year" without distinguishing them is harder to act on than one that
+      separates them explicitly.
 
 ## Extraction integrity
 

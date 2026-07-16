@@ -131,18 +131,24 @@ hand: sample, inspect, then proceed.
 
 ## Handing off
 
-Once material is normalized:
+Once material is normalized, hand off in order:
 
-- Run `wakil ingest transcript|text|article` with the `--context` string
-  you built. That capture step is deterministic — no model runs, nothing is
-  interpreted — so a thin context string here is a problem you can't fix
-  later by hoping the extraction step compensates.
-- `wakil enrich <source-id>` runs the extraction and entity-resolution DAG
-  automatically; you do not need to (and should not) pre-decide what the
-  material means or which entities it touches.
-- If you're deciding whether normalization was even the right call, or
-  orchestrating the ingest/enrich sequence itself (branches, commits, PRs),
-  that's `ingest-source`'s territory.
-- If the resulting note needs a home beyond what `wakil enrich` proposes,
-  or needs merging into a note that already exists, that's `note-routing`
-  and `note-revision`, respectively — not this skill.
+- [ ] Step 1: Normalize the material into one of the three CLI-native
+      shapes (`transcript`/`text`/`article`) with a rich `--context` string,
+      as described above.
+- [ ] Step 2: Run `wakil ingest transcript|text|article` with the
+      `--context` string you built. That capture step is deterministic — no
+      model runs, nothing is interpreted — so a thin context string here is
+      a problem you can't fix later by hoping the extraction step
+      compensates.
+- [ ] Step 3: Let `wakil enrich <source-id>` run the extraction and
+      entity-resolution DAG automatically; you do not need to (and should
+      not) pre-decide what the material means or which entities it
+      touches.
+- [ ] Step 4: Hand off further judgment as needed. If you're deciding
+      whether normalization was even the right call, or orchestrating the
+      ingest/enrich sequence itself (branches, commits, PRs), that's
+      `ingest-source`'s territory. If the resulting note needs a home
+      beyond what `wakil enrich` proposes, or needs merging into a note
+      that already exists, that's `note-routing` and `note-revision`,
+      respectively — not this skill.

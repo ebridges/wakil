@@ -27,26 +27,30 @@ mechanical part, and reserve this skill's judgment for what it can't cover.
 
 ## Procedure
 
-1. **Run the mechanical pass first.** For the note's entity type, run
-   `wakil schema migrate --dry-run --type <type>` and read the diff. Apply it
-   (`--yes` or per-file confirm) before doing anything by hand — see
-   "Mechanical fixes" below for exactly what this does and doesn't cover.
-2. **Check the category rule.** Confirm `name:` vs `title:` matches the
-   entity's schema category — see "Category rule" below. This is a hard
-   schema error, not a style preference.
-3. **Check the three-part slug.** Filename, H1, and every wikilink pointing
-   at this note must agree — see "Slug consistency" below.
-4. **Check links.** Internal cross-references are `[[path]]` wikilinks using
-   the note's full workspace-relative path; external links are copied
-   verbatim from their source, never reconstructed. See "Links" below.
-5. **Check prose against the no-slop bar.** No filler, no hedged citations,
-   no LLM preamble, no placeholder dates, exact phrasing preserved where the
-   phrasing is the insight, titles under 60 characters and specific. See
-   "No-slop output bar" below.
-6. **Report, don't silently resolve, what you can't fix.** A fact with no
-   traceable source, an entity type unknown to the schema, an ambiguous
-   frontmatter conflict — flag these explicitly rather than guessing or
-   deleting. See "Deterministic links, uncitable facts" below.
+- [ ] Step 1: **Run the mechanical pass first.** For the note's entity type,
+      run `wakil schema migrate --dry-run --type <type>` and read the diff.
+      Apply it (`--yes` or per-file confirm) before doing anything by hand —
+      see "Mechanical fixes" below for exactly what this does and doesn't
+      cover.
+- [ ] Step 2: **Check the category rule.** Confirm `name:` vs `title:`
+      matches the entity's schema category — see "Category rule" below. This
+      is a hard schema error, not a style preference.
+- [ ] Step 3: **Check the three-part slug.** Filename, H1, and every
+      wikilink pointing at this note must agree — see "Slug consistency"
+      below.
+- [ ] Step 4: **Check links.** Internal cross-references are `[[path]]`
+      wikilinks using the note's full workspace-relative path; external
+      links are copied verbatim from their source, never reconstructed. See
+      "Links" below.
+- [ ] Step 5: **Check prose against the no-slop bar.** No filler, no hedged
+      citations, no LLM preamble, no placeholder dates, exact phrasing
+      preserved where the phrasing is the insight, titles under 60
+      characters and specific. See "No-slop output bar" below.
+- [ ] Step 6: **Report, don't silently resolve, what you can't fix.** A fact
+      with no traceable source, an entity type unknown to the schema, an
+      ambiguous frontmatter conflict — flag these explicitly rather than
+      guessing or deleting. See "Deterministic links, uncitable facts"
+      below.
 
 ## Mechanical fixes: `wakil schema migrate`
 

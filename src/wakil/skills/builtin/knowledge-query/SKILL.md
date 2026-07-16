@@ -85,8 +85,8 @@ already loads them into context for you.
 ## Source precedence
 
 When multiple sources speak to the same fact, prefer them in this order,
-highest to lowest: (1) the user's direct statements, (2) compiled truth /
-State (the existing synthesized understanding), (3) Timeline entries (raw
+highest to lowest: (1) the user's direct statements, (2) State (Compiled
+Truth) (the existing synthesized understanding), (3) Timeline entries (raw
 evidence), (4) external sources (API enrichment, web search). When sources
 conflict, note the contradiction with both citations — never silently pick
 one.

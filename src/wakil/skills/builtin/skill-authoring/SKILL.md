@@ -35,10 +35,10 @@ kb-local skill into the shipped catalog.
    frontmatter contract, one clear scope, no dangling cross-references — see
    "Structural checklist."
 4. **If overriding a built-in** for one workspace or one user, place the
-   override correctly and never edit the shipped copy — see "Overriding a
-   built-in."
+   override correctly and never edit the shipped copy — see
+   `references/overriding-a-builtin.md`.
 5. **If promoting or porting a skill** across the built-in/kb-local boundary,
-   run the genericization pass — see "Promoting or porting a skill."
+   run the genericization pass — see `references/promoting-or-porting.md`.
 6. **If something in an existing skill is wrong**, follow the revision
    ladder rather than improvising a one-off workaround — see "When something's
    wrong."
@@ -76,8 +76,11 @@ extending means one of:
 - a new subsection in the existing skill's `SKILL.md` body;
 - a new file under that skill's `references/` (session-specific detail,
   provider quirks, worked examples) or `templates/` (starter content meant to
-  be copied) directory — only `source-ingestion` currently ships a
-  `references/` directory; add one to any skill that needs it;
+  be copied) directory — see any skill that already ships one for the
+  pattern; add a `references/` or `templates/` directory to any skill that
+  needs one. This skill's own `templates/SKILL.md` is exactly that: the
+  blank frontmatter-plus-headings starting point a new skill file is copied
+  from;
 - a `scripts/` file, if the skill needs one — used sparingly, since wakil's
   skill resolver never executes a skill's supporting files itself (discovery
   and validation don't run skill-provided code); anything under `scripts/` is
@@ -138,61 +141,16 @@ haven't personally confirmed.
 
 ## Overriding a built-in
 
-Per the resolution spec, wakil searches skill roots in a fixed order and the
-first match wins:
-
-```text
-1. WAKIL_SKILL_PATH roots
-2. <kb-root>/skills
-3. <user-config>/wakil/skills   (XDG_CONFIG_HOME-style)
-4. built-in skills
-```
-
-To override `note-routing` for one knowledge base only, copy
-`src/wakil/skills/builtin/note-routing/` in its entirety to
-`<kb-root>/skills/note-routing/` and edit the copy — never edit the shipped
-built-in directly. Whole-directory selection means that once your kb-local
-copy wins resolution, wakil never reaches back into the built-in for a
-missing supporting file: bring every `references/`, `templates/`, or
-`scripts/` file the skill actually uses along with it, or it silently has
-less than the original. The same mechanics apply one root lower, for a
-user-level override at `<user-config>/wakil/skills/<name>/`.
-
-Before relying on an override:
-
-- `wakil skills which <name> --verbose` — shows which root actually won, plus
-  any shadowed lower-precedence matches, so you can confirm your copy is the
-  one being used rather than silently shadowed by an even-higher-precedence
-  root.
-- `wakil skills validate <name>` — checks the override's frontmatter and
-  directory are well-formed. An invalid override blocks fallback to the
-  built-in rather than silently using it instead — a broken override fails
-  loudly, on purpose, so fix it rather than assume the built-in is quietly
-  covering for it.
-- `wakil skills list` — the same full-catalog scan used for the MECE step
-  above; also the fastest way to confirm your override registered at all.
+Placing a workspace- or user-level override correctly, without ever editing
+the shipped built-in copy, is a whole-directory operation with its own
+precedence rules and pre-flight checks — see
+`references/overriding-a-builtin.md` for the full mechanics.
 
 ## Promoting or porting a skill
 
 Lifting a kb-local or user-level skill into the shipped built-in catalog (or
 narrowing a built-in into a kb-local override) is an editorial pass, not a
-plain copy — wakil has no automated harvesting command for this; the
-checklist below is the manual discipline that stands in for one:
-
-1. **Strip specific names into placeholders.** Real people, companies, deals,
-   or workspace-specific paths in prose or examples become generic
-   placeholders — a built-in skill ships to every workspace, while a kb-local
-   example is often written against one real knowledge base.
-2. **Scrub tool- and workspace-specific references.** Drop mentions of
-   anything that isn't part of wakil itself or the open workspace's own
-   `RESOLVER.md`/`SCHEMA.md` — a skill written around one person's particular
-   setup, or a one-off convention, doesn't belong in the shared catalog.
-3. **Document deliberate scope-narrowing.** If the promoted (or narrowed)
-   version intentionally does less than the original — drops a
-   workspace-specific step, assumes a narrower input shape — say so
-   explicitly in the skill's own body, not only in a commit message. A future
-   reader of the skill file should never have to guess why a capability is
-   missing.
+plain copy — see `references/promoting-or-porting.md` for the checklist.
 
 ## When something's wrong
 

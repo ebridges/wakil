@@ -29,29 +29,30 @@ is the single worst failure mode this skill exists to prevent.
 
 ## Procedure
 
-1. **Read the existing note in full before writing anything.** Load its
-   current State, Timeline, and frontmatter. You cannot classify a change
-   as additive, contradicting, or duplicate against content you haven't
-   read.
-2. **Re-read the raw source for the new facts, not your memory of it.**
-   See "Extraction integrity" below — never transcribe a figure, date, or
-   quote from earlier in a conversation when the saved raw source is
-   available to re-read at the moment of writing.
-3. **Classify the new material** against what's already on the page:
-   additive, contradicting/superseding, or a duplicate. See "The three-tier
-   dedup heuristic" below.
-4. **Apply the region-specific update discipline**: re-synthesize State,
-   append to Timeline. Never regenerate the whole page from only the new
-   source. See "State vs. Timeline" below.
-5. **Diff your draft against the current page before saving.** If the new
-   version is shorter, or drops a fact/frontmatter key that was there
-   before, stop — you are very likely clobbering, not updating. See "The
-   clobbering bug" below.
-6. **Preview, don't auto-apply.** Surface the diff for confirmation before
-   writing, the same as every other wakil write path. See "Preview before
-   writing" below.
-7. **Update provenance**, including the `updated:` frontmatter field, and
-   hand off to `note-conformance` for a shape check before `kb-commit`.
+- [ ] Step 1: **Read the existing note in full before writing anything.**
+      Load its current State, Timeline, and frontmatter. You cannot
+      classify a change as additive, contradicting, or duplicate against
+      content you haven't read.
+- [ ] Step 2: **Re-read the raw source for the new facts, not your memory
+      of it.** See "Extraction integrity" below — never transcribe a
+      figure, date, or quote from earlier in a conversation when the saved
+      raw source is available to re-read at the moment of writing.
+- [ ] Step 3: **Classify the new material** against what's already on the
+      page: additive, contradicting/superseding, or a duplicate. See "The
+      three-tier dedup heuristic" below.
+- [ ] Step 4: **Apply the region-specific update discipline**:
+      re-synthesize State, append to Timeline. Never regenerate the whole
+      page from only the new source. See "State vs. Timeline" below.
+- [ ] Step 5: **Diff your draft against the current page before saving.**
+      If the new version is shorter, or drops a fact/frontmatter key that
+      was there before, stop — you are very likely clobbering, not
+      updating. See "The clobbering bug" below.
+- [ ] Step 6: **Preview, don't auto-apply.** Surface the diff for
+      confirmation before writing, the same as every other wakil write
+      path. See "Preview before writing" below.
+- [ ] Step 7: **Update provenance**, including the `updated:` frontmatter
+      field, and hand off to `note-conformance` for a shape check before
+      `kb-commit`.
 
 ## State vs. Timeline: two disciplines, one page
 

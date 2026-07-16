@@ -52,8 +52,8 @@ confirm; nothing partial is left behind if you decline.
 The DAG above gives you a schema-valid primary note plus schema-valid entity
 stubs. It does **not**:
 
-- write texture into a stub's Compiled Truth, decide which of the source's
-  *other* mentions earn a back-link, or add Timeline entries beyond what
+- write texture into a stub's State (Compiled Truth), decide which of the
+  source's *other* mentions earn a back-link, or add Timeline entries beyond what
   extraction directly proposed — that's `entity-enrichment`'s job, per its
   own description of exactly this gap;
 - route the primary note through the workspace's `RESOLVER.md` — the

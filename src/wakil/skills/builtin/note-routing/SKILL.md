@@ -99,24 +99,29 @@ that's a signal to send it back rather than file it.
 
 ## Decision tree
 
-1. **Is this content a single resolved entity** (the output of
-   `entity-resolution`/`entity-enrichment`, with a known `type`)? → Its
-   destination is `schema.directory` for that type. Done — this is
-   deterministic, not a judgment call.
-2. **Otherwise** — does the workspace have a `RESOLVER.md`? If not, or if it
-   doesn't cover this case, stop and ask the user; do not guess.
-3. **Walk `RESOLVER.md`'s own decision order** for the content in front of
-   you (it may route by sensitivity, subject type, or another scheme
-   entirely — follow *its* order, not a generic one).
-4. **Within a subject-matter directory, file by primary subject**, not
-   format or source (see above). Apply the sui-generis-synthesis exception
-   only if `RESOLVER.md` itself defines a home for that case.
-5. **Generate the filename** using the workspace's own slug/naming
-   convention as stated in `RESOLVER.md` (or, absent one, ask rather than
-   invent a convention).
-6. **When the routing decision isn't obvious** — genuinely fits two
-   destinations, or the workspace's rules underdetermine it — surface the
-   ambiguity and your reasoning rather than silently picking one.
+- [ ] Step 1: Check whether this content is a single resolved entity (the
+      output of `entity-resolution`/`entity-enrichment`, with a known
+      `type`). If it is, its destination is `schema.directory` for that
+      type — done, this is deterministic, not a judgment call.
+- [ ] Step 2: Otherwise, check whether the workspace has a `RESOLVER.md`.
+
+      **If the workspace has no `RESOLVER.md`, or it doesn't cover this
+      case, this step is a conditional exit, not a checkbox to clear and
+      move past: stop and ask the user, and do not guess.** Only proceed to
+      Step 3 once you've confirmed a `RESOLVER.md` exists and covers the
+      case in front of you.
+- [ ] Step 3: Walk `RESOLVER.md`'s own decision order for the content in
+      front of you (it may route by sensitivity, subject type, or another
+      scheme entirely — follow *its* order, not a generic one).
+- [ ] Step 4: Within a subject-matter directory, file by primary subject,
+      not format or source (see above). Apply the sui-generis-synthesis
+      exception only if `RESOLVER.md` itself defines a home for that case.
+- [ ] Step 5: Generate the filename using the workspace's own slug/naming
+      convention as stated in `RESOLVER.md` (or, absent one, ask rather
+      than invent a convention).
+- [ ] Step 6: When the routing decision isn't obvious — genuinely fits two
+      destinations, or the workspace's rules underdetermine it — surface
+      the ambiguity and your reasoning rather than silently picking one.
 
 ## Hard rule
 

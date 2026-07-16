@@ -7,6 +7,15 @@ what to extract, and which of wakil's three CLI-native shapes
 decides what the material *means* — that's the ingestion DAG's job once
 `wakil ingest` runs.
 
+## Contents
+
+- [Meeting transcripts](#meeting-transcripts-from-exports-pdfs-or-raw-capture-files)
+- [PDFs](#pdfs-documents-contracts-email-thread-exports)
+- [Voice notes](#voice-notes)
+- [YouTube videos](#youtube-videos)
+- [OCR / scanned documents](#ocr--scanned-documents)
+- [Deferred: media ingest and archive crawling](#deferred-media-ingest-and-archive-crawling)
+
 ## Meeting transcripts (from exports, PDFs, or raw capture files)
 
 Destination shape: `wakil ingest transcript`.

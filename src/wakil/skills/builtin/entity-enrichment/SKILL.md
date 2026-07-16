@@ -18,10 +18,11 @@ entity-enrichment → decide how the note should connect to it
 
 If you're checking whether "Jane" is `people/jane-doe.md`, that's
 `entity-resolution`. If you're deciding whether this mention of Jane earns a
-back-link, whether her page's Compiled Truth needs updating, or whether a
-brand-new page for her is worth creating at all — that's here. Never skip
-straight to linking or creating without resolving identity first; this skill
-consumes `entity-resolution`'s output, it doesn't re-derive it.
+back-link, whether her page's State (Compiled Truth) needs updating, or
+whether a brand-new page for her is worth creating at all — that's here.
+Never skip straight to linking or creating without resolving identity
+first; this skill consumes `entity-resolution`'s output, it doesn't
+re-derive it.
 
 ## When to use
 
@@ -38,13 +39,14 @@ consumes `entity-resolution`'s output, it doesn't re-derive it.
 `wakil enrich <source-id>` already runs entity resolution and, for every
 `action: create` result, writes a schema-valid stub
 (`_build_stub_entities`, `src/wakil/app/ingest_service.py`): frontmatter
-carrying only what `entity-resolve` proposed plus `created`/`updated`, and a
-body skeleton of `## Compiled Truth`, `## Open Threads`, and `## Timeline /
-Log` (`_stub_content`) — empty, waiting to be filled. That's identity
-resolution and page scaffolding, not enrichment. The CLI path does not
-decide which of the source's *other* mentions deserve a back-link, does not
-write anything into Compiled Truth, and does not add Timeline entries beyond
-what extraction directly proposed.
+carrying only what the CLI's internal resolution DAG step proposed plus
+`created`/`updated`, and a body skeleton of `## Compiled Truth`,
+`## Open Threads`, and `## Timeline / Log` (`_stub_content`) — empty,
+waiting to be filled. That's identity resolution and page scaffolding, not
+enrichment. The CLI path does not decide which of the source's *other*
+mentions deserve a back-link, does not write anything into State (Compiled
+Truth), and does not add Timeline entries beyond what extraction directly
+proposed.
 
 That judgment is this skill's job — applied to a freshly-stubbed page, an
 existing page being updated with new signal, or a mention encountered during

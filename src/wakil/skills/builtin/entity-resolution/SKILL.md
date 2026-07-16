@@ -33,9 +33,9 @@ scope — hand the resolution result to `entity-enrichment`.
 
 `wakil enrich <source-id>` runs entity resolution as a fixed DAG step,
 always invoked, never optional (`src/wakil/app/ingest_service.py`,
-`_run_entity_resolution`). It calls the internal
-`skills/entity-resolve/SKILL.md` judgment against every entity the
-extraction step surfaced, then `_build_stub_entities` turns each
+`_run_entity_resolution`) — `ingest-source` documents how that internal DAG
+step fits into the pipeline. It applies the same judgment against every
+entity the extraction step surfaced, then `_build_stub_entities` turns each
 `action: create` result into a schema-routed stub page, and
 `validate_proposal()` hard-stops on any entity type the schema doesn't
 recognize rather than best-guessing a shape. If you're driving ingestion
@@ -44,8 +44,8 @@ judgment — don't re-run it by hand.
 
 This skill exists for everywhere else: `note-revision`, ad hoc editing, or
 any other case where an agent is resolving an entity mention outside that
-pipeline. The judgment below is the same one `entity-resolve` encodes for
-the CLI path — apply it consistently so a note edited by hand and a note
+pipeline. The judgment below is the same one the CLI's internal DAG step
+encodes — apply it consistently so a note edited by hand and a note
 produced by `wakil enrich` don't disagree about whether "Jane" is
 `people/jane-doe.md`.
 
@@ -73,7 +73,7 @@ Reach exactly one of three outcomes:
 ## Notability gate
 
 Before treating an unmatched entity as a create candidate, apply the same
-bar `entity-resolve` uses: will you interact with this person again, or are
+bar the CLI's internal DAG step uses: will you interact with this person again, or are
 they relevant to your work or interests? Is the company relevant to work,
 job search, or interests? Is the concept a reusable mental model worth
 referencing again? A page clears the gate when it's likely to accumulate

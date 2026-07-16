@@ -96,15 +96,27 @@ Reach exactly one of these verdicts, and record which one and why:
 
 - **Verified** — the claim traces to a real source, and independent evidence
   (another source, the underlying data, a second account) supports it.
+  *Example:* claim, from a meeting transcript, is "Acme Corp closed a $12M
+  seed round in March 2025." Trace: Acme's own funding announcement plus a
+  TechCrunch write-up reporting the same amount and date. Verdict:
+  **Verified** — two independent sources agree on figure, round, and date.
 - **Partially verified** — the underlying source is real and the core claim
   holds, but the way it's being cited oversells it (a correlation cited as
   causation, one account generalized as consensus, a caveat dropped).
-  Record the limit explicitly.
+  Record the limit explicitly. *Example:* claim, from a product lead's
+  transcript quote, is "our new onboarding flow cut churn in half." Trace:
+  the underlying dashboard export does show a 50% drop, but only for new
+  signups' 30-day churn, not churn overall. Verdict: **Partially verified**
+  — the number is real; the transcript's unqualified "churn" oversells it.
 - **Unverifiable** — no independent evidence either way. This is not the
   same as "wrong" — say plainly that it couldn't be confirmed rather than
   implying it's false.
 - **Misattributed** — the cited source doesn't actually say what the claim
-  attributes to it.
+  attributes to it. *Example:* a captured note cites "a Stanford study found
+  remote workers are 13% more productive." Trace: the underlying paper is a
+  vendor-commissioned survey, not a Stanford study, and never measures
+  productivity. Verdict: **Misattributed** — a real source exists, but it
+  doesn't support what's attributed to it.
 - **Retracted or disputed** — the source has a known retraction, correction,
   or well-documented critique that contradicts the claim.
 
@@ -159,8 +171,8 @@ applies to answers:
   disagreement rather than silently preferring one. When the disagreement is
   between the KB's own compiled understanding and new external evidence,
   prefer in this order, highest to lowest: the user's direct statements,
-  the KB's existing compiled/State understanding, the KB's own Timeline
-  entries, then external sources — and still note the conflict rather than
+  the KB's existing State (Compiled Truth) understanding, the KB's own
+  Timeline entries, then external sources — and still note the conflict rather than
   resolving it by precedence alone when both sides carry real weight.
 
 When capturing someone's original thinking or a load-bearing exact figure,

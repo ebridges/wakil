@@ -50,7 +50,7 @@ What each kind is for, going by how wakil's own code already uses them:
   produced from a source. Under this skill, use it for a manually-applied
   enrichment result you're committing by hand.
 - **`note`** — a manual edit to an existing note, or a `note-revision` result:
-  a compiled-truth (State) rewrite, a Timeline append, a prose fix. This is
+  a State (Compiled Truth) rewrite, a Timeline append, a prose fix. This is
   the kind you'll reach for most often under this skill.
 - **`link`** — adding or repairing cross-references/back-links without
   otherwise changing a note's content.
@@ -60,9 +60,9 @@ What each kind is for, going by how wakil's own code already uses them:
   committing a migrate run by hand.
 - **`memory`** — a memory-lifecycle change (candidate → active promotion,
   a memory record's retirement) as described in `docs/memory-model.md`.
-- **`dream`** — output of a periodic re-synthesis/consolidation pass, once
-  that command exists (see `TODO.md`'s `wakil dream` entries). Not yet
-  produced by any shipped wakil command as of this writing; use `note` or
+- **`dream`** — reserved for output of a periodic re-synthesis/consolidation
+  pass once `wakil dream` ships (tracked in `TODO.md`'s `wakil dream`
+  entries). Until then, no wakil command produces this kind — use `note` or
   `ingest` for anything currently generated.
 
 There is no general-purpose `wakil commit` CLI command — `commit_message()` is
@@ -73,53 +73,57 @@ different shape for a hand-run commit.
 
 ## Procedure
 
-1. **Survey.** Run `wakil git summary` for branch, pending-change count, and
-   recent commit context. For any single file whose history you need to
-   understand before deciding where it belongs, `wakil git history <path>`
-   shows its prior commits.
+- [ ] Step 1: **Survey.** Run `wakil git summary` for branch, pending-change
+      count, and recent commit context. For any single file whose history
+      you need to understand before deciding where it belongs, `wakil git
+      history <path>` shows its prior commits.
 
-2. **Inspect every diff individually before grouping.** `git status
-   --porcelain` gives the file list; `git diff --stat` gives shape — neither
-   is enough to decide grouping. Open the actual diff (`git diff <path>`, or
-   read the first ~30 lines of an untracked file) for every changed path
-   before deciding which change set it belongs to. Do not `git add -A` and
-   commit as one blob — a note edit and an unrelated frontmatter fix picked
-   up in the same sweep is exactly the failure mode this step prevents.
+- [ ] Step 2: **Inspect every diff individually before grouping.** `git
+      status --porcelain` gives the file list; `git diff --stat` gives shape
+      — neither is enough to decide grouping. Open the actual diff (`git
+      diff <path>`, or read the first ~30 lines of an untracked file) for
+      every changed path before deciding which change set it belongs to. Do
+      not `git add -A` and commit as one blob — a note edit and an unrelated
+      frontmatter fix picked up in the same sweep is exactly the failure
+      mode this step prevents.
 
-3. **Group into logical change sets.** One coherent concern per commit:
-   a single note's revision, one batch of related back-link additions, one
-   schema-migrate type's mechanical fixes. Different notes touched for
-   unrelated reasons are different commits even if they landed in the same
-   session.
+- [ ] Step 3: **Group into logical change sets.** One coherent concern per
+      commit: a single note's revision, one batch of related back-link
+      additions, one schema-migrate type's mechanical fixes. Different notes
+      touched for unrelated reasons are different commits even if they
+      landed in the same session.
 
-4. **Exclude transient, generated, or sensitive files.** Don't stage SQLite
-   WAL/journal files, caches, or anything that looks like local credentials —
-   if something like that shows up modified, it's a sign it doesn't belong in
-   this repo at all, not something to sweep into a commit. When in doubt,
-   surface it and ask rather than silently staging or silently dropping it.
+- [ ] Step 4: **Exclude transient, generated, or sensitive files.** Don't
+      stage SQLite WAL/journal files, caches, or anything that looks like
+      local credentials — if something like that shows up modified, it's a
+      sign it doesn't belong in this repo at all, not something to sweep
+      into a commit. When in doubt, surface it and ask rather than silently
+      staging or silently dropping it.
 
-5. **Confirm before committing.** State the proposed change sets (message +
-   files) and get explicit approval before running `git commit` — this
-   applies even to a single obviously-correct commit. Never commit
-   destructive changes (a deletion, a large rewrite) without the user having
-   seen the diff first. This mirrors wakil's own preview/confirm/apply
-   discipline (`schema_migrate_service.py`'s propose → diff → confirm →
-   apply split) — don't hold this skill to a lower bar than the code it's
-   filling a gap around.
+- [ ] Step 5: **Confirm before committing.** State the proposed change sets
+      (message + files) and get explicit approval before running `git
+      commit` — this applies even to a single obviously-correct commit.
+      Never commit destructive changes (a deletion, a large rewrite) without
+      the user having seen the diff first. This mirrors wakil's own
+      preview/confirm/apply discipline (`schema_migrate_service.py`'s
+      propose → diff → confirm → apply split) — don't hold this skill to a
+      lower bar than the code it's filling a gap around.
 
-6. **Write the message to describe the knowledge change, not the file list.**
-   The subject line is `wakil <kind>: <description>` in imperative,
-   lowercase-first, no trailing period. The description names what changed
-   about the knowledge base ("resynthesize Acme Corp state after Q3
-   update-call transcript", not "update acme-corp.md"). Add a body when the
-   change isn't self-explanatory from the subject alone — what triggered it,
-   what source it came from, what was added versus revised.
+- [ ] Step 6: **Write the message to describe the knowledge change, not the
+      file list.** The subject line is `wakil <kind>: <description>` in
+      imperative, lowercase-first, no trailing period. The description names
+      what changed about the knowledge base ("resynthesize Acme Corp state
+      after Q3 update-call transcript", not "update acme-corp.md"). Add a
+      body when the change isn't self-explanatory from the subject alone —
+      what triggered it, what source it came from, what was added versus
+      revised.
 
-7. **Commit each group, then re-verify.** After each commit, `git status
-   --porcelain` again before staging the next group — confirm only the
-   intended files moved and nothing unexpected is still sitting dirty.
+- [ ] Step 7: **Commit each group, then re-verify.** After each commit, `git
+      status --porcelain` again before staging the next group — confirm only
+      the intended files moved and nothing unexpected is still sitting
+      dirty.
 
-8. **Do not push** unless explicitly asked.
+- [ ] Step 8: **Do not push** unless explicitly asked.
 
 ## Examples
 
