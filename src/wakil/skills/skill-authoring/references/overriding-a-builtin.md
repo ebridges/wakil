@@ -11,7 +11,7 @@ first match wins:
 ```
 
 To override `note-routing` for one knowledge base only, copy
-`src/wakil/skills/builtin/note-routing/` in its entirety to
+`src/wakil/skills/note-routing/` in its entirety to
 `<kb-root>/skills/note-routing/` and edit the copy — never edit the shipped
 built-in directly. Whole-directory selection means that once your kb-local
 copy wins resolution, wakil never reaches back into the built-in for a

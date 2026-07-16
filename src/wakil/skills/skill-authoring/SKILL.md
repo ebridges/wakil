@@ -55,7 +55,7 @@ Run `wakil skills list` first. It reports every effective skill name across
 all roots — kb-local, user-level, built-in — under normal precedence, not
 just what you've already read. Where relevant, also look directly at
 `<kb-root>/skills/`, `<user-config>/wakil/skills/`, and this catalog's
-`src/wakil/skills/builtin/` on the filesystem, since a skill can exist without
+`src/wakil/skills/` on the filesystem, since a skill can exist without
 having been invoked yet. Only once no existing skill's stated scope covers
 the responsibility should you consider a new one.
 
@@ -183,10 +183,10 @@ personally read — a name that sounds right is not the same as a name that
 resolves.
 
 Do not reference `article`/`text`/`transcript`/`entity-resolve`
-(`src/wakil/skills/builtin/{article,text,transcript,entity-resolve}/SKILL.md`)
-as if they were members of *this* 12-skill catalog. They live under the same
-`builtin/` root and resolve, override, and appear in `wakil skills list` the
-same way — but they're consumed only by `wakil enrich`'s own DAG
+(`src/wakil/skills/{article,text,transcript,entity-resolve}/SKILL.md`) as if
+they were members of *this* 12-skill catalog. They live alongside this
+catalog and resolve, override, and appear in `wakil skills list` the same
+way — but they're consumed only by `wakil enrich`'s own DAG
 (`wakil.llm.skill_loader.load_skill`), never read or followed by an
 interactive agent the way the 12 catalog skills are. `ingest-source` is the
 place that documents how they fit into the pipeline; don't duplicate or

@@ -21,7 +21,7 @@ from wakil.skills.resolver import discover_skill_names
 
 from .runner import grade_transcript, materialize_workspace, run_scenario
 
-BUILTIN_ROOT = Path(__file__).resolve().parents[2] / "src" / "wakil" / "skills" / "builtin"
+BUILTIN_ROOT = Path(__file__).resolve().parents[2] / "src" / "wakil" / "skills"
 
 TRANSCRIPT_EXCERPT_CHARS = 1000
 

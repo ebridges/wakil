@@ -36,10 +36,10 @@ wakil enrich <source-id>                (DAG: extraction → entity resolution �
         └─ DAG node 2: entity-resolve skill — always invoked
 ```
 
-`article`/`text`/`transcript`/`entity-resolve` live under
-`src/wakil/skills/builtin/` alongside this 12-skill catalog and are resolved,
-overridden, and validated the same way (`wakil skills list/which/validate`
-show them too) — but they're invoked automatically by `wakil enrich`
+`article`/`text`/`transcript`/`entity-resolve` live under `src/wakil/skills/`
+alongside this 12-skill catalog and are resolved, overridden, and validated
+the same way (`wakil skills list/which/validate` show them too) — but they're
+invoked automatically by `wakil enrich`
 (`src/wakil/app/ingest_service.py`), not part of *this* 12-skill catalog, and
 this skill does not re-derive their judgment. Once your normalized file is
 captured, their extraction and entity-resolution judgment takes over; nothing

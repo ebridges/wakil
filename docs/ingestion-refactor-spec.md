@@ -73,7 +73,7 @@ flowchart TD
     subgraph Enrichment["wakil enrich &lt;source-id&gt; (this spec's target)"]
         ENRICHCMD["prepare_enrichment"] --> JUDGE
         JUDGE["extraction judgment\nskills/&lt;kind&gt;/SKILL.md + ExtractionOutput"] --> RESOLVE
-        RESOLVE["entity resolution (always invoked, 2nd model call)\nskills/builtin/entity-resolve/SKILL.md + EntityResolution"] --> VALIDATE
+        RESOLVE["entity resolution (always invoked, 2nd model call)\nskills/entity-resolve/SKILL.md + EntityResolution"] --> VALIDATE
         VALIDATE["validate_proposal()\ndedup, schema check (new writes only),\nnotability, 1:N routing, hard-stop on missing schema"] --> PREVIEW
         PREVIEW["preview / --yes confirm"] --> APPLY
         APPLY["apply_enrichment: write files + DB rows\n-> Source.status='enriched'"]
@@ -163,7 +163,7 @@ Everything below targets `prepare_enrichment`/`apply_enrichment` and the
 `apply_capture`/`CaptureProposal`/`CaptureResult` are untouched — capture
 already is the correctly-scoped mechanical step.
 
-- `src/wakil/skills/builtin/{transcript,text,article}/SKILL.md` — the judgment
+- `src/wakil/skills/{transcript,text,article}/SKILL.md` — the judgment
   content currently embedded in `INGEST_SYSTEM_PROMPT` (`llm/prompts.py`),
   rewritten as prose per `source.source_type`, with the JSON-shape block
   removed (it moves to code, generated from a Pydantic model, so it can
@@ -172,7 +172,7 @@ already is the correctly-scoped mechanical step.
   absorbed the mechanical kind-specific work, so these files carry
   judgment only — e.g. a transcript's "find the resolution, don't anchor on
   the first option" vs. an article's "quotable lines, not paraphrase."
-- `src/wakil/skills/builtin/entity-resolve/SKILL.md` — new judgment content, not a
+- `src/wakil/skills/entity-resolve/SKILL.md` — new judgment content, not a
   rewrite of anything existing: how to decide create/update/skip for a
   mentioned entity, the notability heuristic, how to propose a frontmatter
   patch for an update vs. a full stub for a create.
@@ -278,7 +278,7 @@ layer from A.
 - `src/wakil/storage/schema.py` — `Memory.event_date`,
   `Relationship.subject_note_id`/`object_note_id`
 - `alembic.ini`, `migrations/` — new
-- `src/wakil/skills/builtin/{transcript,text,article,entity-resolve}/SKILL.md` — new
+- `src/wakil/skills/{transcript,text,article,entity-resolve}/SKILL.md` — new
 - `src/wakil/llm/schemas.py`, `src/wakil/llm/skill_loader.py` — new
 - `src/wakil/llm/prompts.py` — `INGEST_SYSTEM_PROMPT`/`parse_ingest_response`
   retired in favor of the above

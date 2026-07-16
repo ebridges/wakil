@@ -22,9 +22,9 @@ judgment already lives in skills invoked as DAG node 1 of `wakil enrich
 - `text`
 - `transcript`
 
-(all three under `src/wakil/skills/builtin/`, same resolver, same
-override/validate mechanics as this catalog — just consumed by wakil's own
-code rather than by an interactive agent)
+(all three under `src/wakil/skills/`, same resolver, same override/validate
+mechanics as this catalog — just consumed by wakil's own code rather than by
+an interactive agent)
 
 If you're driving synthesis through that pipeline, those skills are
 authoritative — read them, don't re-derive their judgment here, and don't
