@@ -50,10 +50,10 @@
         }
       },
       "expected_behavior": [
-        "Recognizes that this article source type is already handled by the code-owned `skills/article/SKILL.md` as DAG node 1 of the enrich pipeline, and names that skill rather than re-deriving synthesis judgment here.",
+        "Recognizes that this article source type is already handled by the `article` skill as DAG node 1 of the enrich pipeline, and names that skill rather than re-deriving synthesis judgment here.",
         "Cites `wakil enrich art-9f21` as the correct command to run, not an invented or generic command.",
         "Does NOT hand-synthesize and write the note's content itself for this source, since it arrived through the CLI-native `wakil ingest`/`wakil enrich` path this skill explicitly defers to.",
-        "Does NOT claim this skill's general guidance should override or take precedence over `skills/article/SKILL.md`'s judgment for this source.",
+        "Does NOT claim this skill's general guidance should override or take precedence over the `article` skill's judgment for this source.",
         "Correctly identifies the source as the 'article' type specifically (not text or transcript), matching what the overlay's frontmatter states."
       ],
       "related_skills": ["ingest-source", "note-conformance", "kb-commit"]

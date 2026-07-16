@@ -29,16 +29,15 @@ wakil enrich <source-id>                   step 2: analyze and link (model-drive
 `wakil enrich <source-id>` then runs a fixed, code-sequenced DAG
 (`src/wakil/app/ingest_service.py`, `prepare_enrichment`):
 
-1. **DAG node 1 — extraction.** Runs the CLI-native judgment from
-   `skills/{transcript,text,article}/SKILL.md` (this is exactly what
+1. **DAG node 1 — extraction.** Runs the CLI-native judgment from the
+   `transcript`/`text`/`article` skill (this is exactly what
    `content-synthesis` describes as already handled for native source
    types) and produces a proposed primary note.
 2. **DAG node 2 — entity resolution.** Always invoked, never optional.
-   Runs `skills/entity-resolve/SKILL.md` (the same judgment
-   `entity-resolution` documents) and, for every entity it decides to
-   create, writes a schema-routed stub page via `schema.directory` —
-   the deterministic slice of what `note-routing` calls "entity types are
-   code-owned."
+   Runs the `entity-resolve` skill (the same judgment `entity-resolution`
+   documents) and, for every entity it decides to create, writes a
+   schema-routed stub page via `schema.directory` — the deterministic slice
+   of what `note-routing` calls "entity types are code-owned."
 3. **Validation gate.** `validate_proposal()` checks every proposed file
    carries schema-valid frontmatter for its `type:` and hard-stops on an
    unrecognized type or a duplicate path — a partial, mechanical slice of

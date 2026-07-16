@@ -14,7 +14,7 @@
         "Runs, or explicitly states it would run, `wakil skills list` before deciding anything, per the MECE-scan step, rather than assuming outright that a new skill is needed",
         "Notices the existing kb-local skills/weekly-review/SKILL.md as part of the scan and confirms it doesn't already cover domain-allowlist auditing, rather than only checking whatever is already loaded in context",
         "Applies the skill-shaped test (repeatable, carries real procedural judgment, a description distinguishable from siblings like weekly-review) before deciding to create a new file rather than just noting a one-off in conversation",
-        "If creating a new skill, places it at <kb-root>/skills/<name>/ (kb-local) rather than under src/wakil/skills/builtin/, since a new workflow for one knowledge base is kb-local by default and adding a shipped built-in is a maintainer decision, not a mid-task one",
+        "If creating a new skill, places it at <kb-root>/skills/<name>/ (kb-local) rather than under src/wakil/skills/, since a new workflow for one knowledge base is kb-local by default and adding a shipped built-in is a maintainer decision, not a mid-task one",
         "Produces frontmatter matching the contract exactly: lowercase kebab-case name matching the directory, skill_api: 1, and a one-line description specific enough not to be confused with weekly-review or another sibling",
         "Does NOT invent a new wakil CLI command (e.g. a fictitious `wakil audit` or `wakil allowlist-check`) to describe how the procedure runs, framing it instead as an agent procedure"
       ],
@@ -63,12 +63,12 @@
         "overlay": {}
       },
       "expected_behavior": [
-        "Identifies this as a built-in override rather than a direct edit to the shipped source at src/wakil/skills/builtin/note-routing/",
+        "Identifies this as a built-in override rather than a direct edit to the shipped source at src/wakil/skills/note-routing/",
         "States the correct destination for the override is <kb-root>/skills/note-routing/, copying note-routing's entire directory rather than only its SKILL.md file",
         "Warns that the whole-directory copy must also bring along any references/, templates/, or scripts/ files note-routing actually uses, since wakil won't reach back into the built-in for a missing supporting file once the kb-local copy wins resolution",
         "Names `wakil skills which note-routing --verbose` as the command to confirm the kb-local copy is the one actually winning resolution, not silently shadowed by a higher-precedence root",
         "Names `wakil skills validate note-routing` as the command to check the override's frontmatter and directory are well-formed before relying on it",
-        "Does NOT propose editing src/wakil/skills/builtin/note-routing/ directly to make this workspace-specific behavior change"
+        "Does NOT propose editing src/wakil/skills/note-routing/ directly to make this workspace-specific behavior change"
       ],
       "related_skills": ["note-routing"]
     },
@@ -85,7 +85,7 @@
         "Treats this as an editorial genericization pass rather than a plain copy, per skill-authoring's own promoting-or-porting checklist",
         "Flags the specific person and company names in the draft (Priya, Acme Corp) as needing to become generic placeholders, since a built-in skill ships to every workspace",
         "Flags the Slack-specific reference (#legal-ops channel) as a tool- or workspace-specific detail to scrub, since it isn't part of wakil itself or this workspace's own RESOLVER.md/SCHEMA.md",
-        "Does NOT propose copying skills/priya-review-tracker/SKILL.md into src/wakil/skills/builtin/ unchanged",
+        "Does NOT propose copying skills/priya-review-tracker/SKILL.md into src/wakil/skills/ unchanged",
         "States that if the promoted version intentionally does less than the kb-local original, that narrowing must be documented explicitly in the skill's own body, not left implicit or noted only in a commit message",
         "Does NOT unilaterally decide to add it to the built-in catalog itself, instead framing this as the kind of built-in-catalog decision that belongs to whoever maintains wakil"
       ],

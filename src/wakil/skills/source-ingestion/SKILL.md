@@ -31,17 +31,19 @@ wakil ingest transcript|text|article    (capture: deterministic, no model)
         ▼
 wakil enrich <source-id>                (DAG: extraction → entity resolution → apply)
         │
-        ├─ DAG node 1: skills/transcript/SKILL.md, skills/text/SKILL.md,
-        │  or skills/article/SKILL.md — extraction judgment
-        └─ DAG node 2: skills/entity-resolve/SKILL.md — always invoked
+        ├─ DAG node 1: transcript, text, or article skill — extraction
+        │  judgment
+        └─ DAG node 2: entity-resolve skill — always invoked
 ```
 
-`skills/{transcript,text,article,entity-resolve}/SKILL.md` are code-owned
-internals invoked automatically by `wakil enrich`
-(`src/wakil/app/ingest_service.py`) — they are not part of this 12-skill
-catalog, and this skill does not re-derive their judgment. Once your
-normalized file is captured, their extraction and entity-resolution
-judgment takes over; nothing here should anticipate or duplicate it.
+`article`/`text`/`transcript`/`entity-resolve` live under `src/wakil/skills/`
+alongside this 12-skill catalog and are resolved, overridden, and validated
+the same way (`wakil skills list/which/validate` show them too) — but they're
+invoked automatically by `wakil enrich`
+(`src/wakil/app/ingest_service.py`), not part of *this* 12-skill catalog, and
+this skill does not re-derive their judgment. Once your normalized file is
+captured, their extraction and entity-resolution judgment takes over; nothing
+here should anticipate or duplicate it.
 
 Deciding *whether* a given piece of raw material needs this
 pre-normalization step at all, and actually invoking `wakil ingest` /

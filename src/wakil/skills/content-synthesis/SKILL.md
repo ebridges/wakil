@@ -15,12 +15,16 @@ content in the first place.
 ## Where `wakil enrich` already does this — don't duplicate it
 
 For the three source types `wakil ingest` captures natively, the synthesis
-judgment already lives in code-owned skills, invoked as DAG node 1 of `wakil
-enrich <source-id>` (`ingest_service.py`, `_run_extraction`):
+judgment already lives in skills invoked as DAG node 1 of `wakil enrich
+<source-id>` (`ingest_service.py`, `_run_extraction`):
 
-- `skills/article/SKILL.md`
-- `skills/text/SKILL.md`
-- `skills/transcript/SKILL.md`
+- `article`
+- `text`
+- `transcript`
+
+(all three under `src/wakil/skills/`, same resolver, same override/validate
+mechanics as this catalog — just consumed by wakil's own code rather than by
+an interactive agent)
 
 If you're driving synthesis through that pipeline, those skills are
 authoritative — read them, don't re-derive their judgment here, and don't

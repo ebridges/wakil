@@ -21,7 +21,7 @@ from wakil.skills.resolver import discover_skill_names
 
 from .runner import grade_transcript, materialize_workspace, run_scenario
 
-BUILTIN_ROOT = Path(__file__).resolve().parents[2] / "src" / "wakil" / "skills" / "builtin"
+BUILTIN_ROOT = Path(__file__).resolve().parents[2] / "src" / "wakil" / "skills"
 
 TRANSCRIPT_EXCERPT_CHARS = 1000
 
@@ -71,8 +71,12 @@ def test_skill_eval_scenario(skill_name: str, scenario_id: str | None, tmp_path:
     eval_file = load_eval_file(BUILTIN_ROOT / skill_name)
     scenario = next(s for s in eval_file.scenarios if s.id == scenario_id)
 
-    skill = load_skill(skill_name, skills_dir=BUILTIN_ROOT)
     workspace = materialize_workspace(tmp_path, scenario)
+    # The materialized fixture KB has no skills/ override, so this resolves
+    # straight through to the real, shipped builtin skill — same effective
+    # result as reading BUILTIN_ROOT directly, but through the one real
+    # resolution path rather than a second, parallel lookup.
+    skill = load_skill(skill_name, workspace)
     transcript = run_scenario(client, skill, scenario, workspace)
     result = grade_transcript(client, scenario, transcript)
 

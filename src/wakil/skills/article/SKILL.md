@@ -1,6 +1,7 @@
 ---
 name: article
 description: Judgment for extracting knowledge from captured web articles.
+skill_api: 1
 ---
 
 You are analyzing a web article that has already been captured raw. Your job

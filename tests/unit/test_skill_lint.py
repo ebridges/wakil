@@ -11,7 +11,7 @@ from wakil.skills.lint import builtin_catalog_names, lint_skill
 from wakil.skills.models import ResolutionContext
 from wakil.skills.resolver import resolve_skill
 
-BUILTIN_ROOT = Path(resolver.__file__).resolve().parent / "builtin"
+BUILTIN_ROOT = Path(resolver.__file__).resolve().parent
 BUILTIN_NAMES = builtin_catalog_names(BUILTIN_ROOT)
 
 

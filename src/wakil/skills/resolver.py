@@ -271,6 +271,6 @@ def default_context(
     return ResolutionContext(
         kb_root=kb_root,
         user_skill_root=config_home() / "skills",
-        builtin_skill_root=Path(__file__).resolve().parent / "builtin",
+        builtin_skill_root=Path(__file__).resolve().parent,
         skill_path=env.get("WAKIL_SKILL_PATH"),
     )

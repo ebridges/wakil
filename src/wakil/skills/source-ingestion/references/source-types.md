@@ -21,15 +21,14 @@ decides what the material *means* — that's the ingestion DAG's job once
 Destination shape: `wakil ingest transcript`.
 
 - **Attendee identification belongs in `--context`, not in manual page
-  creation.** `wakil enrich`'s entity-resolution DAG step
-  (`skills/entity-resolve/SKILL.md`) is always invoked and will create or
-  update attendee pages itself — don't do that by hand here. What
-  normalization contributes is making sure the
-  extraction step doesn't have to guess: list attendees with full names,
-  roles, and company in the `--context` string. `skills/transcript/SKILL.md`
-  explicitly uses this context to resolve first names and pronouns to full
-  names — a transcript normalized without it forces the extraction step to
-  guess who "Jane" or "he" refers to.
+  creation.** `wakil enrich`'s entity-resolution DAG step (the
+  `entity-resolve` skill) is always invoked and will create or update
+  attendee pages itself — don't do that by hand here. What normalization
+  contributes is making sure the extraction step doesn't have to guess: list
+  attendees with full names, roles, and company in the `--context` string.
+  The `transcript` skill explicitly uses this context to resolve first names
+  and pronouns to full names — a transcript normalized without it forces the
+  extraction step to guess who "Jane" or "he" refers to.
 - **Verify proper-noun spelling before it goes into the context string or
   the file.** Auto-generated transcripts and hand-typed filenames
   frequently misspell names and company names. Cross-check against an

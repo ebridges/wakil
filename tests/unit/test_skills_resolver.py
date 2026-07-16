@@ -433,4 +433,4 @@ def test_default_context_reads_env_and_uses_config_home(monkeypatch, tmp_path):
     assert context.kb_root == kb_root
     assert context.skill_path == str(tmp_path / "experimental-skills")
     assert context.user_skill_root == config_home() / "skills"
-    assert context.builtin_skill_root == Path(resolver.__file__).resolve().parent / "builtin"
+    assert context.builtin_skill_root == Path(resolver.__file__).resolve().parent
