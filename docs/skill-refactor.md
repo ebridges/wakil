@@ -285,6 +285,8 @@ skill-evaluation
 
 It could review skill scope, internal consistency, maintainability, and observed results, but it is not required for the first release.
 
+That deferred intention is now fulfilled by the eval mechanism itself (per-skill `eval.json` scenarios, `tests/evals/runner.py`, and `wakil skills lint`) rather than by a 13th catalog skill.
+
 ---
 
 ### 12. `kb-commit`

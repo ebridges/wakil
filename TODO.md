@@ -94,6 +94,15 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
       ingestion/entity refactor Phase B)
 - [ ] Docs: QMD integration, memory lifecycle, git workflow
 - [ ] Wikilink/tag extraction during indexing (feeds relationship discovery)
+- [ ] FUTURE: full agentic eval harness. The current live-model skill evals
+      (`tests/evals/runner.py`, `-m eval`) are single-shot: skill prose +
+      query go to a model, the model *describes* what it would do, and a
+      second model call grades that description against a rubric — no real
+      tool use, no actual file mutation. A more faithful harness would run a
+      real agent with real tool access against a scratch workspace and grade
+      the resulting diff. That needs sandboxing, a tool-call loop, and
+      diff-based grading — materially more infrastructure than was justified
+      for the initial 12-skill suite, so it's deliberately deferred.
 
 ## Deliberately deferred (see PROMPT.md non-goals)
 
