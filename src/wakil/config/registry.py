@@ -14,10 +14,14 @@ import yaml
 REGISTRY_FILENAME = "workspaces.yaml"
 
 
+def config_home() -> Path:
+    config_home_env = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(config_home_env) if config_home_env else Path.home() / ".config"
+    return base / "wakil"
+
+
 def registry_path() -> Path:
-    config_home = os.environ.get("XDG_CONFIG_HOME")
-    base = Path(config_home) if config_home else Path.home() / ".config"
-    return base / "wakil" / REGISTRY_FILENAME
+    return config_home() / REGISTRY_FILENAME
 
 
 def _load() -> dict[str, str]:
