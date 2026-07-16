@@ -8,10 +8,12 @@ otherwise transcripts get exactly two fields: create date and meeting date.
 
 Step 2, enrichment (`wakil enrich <source-id>`): a fixed, code-sequenced DAG
 (docs/ingestion-refactor-spec.md) — an extraction model call (judgment from
-skills/<kind>/SKILL.md against the ExtractionOutput contract), then an
-always-invoked entity-resolution model call (skills/entity-resolve/SKILL.md
+the `<kind>` skill against the ExtractionOutput contract), then an
+always-invoked entity-resolution model call (the `entity-resolve` skill
 against EntityResolution), then `validate_proposal()` gating every proposed
 new file against the entity schemas, then one preview/confirm, then apply.
+Both skills are resolved through `wakil.skills.resolver` (built-in by
+default, kb-local/user overridable) via `wakil.llm.skill_loader.load_skill`.
 
 Each step is itself two-phase (prepare → preview/confirm → apply): prepare
 touches nothing, files are only ever created (never overwritten), and DB rows
@@ -301,8 +303,9 @@ def prepare_enrichment(
     related_pairs = [(hit.ref, hit.title) for hit in related_notes]
     source_text = text[:MAX_SOURCE_CHARS]
 
-    # DAG node 1: extraction judgment (skills/<kind>/SKILL.md + ExtractionOutput).
+    # DAG node 1: extraction judgment (the <kind> skill + ExtractionOutput).
     extraction = _run_extraction(
+        config,
         client,
         source.source_type,
         source.origin or title,
@@ -345,6 +348,7 @@ def prepare_enrichment(
 
 
 def _run_extraction(
+    config: WorkspaceConfig,
     client: ModelClient,
     source_type: str,
     origin: str,
@@ -354,9 +358,10 @@ def _run_extraction(
     guides: dict[str, str],
 ) -> ExtractionOutput:
     try:
-        skill = load_skill(source_type)
+        skill = load_skill(source_type, config.root_path)
     except SkillLoadError:
-        skill = load_skill("text")  # unknown kinds get the generic clipping judgment
+        # unknown kinds get the generic clipping judgment
+        skill = load_skill("text", config.root_path)
     system = build_system_prompt(skill, ExtractionOutput)
     prompt = build_extraction_prompt(
         source_type, origin, text, related_pairs, context=proposal.context, guides=guides
@@ -377,7 +382,7 @@ def _run_entity_resolution(
     guides: dict[str, str],
 ) -> None:
     """Second model call plus stub-page construction; degrades visibly."""
-    skill = load_skill("entity-resolve")
+    skill = load_skill("entity-resolve", config.root_path)
     system = build_system_prompt(skill, EntityResolutionOutput)
     prompt = build_resolution_prompt(
         text,

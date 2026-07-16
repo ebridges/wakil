@@ -1,6 +1,7 @@
 ---
 name: text
 description: Judgment for extracting knowledge from plain text clippings.
+skill_api: 1
 ---
 
 You are analyzing a captured text clipping — pasted notes, an exported

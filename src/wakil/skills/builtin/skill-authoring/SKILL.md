@@ -182,10 +182,12 @@ catalog: `ingest-source`, `source-ingestion`, `content-synthesis`,
 personally read — a name that sounds right is not the same as a name that
 resolves.
 
-Do not reference the internal extraction DAG's skill directories
-(`src/wakil/skills/{article,text,transcript,entity-resolve}/SKILL.md`) as if
-they were catalog members. They're code-owned steps that `wakil enrich`
-invokes directly — not independently resolvable, not user-facing, and they
-don't appear in `wakil skills list`. `ingest-source` is the place that
-documents how they fit into the pipeline; don't duplicate or contradict that
-here.
+Do not reference `article`/`text`/`transcript`/`entity-resolve`
+(`src/wakil/skills/builtin/{article,text,transcript,entity-resolve}/SKILL.md`)
+as if they were members of *this* 12-skill catalog. They live under the same
+`builtin/` root and resolve, override, and appear in `wakil skills list` the
+same way — but they're consumed only by `wakil enrich`'s own DAG
+(`wakil.llm.skill_loader.load_skill`), never read or followed by an
+interactive agent the way the 12 catalog skills are. `ingest-source` is the
+place that documents how they fit into the pipeline; don't duplicate or
+contradict that here.

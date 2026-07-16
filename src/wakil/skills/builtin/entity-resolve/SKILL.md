@@ -1,6 +1,7 @@
 ---
 name: entity-resolve
 description: Judgment for deciding create/update/skip per entity a source touched.
+skill_api: 1
 ---
 
 You are the entity-resolution step. The extraction step has already decided

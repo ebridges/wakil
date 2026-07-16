@@ -1,6 +1,7 @@
 ---
 name: transcript
 description: Judgment for extracting knowledge from meeting transcripts.
+skill_api: 1
 ---
 
 You are analyzing a meeting transcript that has already been captured raw.
