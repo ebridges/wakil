@@ -17,10 +17,18 @@ from wakil.app.ingest_service import (
 from wakil.app.query_service import QueryResult
 from wakil.app.search_service import SearchHit
 from wakil.app.workspace_service import IndexResult, WorkspaceStatus
+from wakil.skills.models import ResolvedSkill, RootIssue, SkillRoot
 
 console = Console()
 
 _KIND_STYLES = {"note": "green", "memory": "magenta", "source": "yellow"}
+_SKILL_SOURCE_STYLES = {
+    "override": "cyan",
+    "kb-local": "green",
+    "user": "yellow",
+    "builtin": "dim",
+    "error": "red",
+}
 
 
 def print_search_hits(hits: list[SearchHit], query: str) -> None:
@@ -311,3 +319,86 @@ def print_index_result(result: IndexResult) -> None:
         f"{result.unchanged} unchanged, "
         f"[red]{result.removed} removed[/red])"
     )
+
+
+def print_root_issues(issues: list[RootIssue], *, prefix: str = "Warning") -> None:
+    for issue in issues:
+        style = "red" if prefix == "Error" else "yellow"
+        console.print(f"[{style}]{prefix}:[/{style}] {issue.reason} — {issue.message}")
+
+
+def print_skill_list(rows: list[tuple[str, str, str]]) -> None:
+    """rows: (name, source, detail) — detail is the skill directory on success,
+    or an error description when source == "error"."""
+    if not rows:
+        console.print("No skills found.")
+        return
+    table = Table(title="Skills")
+    table.add_column("Name", style="bold")
+    table.add_column("Source")
+    table.add_column("Detail", overflow="fold")
+    for name, source, detail in rows:
+        style = _SKILL_SOURCE_STYLES.get(source, "white")
+        table.add_row(name, f"[{style}]{source}[/{style}]", detail)
+    console.print(table)
+
+
+def print_skill_which(
+    resolved: ResolvedSkill,
+    *,
+    verbose: bool,
+    roots: list[SkillRoot] | None = None,
+    shadowed: list[SkillRoot] | None = None,
+) -> None:
+    console.print(str(resolved.manifest), soft_wrap=True, highlight=False)
+    if not verbose:
+        return
+    console.print(f"[dim]source: {resolved.source}[/dim]")
+    if roots:
+        console.print("[bold]Search roots:[/bold]")
+        for root in roots:
+            style = _SKILL_SOURCE_STYLES.get(root.source, "white")
+            marker = " [green](selected)[/green]" if root.path == resolved.root else ""
+            console.print(
+                f"  [{style}]{root.source}[/{style}] {root.path}{marker}",
+                soft_wrap=True,
+                highlight=False,
+            )
+    if shadowed:
+        console.print("[bold]Shadowed matches:[/bold]")
+        for i, root in enumerate(shadowed):
+            style = _SKILL_SOURCE_STYLES.get(root.source, "white")
+            marker = " [green](winner)[/green]" if i == 0 else ""
+            skill_dir = root.path / resolved.name
+            console.print(
+                f"  [{style}]{root.source}[/{style}] {skill_dir}{marker}",
+                soft_wrap=True,
+                highlight=False,
+            )
+
+
+def print_skill_validation(
+    root_issues: list[RootIssue],
+    results: list[tuple[str, bool, str]],
+) -> None:
+    """results: (name, ok, detail) — detail is "source: directory" on success,
+    or "reason: message" on failure."""
+    if root_issues:
+        print_root_issues(root_issues, prefix="Error")
+    if not results:
+        console.print("No skills to validate.")
+    else:
+        table = Table(title="Skill validation")
+        table.add_column("Name", style="bold")
+        table.add_column("Status")
+        table.add_column("Detail", overflow="fold")
+        for name, ok, detail in results:
+            status = "[green]ok[/green]" if ok else "[red]invalid[/red]"
+            table.add_row(name, status, detail)
+        console.print(table)
+    failures = sum(1 for _, ok, _ in results if not ok)
+    total_issues = len(root_issues) + failures
+    if total_issues == 0:
+        console.print("[green]All skills valid.[/green]")
+    else:
+        console.print(f"[red]{total_issues} issue(s) found.[/red]")

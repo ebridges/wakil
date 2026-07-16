@@ -98,6 +98,22 @@ subcommand) naming the workspace to operate on:
 The `WAKIL_WORKSPACE` environment variable provides the same value as a
 default, e.g. `export WAKIL_WORKSPACE=kb`.
 
+## Skills
+
+A skill is a directory containing a `SKILL.md` file (Claude-Skills-compatible
+frontmatter: `name`, `skill_api`, optional `version`), plus any supporting
+files it needs. wakil resolves a skill name by searching, in order,
+`WAKIL_SKILL_PATH` (a `:`-separated list of extra roots), then
+`<kb-root>/skills`, then `~/.config/wakil/skills`, then built-in skills — the
+first directory found wins, and a broken override blocks fallback rather than
+being silently skipped.
+
+```bash
+uv run wakil -w kb skills list                       # effective name + source
+uv run wakil -w kb skills which meeting-synthesis -v  # selected path, roots, shadows
+uv run wakil -w kb skills validate                    # check every root and skill
+```
+
 ## Ingest
 
 Ingest is two explicit steps.
