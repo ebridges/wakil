@@ -45,3 +45,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["eval: live-model skill evaluations (real API calls; excluded by default, run with -m eval)"]
+addopts = "-m 'not eval'"

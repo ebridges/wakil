@@ -209,6 +209,7 @@ QMD on the PATH, and records high-priority context files (`README.md`,
 ## Development
 
 ```bash
-uv run pytest       # tests
-uv run ruff check   # lint
+uv run pytest             # tests
+uv run ruff check         # lint
+uv run pytest -m eval     # live-model skill evals (needs ANTHROPIC_API_KEY or another configured provider; skipped if none is set)
 ```

@@ -1,0 +1,80 @@
+{
+  "skill": "note-routing",
+  "scenarios": [
+    {
+      "id": "primary-subject-not-format",
+      "query": "wakil just captured this web clipping under sources/inbox/. It's sitting there waiting to be filed for real. Where should it actually live, and what should the file be named?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "RESOLVER.md": "# RESOLVER.md\n\nDecision order for filing content that is not a single resolved entity:\n\n1. Sensitive content (legal, medical, HR) -> `private/` (excluded from default search).\n2. Otherwise, if the content has a clear primary subject matching an existing subject directory (`concepts/`, `people/`, `companies/`, `meetings/`), file it there by primary subject, never by format or where it was captured from.\n3. Raw source material with no single clear subject -> `sources/<origin>/`.\n4. Personal journal entries -> `journal/<year>/`.\n5. Anything else that doesn't fit the above -> `drafts/`, pending further synthesis.\n\nFilenames: kebab-case slug from the primary subject or title. No dates in the filename except for `meetings/` (`YYYY-MM-DD-slug.md`) and `journal/` entries.\n",
+          "sources/inbox/acme-raises-series-b.md": "---\ntype: source\ntitle: Acme Corp Raises Series B\norigin: web\nurl: https://example.com/acme-series-b\ncaptured: 2026-07-14\ntags:\n  - funding\n---\n\n# Acme Corp Raises Series B\n\nAcme Corp announced a $40M Series B to expand its claims-automation\nproduct line. The piece is entirely about Acme Corp's business and roadmap.\n"
+        }
+      },
+      "expected_behavior": [
+        "Identifies RESOLVER.md as the sole authority for this class of decision and follows its own decision order rather than a generic rule.",
+        "Routes the note to a company-subject directory (e.g. companies/) because Acme Corp is the primary subject, not sources/inbox/ or a generic 'articles' bucket, even though it arrived as a web clipping.",
+        "Does NOT file the note under sources/ merely because that's where ingestion happened to place it.",
+        "Generates the filename using RESOLVER.md's own stated slug convention (kebab-case, no date) rather than inventing a naming scheme.",
+        "Does NOT draft frontmatter fields or propose section/heading structure for the note as part of the routing decision.",
+        "Names note-conformance as the next step for shaping the note once the destination and filename are decided."
+      ],
+      "related_skills": ["note-conformance"]
+    },
+    {
+      "id": "no-resolver-md-ask-dont-guess",
+      "query": "Here's a raw capture from a customer call that just landed in the inbox. It's not a single resolved entity — where should it go in the knowledge base?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "inbox/customer-call-notes.md": "Raw notes from a call with a prospective customer about their claims-intake\nprocess. No frontmatter yet, no clear single subject decided.\n"
+        }
+      },
+      "expected_behavior": [
+        "Notices the workspace has no RESOLVER.md before proposing any destination.",
+        "Does NOT guess a destination directory in the absence of RESOLVER.md, even a plausible-sounding one like sources/ or drafts/.",
+        "Explicitly stops and asks the user for the destination rather than proceeding to file the note.",
+        "Does NOT fall back to an entity schema.directory lookup, since this content is not a single resolved entity.",
+        "Does NOT claim to have written or moved the file anywhere before the user answers."
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "resolved-entity-defer-shaping-to-conformance",
+      "query": "entity-resolution just determined this is a new person: Alex Rivera, an engineer at Acme Corp mentioned in the July planning meeting. Where does the note go, and what should its frontmatter and headings look like?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "inbox/resolved-entities/alex-rivera.md": "# Entity Resolution Result\n\n- entity: Alex Rivera\n- type: person\n- action: create\n- resolved_by: entity-resolution\n- context: New engineering hire mentioned in the July planning meeting; will collaborate on FNOL routing with Jane Doe.\n"
+        }
+      },
+      "expected_behavior": [
+        "States the destination directory is people/, taken directly from schema.directory for type person, and treats this as deterministic rather than a judgment call.",
+        "Does NOT draft frontmatter fields (name, status, company, etc.) or propose a heading/section structure for the new page.",
+        "Explicitly names note-conformance as the skill responsible for shaping the note's frontmatter and structure next.",
+        "Does NOT consult or invoke RESOLVER.md for this decision, since the content is a single resolved entity, not workspace-owned routing.",
+        "Does NOT re-open or second-guess entity-resolution's notability/create decision as part of routing it."
+      ],
+      "related_skills": ["note-conformance", "entity-resolution"]
+    },
+    {
+      "id": "genuine-ambiguity-surface-dont-pick",
+      "query": "I drafted this synthesis note about Jane's move to a new role at Acme Corp. Where should it go, and what should I name it?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "RESOLVER.md": "# RESOLVER.md\n\nDecision order for filing content that is not a single resolved entity:\n\n1. Sensitive content (legal, medical, HR) -> `private/`.\n2. If the content has a clear primary subject matching an existing subject directory (`people/`, `companies/`, `concepts/`, `projects/`), file it there by primary subject.\n3. Raw source material with no single clear subject -> `sources/<origin>/`.\n4. Anything else -> `drafts/`.\n\nFilenames: kebab-case slug from the primary subject or title.\n",
+          "drafts/jane-acme-transition.md": "---\ntype: draft\ntitle: Jane's Move to Acme Corp\n---\n\n# Jane's Move to Acme Corp\n\nHalf the note covers Jane Doe's personal transition and career reasoning;\nthe other half covers Acme Corp's hiring push and what it means for the\nteam. Neither side is clearly the primary subject over the other.\n"
+        }
+      },
+      "expected_behavior": [
+        "Recognizes RESOLVER.md routes by primary subject among subject-matter directories rather than a generic catch-all.",
+        "Does NOT silently pick people/ or companies/ when the note is genuinely split between the two subjects.",
+        "Explicitly surfaces the ambiguity and states the reasoning for why it's a genuine toss-up, per the skill's own guidance to surface ambiguity rather than silently choose.",
+        "Does NOT invent a new directory (e.g. a 'relationships' or 'crossover' bucket) that isn't backed by RESOLVER.md's own rules.",
+        "Does NOT generate a final filename/slug before the destination directory question is resolved."
+      ],
+      "related_skills": []
+    }
+  ]
+}

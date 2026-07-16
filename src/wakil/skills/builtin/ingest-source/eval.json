@@ -1,0 +1,56 @@
+{
+  "skill": "ingest-source",
+  "scenarios": [
+    {
+      "id": "native-transcript-two-command-backbone",
+      "query": "There's a call transcript at inbox/acme-q3-call.txt from yesterday's Acme Corp Q3 update call. Please get it into the knowledge base.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "inbox/acme-q3-call.txt": "Acme Corp Q3 Update Call -- 2026-07-14\n\nJane Doe: Claims routing volume is up 12% this quarter, mostly FNOL.\nWe're piloting the graph memory approach we discussed at July planning.\n\nTom Reyes (Acme Corp CFO): Budget is approved for the pilot through Q4.\n"
+        }
+      },
+      "expected_behavior": [
+        "Names the two-command backbone correctly: `wakil ingest transcript inbox/acme-q3-call.txt` (with a --context string) for capture, then `wakil enrich <source-id>` for the analysis/linking step -- not a single invented command that does both.",
+        "Refers to the existing person page using wikilink form (e.g. [[jane-doe]]) rather than a relative Markdown link like ../people/jane-doe.md.",
+        "States that the DAG's proposal (primary note plus any entity stubs) gets one preview and requires one explicit confirmation before anything is written to the workspace.",
+        "Does NOT perform entity resolution or content-synthesis judgment by hand itself -- defers that judgment to the automatic DAG steps `wakil enrich` already runs, rather than deciding itself what the note should say or whether Jane Doe/Tom Reyes match existing pages.",
+        "Notes that if Tom Reyes or the pilot detail warrants more texture, back-links, or Timeline entries than the DAG's automatic output provides, the next step is `entity-enrichment` -- named as the actual sibling skill, not an invented step."
+      ],
+      "related_skills": ["content-synthesis", "entity-resolution", "entity-enrichment"]
+    },
+    {
+      "id": "resume-declined-enrichment-by-source-id",
+      "query": "Yesterday I ran `wakil ingest text` on a clipping about Acme Corp's Q3 budget and it gave me source id src-9f2a1. I then ran `wakil enrich src-9f2a1`, but I declined the confirmation prompt because the proposed note was just a one-line stub for Acme Corp. What should I do now to get this properly into the knowledge base?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Names `wakil enrich src-9f2a1` (without --force) as the correct next command -- resuming by the existing source id rather than starting over.",
+        "Does NOT tell the user to re-run `wakil ingest text` on the same clipping to 'retry' -- capture already succeeded and re-running it doesn't advance a stalled pipeline.",
+        "Does NOT reach for `wakil enrich src-9f2a1 --force` -- --force is for re-analyzing a run that already completed and applied, not one that was declined at the confirmation prompt.",
+        "Frames the fix in terms of tracking progress by source id and resuming from the failed/declined stage, not restarting the whole workflow from source-ingestion or wakil ingest.",
+        "Once the DAG output is accepted, if the thin Acme Corp note still needs real texture or back-links, names `entity-enrichment` as the next manual stage rather than jumping to `note-routing` or `note-conformance` prematurely.",
+        "Notes that declining the earlier confirmation left nothing partially written -- nothing is written before confirmation, so no cleanup is needed before retrying."
+      ],
+      "related_skills": ["entity-enrichment"]
+    },
+    {
+      "id": "voice-memo-needs-normalization-first",
+      "query": "I have a voice memo, voice-note.m4a, from a conversation with Acme Corp's CFO about the Q3 budget. Ingest it into the knowledge base.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Names `source-ingestion` as the skill responsible for normalizing the voice memo before anything else happens -- not something this skill does itself.",
+        "Does NOT invent a nonexistent CLI command like `wakil ingest voice` or `wakil ingest audio` -- wakil only ingests the three native shapes, `transcript`, `text`, or `article`.",
+        "Does NOT attempt to transcribe or extract the audio content, or decide what the CFO conversation means, itself -- that judgment is out of scope here and belongs to normalization/content-synthesis, not to ingest-source acting alone.",
+        "Once normalization is described as producing a transcript or text file, correctly cites the resumption point as the two-command backbone (`wakil ingest transcript|text ...` then `wakil enrich <source-id>`), not before normalization is done.",
+        "Recognizes the voice memo as belonging to the 'normalize first' dispatch-table row alongside PDFs, YouTube videos, and scanned documents, rather than treating it as already CLI-native."
+      ],
+      "related_skills": ["source-ingestion"]
+    }
+  ]
+}

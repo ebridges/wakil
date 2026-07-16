@@ -1,0 +1,76 @@
+{
+  "skill": "entity-resolution",
+  "scenarios": [
+    {
+      "id": "confident-match-by-alias",
+      "query": "I'm hand-revising sources/transcripts/notitle.md and it now opens with the line 'Jane called to discuss the FNOL routing prototype and said Acme's board is nervous about the timeline.' I need to know what 'Jane' refers to before I add anything to the note. Resolve the entity.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Resolves 'Jane' to the existing people/jane-doe.md page by identity (name match plus context: claims work, planning meeting), not by inventing a new stub",
+        "Cites the exact existing path people/jane-doe.md rather than restating or guessing at its frontmatter contents",
+        "Uses wikilink form [[people/jane-doe]] (or equivalent bracketed-path form) rather than a relative Markdown link like [Jane](../people/jane-doe.md)",
+        "Does NOT create or propose creating a new page for Jane since one already exists",
+        "States or implies that deciding whether/how the note should link to the page is out of scope here and belongs to entity-enrichment",
+        "Does NOT resolve 'Acme's board is nervous' as a claim held by Acme itself — recognizes the holder is whoever said it (Jane, or an Acme employee), not the company named as subject"
+      ],
+      "related_skills": ["entity-enrichment", "note-revision"]
+    },
+    {
+      "id": "ambiguous-two-jacks",
+      "query": "I'm hand-editing a new note and it mentions 'spoke with Jack about the migration timeline.' The knowledge base doesn't currently have a Jack, but I want you to first check whether this is even resolvable, then walk through your resolution for this exact scenario: pretend the KB actually contains two existing pages, people/jack-nguyen.md and people/jack-oyelaran.md, and nothing else in the note distinguishes which Jack was meant. What do you do?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jack-nguyen.md": "---\ntype: person\nname: Jack Nguyen\n---\n\n# Jack Nguyen\n\nEngineer at Acme Corp, works on the routing service.\n",
+          "people/jack-oyelaran.md": "---\ntype: person\nname: Jack Oyelaran\n---\n\n# Jack Oyelaran\n\nProduct lead who was briefly involved in the migration project.\n",
+          "drafts/migration-note.md": "# Migration Note\n\nSpoke with Jack about the migration timeline. No last name given, no other context.\n"
+        }
+      },
+      "expected_behavior": [
+        "Recognizes this as the genuinely-ambiguous outcome: the mention fits two existing pages (jack-nguyen.md and jack-oyelaran.md) with nothing in the source to settle it",
+        "Does NOT auto-merge or silently pick whichever candidate matched first (e.g. does not default to Jack Nguyen just because he appears first alphabetically or was created first)",
+        "Does NOT merge the two existing Jack pages into one because they look similar",
+        "Surfaces the case as unresolved/ambiguous rather than guessing, and defers the handling choice (skip the link, ask, or leave a flagged note) to entity-enrichment or the calling agent",
+        "Does not fabricate a disambiguating detail (e.g. inventing a last name or role) that isn't present in the source text"
+      ],
+      "related_skills": ["entity-enrichment"]
+    },
+    {
+      "id": "handoff-boundary-linking-decision",
+      "query": "You've just resolved that 'Acme Corp' in a new draft note refers to a real company that doesn't have a page yet, and it clears the notability gate (it's a company under active evaluation in the note). Now: should the note link to Acme Corp, should a stub page be created, and where should that stub file live in the KB directory structure?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "drafts/acme-eval.md": "# Acme Corp Evaluation\n\nAcme Corp is being evaluated as a claims-routing vendor. No existing KB page for them yet.\n"
+        }
+      },
+      "expected_behavior": [
+        "Declines to answer the linking/placement question directly and explicitly hands it off, naming entity-enrichment by its exact directory name as the skill responsible for deciding how the note connects to the entity",
+        "Does NOT itself decide how many links the note should carry or where a stub page should go — that is explicitly out of this skill's scope",
+        "Does NOT create the stub page itself as a side effect of resolving identity, even though the notability gate was cleared",
+        "Correctly frames its own remaining job as surfacing Acme Corp as a create candidate (the resolution result), not performing the enrichment itself",
+        "Does NOT guess a directory (e.g. companies/ vs orgs/) for the prospective stub, since that placement decision belongs to the downstream skill/schema, not to entity-resolution"
+      ],
+      "related_skills": ["entity-enrichment"]
+    },
+    {
+      "id": "drive-by-mention-fails-notability-gate",
+      "query": "I'm revising meetings/2026/2026-07-01-planning.md by hand and adding a line: 'Jane mentioned she used to work at Beta Systems before joining her current team.' Beta Systems has no existing KB page. Resolve the 'Beta Systems' mention.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Applies the notability gate and concludes Beta Systems does not clear it — it's named only as Jane's past employer, a drive-by mention with no ongoing relevance",
+        "Does NOT propose creating a stub page for Beta Systems",
+        "Reaches the 'no match, doesn't clear the gate' outcome (surfaced as unresolved / not a create candidate) rather than treating every unmatched name as something to create",
+        "Correctly resolves the separate entity 'Jane' in the same sentence to the existing people/jane-doe.md page rather than collapsing both mentions into one judgment",
+        "Notes that a page can be created later if Beta Systems recurs, rather than treating this single mention as reason enough now"
+      ],
+      "related_skills": ["entity-enrichment", "note-revision"]
+    }
+  ]
+}

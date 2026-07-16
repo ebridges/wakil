@@ -1,0 +1,79 @@
+{
+  "skill": "knowledge-research",
+  "scenarios": [
+    {
+      "id": "verify-acme-series-a-claim",
+      "query": "Jane Doe said in the July 10 update call that Acme Corp closed a $10M Series A led by Meridian Ventures in June 2026. I want to add this to the knowledge base -- can you verify it first?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-07-10-acme-update.md": "---\ntype: source\ntitle: Acme Corp Update Call\ndate: 2026-07-10\nspeakers:\n  - Jane Doe\n---\n\n# Acme Corp Update Call\n\nJane Doe: \"Acme Corp closed our $10M Series A in June 2026, led by Meridian\nVentures. We're putting most of it into the claims automation team.\"\n"
+        }
+      },
+      "expected_behavior": [
+        "Names wakil search / wakil query as the way to check the KB for existing Acme Corp or Meridian Ventures coverage before reaching for anything external, rather than jumping straight to a web search.",
+        "If an external source is checked to corroborate the funding round, cites `wakil ingest article <url>` as how that source would be captured into the KB before being relied on as a citation.",
+        "Reaches and states exactly one of the skill's named verdicts (Verified / Partially verified / Unverifiable / Misattributed / Retracted or disputed) rather than a vague 'looks credible' judgment.",
+        "Does NOT elevate the claim to an independently-verified fact about Acme Corp merely because Jane Doe stated it and it's now written down -- attributes it to Jane Doe as the person who made the claim, since this is a self-report about her own company's funding.",
+        "Names the correct next-step skill by directory name: since no durable note for Acme Corp exists yet in the workspace, hands the drafted finding to note-routing (and note-conformance) for placement rather than to note-revision, and separately names entity-enrichment for linking Acme Corp/Meridian Ventures rather than deciding that linkage itself.",
+        "Uses the wikilink form [[people/jane-doe.md]] (full workspace-relative path) when referencing Jane Doe's existing page, not a bare 'Jane Doe' mention or a relative link."
+      ],
+      "related_skills": ["knowledge-query", "note-routing", "note-conformance", "entity-enrichment"]
+    },
+    {
+      "id": "check-fnol-automation-stat",
+      "query": "The draft at drafts/claims-automation-stat.md says 'an industry study found automation cuts assignment time by 40%,' citing a Meridian blog post. Can you check whether that claim actually holds up before I fold it into the claims-routing note?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "drafts/claims-automation-stat.md": "---\ntype: draft\ntitle: Claims Automation Stat\n---\n\n# Claims Automation Stat\n\nPer an industry study, automated FNOL routing cuts handler assignment time\nby 40%. Worth citing in the [[concepts/claims-routing]] note.\n",
+          "sources/articles/meridian-blog-fnol-post.md": "---\ntype: source\ntitle: Meridian Insurtech Blog -- FNOL Automation Pilot\nurl: https://meridianinsurtech.example/blog/fnol-automation-pilot\ncaptured: 2026-06-05\n---\n\n# FNOL Automation Pilot Results\n\nIn a pilot with three of Meridian's customers, automated FNOL routing\nreduced handler assignment time by 35%, down from an average of 20 minutes\nto 13 minutes per claim. Results are specific to Meridian's own product and\ncustomer set.\n"
+        }
+      },
+      "expected_behavior": [
+        "Names wakil search / wakil query as the first move to check what the KB (concepts/claims-routing.md in particular) already says before evaluating the draft's claim.",
+        "Re-reads the saved source file (sources/articles/meridian-blog-fnol-post.md) rather than trusting the draft's paraphrase, and reports the actual figure as 35%, not the draft's 40%.",
+        "Reaches a verdict of Misattributed or Partially verified rather than Verified -- explicitly flags that a single vendor's own blog post about a 3-customer pilot is not 'an industry study', and that the draft's framing oversells the source's authority and scope.",
+        "Does NOT silently carry the draft's 40% figure or 'industry study' framing forward into any proposed note text without flagging the discrepancy.",
+        "Uses the wikilink form [[concepts/claims-routing.md]] (full workspace-relative path with the note's actual filename) when referring to the existing Claims Routing note, not the draft's bare '[[concepts/claims-routing]]' or a relative link.",
+        "Names note-revision as the correct next step for merging the corrected figure and caveat into concepts/claims-routing.md, since that note already exists, rather than proposing a brand-new page."
+      ],
+      "related_skills": ["knowledge-query", "note-revision"]
+    },
+    {
+      "id": "jane-doe-lookup-is-knowledge-query-territory",
+      "query": "What do we know about Jane Doe?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Recognizes that people/jane-doe.md and the 2026-07-01 planning meeting note already fully answer this question, and names wakil search / wakil query as the tool that would surface them -- i.e. treats this as the KB-lookup step, not a research task.",
+        "Names knowledge-query by directory name as the skill whose brain-first lookup this question actually belongs to, rather than launching straight into this skill's research or claim-verification workflow for a question the KB already answers.",
+        "Does NOT reach for an external source (a web search, or `wakil ingest article`) for a question fully answered by material already in the workspace.",
+        "Does NOT invoke the claim-verification verdict framework (Verified / Partially verified / Unverifiable / Misattributed / Retracted or disputed) here -- there is no specific claim to trace, only a lookup.",
+        "If it states what the KB says about Jane Doe, uses the wikilink form [[people/jane-doe.md]] rather than a bare 'Jane Doe' reference or a relative link."
+      ],
+      "related_skills": ["knowledge-query"]
+    },
+    {
+      "id": "shadow-ai-new-topic-not-self-routed",
+      "query": "Can you research whether unauthorized employee use of AI tools ('shadow AI') is a meaningful risk for Acme Corp's claims processing, and put together a note on it?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "meetings/2026/2026-07-08-standup.md": "---\ntype: meeting\ntitle: Weekly Standup\ndate: 2026-07-08\nattendees:\n  - Jane Doe\n---\n\n# Weekly Standup\n\nJane Doe mentioned she'd heard a rumor that some claims handlers are pasting\ncustomer data into personal ChatGPT accounts to draft responses faster. No\nfollow-up yet.\n"
+        }
+      },
+      "expected_behavior": [
+        "Names wakil search / wakil query as the way to check the KB first, and surfaces the 2026-07-08 standup mention as the only existing (partial) coverage before deciding external research is warranted.",
+        "Does NOT decide a destination directory or invent a frontmatter shape for the new note itself -- treats that placement decision as out of scope for this skill.",
+        "Names note-routing (and note-conformance) by directory name as the correct next step for placing and shaping the new note, since nothing existing in the KB is a durable note on this topic.",
+        "Names entity-enrichment by directory name for deciding whether/how to link Jane Doe or Acme Corp into the new note, rather than making that linking or notability call itself.",
+        "Does NOT present Jane Doe's secondhand 'heard a rumor' mention as a confirmed fact -- keeps it labeled as an unconfirmed report/rumor, distinct from anything independently verified.",
+        "Presents the research as findings/a draft for handoff rather than claiming to have already written and placed a finished note in the knowledge base."
+      ],
+      "related_skills": ["knowledge-query", "note-routing", "note-conformance", "entity-enrichment"]
+    }
+  ]
+}
