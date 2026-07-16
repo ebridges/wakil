@@ -88,7 +88,8 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 
 - [ ] Read and prioritize `AGENTS.md`, `SCHEMA.md`, `RESOLVER.md` as workspace
       context in queries and note proposals (detection is done)
-- [ ] Skills loader for Claude-format `SKILL.md` files
+- [x] Skill resolver: precedence-ordered discovery/override for
+      Claude-format `SKILL.md` files (`wakil skills list/which/validate`)
 - [x] Alembic migrations once the schema starts evolving (landed with the
       ingestion/entity refactor Phase B)
 - [ ] Docs: QMD integration, memory lifecycle, git workflow

@@ -18,7 +18,11 @@ from wakil.ui.console import (
     print_index_result,
     print_proposal_issues,
     print_query_result,
+    print_root_issues,
     print_search_hits,
+    print_skill_list,
+    print_skill_validation,
+    print_skill_which,
     print_status,
 )
 
@@ -40,6 +44,8 @@ memory_app = typer.Typer(help="Review and manage the memory lifecycle.", no_args
 app.add_typer(memory_app, name="memory")
 schema_app = typer.Typer(help="Entity schema tools for the knowledge base.", no_args_is_help=True)
 app.add_typer(schema_app, name="schema")
+skills_app = typer.Typer(help="Discover, inspect, and validate skills.", no_args_is_help=True)
+app.add_typer(skills_app, name="skills")
 
 
 @app.callback()
@@ -667,6 +673,102 @@ def git_history(
         raise typer.Exit(code=0)
     for line in entries:
         console.print(line)
+
+
+@skills_app.command("list")
+def skills_list(ctx: typer.Context) -> None:
+    """List effective skills and their resolved source."""
+    from wakil.skills.errors import SkillResolutionError
+    from wakil.skills.resolver import (
+        default_context,
+        discover_skill_names,
+        resolve_roots,
+        resolve_skill,
+    )
+
+    root = _resolve_workspace(ctx)
+    context = default_context(root)
+    root_resolution = resolve_roots(context)
+    print_root_issues(root_resolution.issues)
+
+    rows: list[tuple[str, str, str]] = []
+    for name in discover_skill_names(context):
+        try:
+            resolved = resolve_skill(name, context)
+        except SkillResolutionError as exc:
+            rows.append((name, "error", f"{exc.reason}: {exc}"))
+        else:
+            rows.append((resolved.name, resolved.source, str(resolved.directory)))
+    print_skill_list(rows)
+
+
+@skills_app.command("which")
+def skills_which(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Skill name to resolve.")],
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Show ordered search roots and shadowed matches."),
+    ] = False,
+) -> None:
+    """Show which skill directory wins for a name."""
+    from wakil.skills.errors import SkillResolutionError
+    from wakil.skills.resolver import (
+        default_context,
+        find_shadowed_roots,
+        resolve_roots,
+        resolve_skill,
+    )
+
+    root = _resolve_workspace(ctx)
+    context = default_context(root)
+    root_resolution = resolve_roots(context)
+    print_root_issues(root_resolution.issues)
+    try:
+        resolved = resolve_skill(name, context)
+    except SkillResolutionError as exc:
+        console.print(f"[red]{exc.reason}:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    roots = root_resolution.roots if verbose else None
+    shadowed = find_shadowed_roots(name, context) if verbose else None
+    print_skill_which(resolved, verbose=verbose, roots=roots, shadowed=shadowed)
+
+
+@skills_app.command("validate")
+def skills_validate(
+    ctx: typer.Context,
+    name: Annotated[
+        str | None,
+        typer.Argument(help="Validate only this skill (defaults to every discovered skill)."),
+    ] = None,
+) -> None:
+    """Validate skill roots and skill directories."""
+    from wakil.skills.errors import SkillResolutionError
+    from wakil.skills.resolver import (
+        default_context,
+        discover_skill_names,
+        resolve_roots,
+        resolve_skill,
+    )
+
+    root = _resolve_workspace(ctx)
+    context = default_context(root)
+    root_resolution = resolve_roots(context)
+
+    names = [name] if name else discover_skill_names(context)
+    results: list[tuple[str, bool, str]] = []
+    for candidate in names:
+        try:
+            resolved = resolve_skill(candidate, context)
+        except SkillResolutionError as exc:
+            results.append((candidate, False, f"{exc.reason}: {exc}"))
+        else:
+            results.append((candidate, True, f"{resolved.source}: {resolved.directory}"))
+
+    print_skill_validation(root_resolution.issues, results)
+    if root_resolution.issues or any(not ok for _, ok, _ in results):
+        raise typer.Exit(code=1)
 
 
 @app.command()
