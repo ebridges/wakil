@@ -1,0 +1,84 @@
+{
+  "skill": "note-revision",
+  "scenarios": [
+    {
+      "id": "additive-merge-happy-path",
+      "query": "Just got off a call with Jane Doe -- the transcript is saved at sources/transcripts/2026-07-16-jane-call.md. Update her page with what she told me.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\nstatus: active\ncompany: Acme Corp\nrole: Head of Claims Automation\ncreated: 2026-06-01\nupdated: 2026-07-01\n---\n\n# Jane Doe\n\n## Compiled Truth\n\nJane leads claims automation and has been the primary champion for prototyping graph-based FNOL routing. She's skeptical that a single monolithic vendor can handle claims routing at current volume and prefers composable services she can swap out piece by piece.\n\n## Open Threads\n\n- Evaluating whether a single vendor can handle claims routing at our volume.\n\n## Timeline / Log\n\n- 2026-07-01: July planning meeting -- advocated for a graph-memory-based FNOL routing pilot over a rules-engine rewrite. [[meetings/2026/2026-07-01-planning]]\n- 2026-07-10: Jane reported (self-reported, unverified) that the graph-memory pilot cut manual triage time by about 40%.\n",
+          "sources/transcripts/2026-07-16-jane-call.md": "Quick call with Jane Doe, 2026-07-16. She said the FNOL routing pilot moved to production this week for the first cohort of claims. She's now also evaluating a second vendor, Acme Corp, as a fallback in case the primary pilot doesn't scale.\n"
+        }
+      },
+      "expected_behavior": [
+        "Reads people/jane-doe.md in full -- Compiled Truth, Open Threads, and Timeline / Log -- before drafting any update, rather than working only from the query's summary.",
+        "Re-reads sources/transcripts/2026-07-16-jane-call.md itself for the exact wording and date rather than relying on the query's paraphrase of what Jane said.",
+        "Classifies the new material as additive (production move, new fallback vendor) since neither fact contradicts or duplicates anything already on the page.",
+        "Re-synthesizes Compiled Truth to include both the prior texture (vendor skepticism, composable-services preference) and the new facts, and appends a new dated Timeline / Log entry rather than editing or deleting the existing 2026-07-01 or 2026-07-10 entries.",
+        "Updates the `updated:` frontmatter field to reflect this revision rather than leaving it at 2026-07-01.",
+        "Surfaces the draft diff for confirmation before writing, then names note-conformance (likely to run `wakil schema migrate --dry-run --type person` as its mechanical pass) and kb-commit as the next steps, rather than claiming the page is already saved."
+      ],
+      "related_skills": ["note-conformance", "kb-commit"]
+    },
+    {
+      "id": "conflicting-figures-resist-clobbering",
+      "query": "Here's a fresh transcript from today's standup at sources/transcripts/2026-07-16-jane-standup.md. Just rewrite Jane Doe's page based on this -- replace the current version with an updated one.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\nstatus: active\ncompany: Acme Corp\nrole: Head of Claims Automation\ncreated: 2026-06-01\nupdated: 2026-07-01\n---\n\n# Jane Doe\n\n## Compiled Truth\n\nJane leads claims automation and has been the primary champion for prototyping graph-based FNOL routing. She's skeptical that a single monolithic vendor can handle claims routing at current volume and prefers composable services she can swap out piece by piece.\n\n## Open Threads\n\n- Evaluating whether a single vendor can handle claims routing at our volume.\n\n## Timeline / Log\n\n- 2026-07-01: July planning meeting -- advocated for a graph-memory-based FNOL routing pilot over a rules-engine rewrite. [[meetings/2026/2026-07-01-planning]]\n- 2026-07-10: Jane reported (self-reported, unverified) that the graph-memory pilot cut manual triage time by about 40%.\n",
+          "sources/transcripts/2026-07-16-jane-standup.md": "Standup, 2026-07-16. Jane Doe said the 40% triage-time figure she gave on the 10th was based on a small sample -- she now thinks it's closer to 25% once more claims ran through the pilot.\n"
+        }
+      },
+      "expected_behavior": [
+        "Does NOT perform a full-file regeneration of people/jane-doe.md from only the new standup transcript despite the request's 'rewrite ... replace' phrasing -- treats full regeneration as the mechanism that causes clobbering, not a valid shortcut.",
+        "Does NOT silently overwrite the existing 40% figure with 25%, and does NOT silently drop the new 25% figure -- notes the contradiction explicitly with both figures cited in Timeline / Log.",
+        "Preserves prior Compiled Truth content (vendor skepticism, composable-services preference), the 2026-07-01 Timeline entry, and existing frontmatter fields (status, company, role, created) rather than reducing the page to only the newest source's content.",
+        "Treats a shorter or thinner draft than the current page as a stop-and-check signal rather than proceeding to write it as an improvement.",
+        "Attributes both the 40% and 25% figures to Jane Doe as self-reported claims, not to Acme Corp or to any external verified source.",
+        "Surfaces the flagged conflict and diff for confirmation before writing anything, rather than auto-applying either the old or the new figure."
+      ],
+      "related_skills": ["note-conformance", "kb-commit"]
+    },
+    {
+      "id": "split-entity-handoff-to-note-routing",
+      "query": "Jane Doe just told me she's leaving to start her own company called Acme Claims AI, spun out of the FNOL routing work she led here. The transcript's at sources/transcripts/2026-07-16-jane-departure.md. Update her page and get Acme Claims AI set up in the knowledge base too.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\nstatus: active\ncompany: Acme Corp\nrole: Head of Claims Automation\ncreated: 2026-06-01\nupdated: 2026-07-01\n---\n\n# Jane Doe\n\n## Compiled Truth\n\nJane leads claims automation and has been the primary champion for prototyping graph-based FNOL routing.\n\n## Open Threads\n\n- Evaluating whether a single vendor can handle claims routing at our volume.\n\n## Timeline / Log\n\n- 2026-07-01: July planning meeting -- advocated for a graph-memory-based FNOL routing pilot over a rules-engine rewrite. [[meetings/2026/2026-07-01-planning]]\n",
+          "sources/transcripts/2026-07-16-jane-departure.md": "Call with Jane Doe, 2026-07-16. She's leaving Acme Corp to found her own company, Acme Claims AI, spinning directly out of the FNOL routing work she led. She wants Acme Claims AI tracked going forward.\n"
+        }
+      },
+      "expected_behavior": [
+        "Updates people/jane-doe.md itself (status, role/company fields, a new Timeline / Log entry about her departure) since that page already exists and this part is squarely in scope.",
+        "Does NOT create, place, or write any new file for Acme Claims AI itself (no invented path like companies/acme-claims-ai.md) -- names note-routing as the skill responsible for deciding a new entity's destination directory and filename.",
+        "Does NOT itself decide whether Acme Claims AI clears the notability gate or warrants a page at all -- names entity-resolution as the skill that owns that judgment, rather than assuming it should be created.",
+        "Appends the departure/founding fact as a new dated Timeline / Log entry on Jane's page without deleting or rewriting the existing 2026-07-01 entry.",
+        "References Jane Doe's page using wikilink form (e.g. [[people/jane-doe]]) rather than a relative Markdown link if it links to her from elsewhere.",
+        "Surfaces the diff for Jane Doe's page for confirmation before writing, rather than claiming the update and the new Acme Claims AI setup are already done."
+      ],
+      "related_skills": ["note-routing", "entity-resolution"]
+    },
+    {
+      "id": "no-existing-note-handoff-to-content-synthesis",
+      "query": "New source came in about Acme Corp -- they're now our vendor of choice for claims routing after the pilot wrapped up. The transcript's at sources/transcripts/2026-07-16-acme-vendor-decision.md. Update Acme Corp's note with this info.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-07-16-acme-vendor-decision.md": "Jane Doe said Acme Corp has been selected as vendor of choice for claims routing following the pilot's results.\n"
+        }
+      },
+      "expected_behavior": [
+        "Checks the knowledge base for an existing Acme Corp page before doing anything, and correctly reports that none exists -- only people/jane-doe.md, concepts/claims-routing.md, and concepts/graph-memory.md are present.",
+        "States plainly that this isn't a note-revision task since there is no existing note to read or merge into, rather than proceeding as if one exists.",
+        "Names content-synthesis as the skill for drafting Acme Corp's content from scratch, since note-revision explicitly excludes creating a note that doesn't exist yet.",
+        "Does NOT fabricate or write a new Acme Corp page itself under this skill's procedure, and does NOT guess its destination directory or filename (e.g. companies/acme-corp.md) -- that's note-routing's call once the page is drafted.",
+        "Does NOT proceed to Step 3 classification (additive vs. contradicting vs. duplicate) for Acme Corp, since Step 1 -- reading the existing note in full -- has no existing note to read.",
+        "Does NOT lose track of Jane Doe as the source of the claim -- if mentioning her, attributes the vendor-selection statement to Jane Doe rather than treating it as an unattributed fact."
+      ],
+      "related_skills": ["content-synthesis", "note-routing"]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "skill": "knowledge-query",
+  "scenarios": [
+    {
+      "id": "current-status-recency-over-compiled",
+      "query": "What's the current status of claims routing?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "concepts/claims-routing.md": "---\ntype: concept\nname: Claims Routing\n---\n\n# Claims Routing\n\n## State\n\nHow incoming insurance claims (FNOL) are triaged and routed to handlers. As\nof the July planning meeting, the team had only decided to prototype FNOL\nrouting using graph memory; nothing had shipped yet.\n\n## Timeline\n\n- 2026-07-01: Decided to prototype FNOL routing with graph memory. See\n  [[meetings/2026/2026-07-01-planning]].\n- 2026-07-14: First internal test passed; routing latency dropped under\n  200ms. Jane Doe is leading the rollout. See [[people/jane-doe]].\n"
+        }
+      },
+      "expected_behavior": [
+        "Names the actual wakil CLI command used for retrieval (wakil search or wakil query, with a --mode flag) rather than inventing a command name",
+        "Weighs recency correctly for this current-state question: leads with the 2026-07-14 entry (test passed, latency under 200ms) rather than resting on the older 'still deciding whether to prototype' framing from the State section",
+        "Cites the concept page using wikilink form [[concepts/claims-routing]] (and, if Jane Doe's role is mentioned, [[people/jane-doe]]) rather than a relative Markdown link",
+        "Distinguishes the retrieved fact (latency under 200ms, per the 2026-07-14 Timeline entry) from any inference drawn from it, rather than presenting synthesis with the same confidence as a citation",
+        "Does NOT invent a specific latency number, date, or detail beyond what the Timeline entry actually states"
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "same-day-conflicting-timeline-entries",
+      "query": "Who's leading the FNOL routing prototype right now?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\n---\n\n# Jane Doe\n\n## State\n\nWorks on claims automation. Met at the July planning meeting.\n\n## Timeline\n\n- 2026-07-14: Jane confirmed in standup that she is now the lead for the\n  FNOL routing prototype.\n- 2026-07-14: Separate planning notes from the same day say the FNOL\n  routing prototype was handed off to Alex Rivera and Jane moved to a\n  different project.\n"
+        }
+      },
+      "expected_behavior": [
+        "Recognizes the two 2026-07-14 Timeline entries as a genuine conflict at the same level, not resolvable by source precedence or recency alone since they are dated the same day",
+        "Surfaces both citations explicitly (pointing to [[people/jane-doe]] for both claims) rather than silently choosing one",
+        "Does NOT quietly report only 'Jane is leading the prototype' (or only the handoff-to-Alex claim) without flagging that the two sources disagree",
+        "Uses wikilink form [[people/jane-doe]] when citing, not a relative Markdown link",
+        "Does NOT fabricate a tiebreaker (e.g. inventing which note was written later in the day, or which source is more authoritative) that isn't actually stated in the notes",
+        "Does NOT invent an Alex Rivera page or claim one exists; only reports what the conflicting entry actually says about the handoff"
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "kb-empty-handoff-to-knowledge-research",
+      "query": "What SLA and cloud region does our graph-memory infrastructure vendor guarantee for uptime?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Attempts a KB-first lookup (names wakil search or wakil query with a --mode flag) before concluding anything, rather than skipping straight to external research",
+        "Reports the gap honestly (e.g. 'the knowledge base doesn't have information on vendor SLAs or cloud regions') rather than fabricating an SLA percentage or region from general knowledge",
+        "Does NOT perform or narrate an inline web search itself as part of this response",
+        "Explicitly hands off to knowledge-research by that exact name as the next step for the external research",
+        "Finishes the KB-grounded (nothing-found) answer before or while proposing the handoff, rather than jumping straight to 'hand this off' with no KB-grounded answer at all",
+        "Does NOT cite concepts/graph-memory.md as if it contained vendor, SLA, or uptime information it doesn't actually contain"
+      ],
+      "related_skills": ["knowledge-research"]
+    },
+    {
+      "id": "conceptual-question-needs-vsearch",
+      "query": "What have I learned about connecting related pieces of knowledge together automatically?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Recognizes the phrasing is conceptual and unlikely to keyword-match the note's actual wording, and reaches for vsearch (or query, which subsumes it) rather than defaulting to a plain keyword search without justification, naming the actual --mode flag/value",
+        "Retrieves and cites concepts/graph-memory.md using wikilink form [[concepts/graph-memory]], not a relative link or an uncited paraphrase",
+        "Treats this as a canonical-truth-style question by leaning on the note's compiled description rather than treating it as a request for the newest timestamped event",
+        "Does NOT overstate KB coverage: reports that there is a single relevant concept note rather than implying broader or repeated coverage of the idea",
+        "If it also surfaces the related [[claims-routing]] link mentioned inside graph-memory.md, presents that connection as a retrieved fact (present in the note) rather than as its own inference"
+      ],
+      "related_skills": []
+    }
+  ]
+}

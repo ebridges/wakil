@@ -1,0 +1,99 @@
+{
+  "skill": "source-ingestion",
+  "scenarios": [
+    {
+      "id": "pdf-email-export-happy-path",
+      "query": "I have a PDF export of an email thread between me and Acme Corp about a partnership proposal, saved as sources/raw/acme-thread.pdf. I've already run pdftotext on it and saved the output to sources/raw/acme-thread.txt. The thread has three participants: me, John Smith (Acme Corp, VP Partnerships), and Priya Patel (Acme Corp, Legal). The extracted text shows each earlier message quoted in full at the bottom of every later reply as the thread grows. What should I do to get this into the knowledge base?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/raw/acme-thread.txt": "From: John Smith <john.smith@acme.example>\nTo: me\nSubject: Partnership proposal\n\nHi, following up on our call -- proposing a 60/40 revenue split favoring Acme for the first year.\n\n> On Jul 10, from: me\n> Sounds good, let's discuss terms.\n\n---\n\nFrom: Priya Patel <priya.patel@acme.example>\nTo: me, John Smith\nSubject: RE: Partnership proposal\n\nLegal reviewed -- we're fine with the 60/40 split for year one, standard terms after.\n\n> On Jul 11, from: John Smith\n> Hi, following up on our call -- proposing a 60/40 revenue split favoring Acme for the first year.\n>\n> > On Jul 10, from: me\n> > Sounds good, let's discuss terms.\n"
+        }
+      },
+      "expected_behavior": [
+        "Identifies this as a PDF/email-thread source that must be classified and normalized before wakil ingest can run, per the PDF section of references/source-types.md",
+        "De-duplicates the quoted/forwarded content (the repeated 60/40 message) before writing the normalized file, rather than capturing it multiple times",
+        "Names the correct destination CLI command as `wakil ingest text` (an email thread, not a meeting transcript) with a `--context`/`-C` string",
+        "Builds a --context string naming the participants with full names, roles, and company (John Smith, VP Partnerships; Priya Patel, Legal; Acme Corp) rather than leaving them for a later step to guess",
+        "Does NOT pass the original PDF path itself to wakil ingest or embed it in place of the extracted content",
+        "Does NOT attempt to resolve or create person/company entity pages itself, and instead defers that to wakil enrich's entity-resolution step"
+      ],
+      "related_skills": ["ingest-source"]
+    },
+    {
+      "id": "suspicious-numeric-claim-in-batch-transcripts",
+      "query": "I just got back from a conference and have a folder of 40 auto-transcribed voice memos from investor conversations, sources/raw/voice/*.txt. I want to get all 40 into wakil as fast as possible. Here's the first one, sources/raw/voice/memo-01.txt -- it mentions a fundraising number that sounds off to me. How should I proceed?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/raw/voice/memo-01.txt": "okay so, uh, quick note after the coffee chat with the investor -- they said they'd do, uh, three hundred basis points of the round, which, wait, I think they meant three hundred thousand dollars not three hundred basis points, that doesn't really make sense for a round this size. anyway need to follow up on that. also they want a call next week.",
+          "sources/raw/voice/memo-02.txt": "second memo, different investor, said they're interested in leading.",
+          "sources/raw/voice/memo-03.txt": "third one, quick, nothing major here, just a name to follow up with."
+        }
+      },
+      "expected_behavior": [
+        "Recommends normalizing and ingesting only a small sample (3-5 memos) first and inspecting the results before processing the remaining ~35, rather than batch-processing all 40 at once",
+        "Classifies the voice memos as destination shape `wakil ingest text` (solo narration, not a multi-party dialogue), not `wakil ingest transcript`",
+        "Transcribes memo-01 verbatim, preserving hesitations and filler ('uh', 'wait, I think they meant') rather than cleaning up the phrasing",
+        "Flags the 'three hundred basis points' vs 'three hundred thousand dollars' discrepancy in the --context string, noting both the verbatim claim and the likely correction, rather than silently picking one or dropping it",
+        "Does NOT silently fix the ambiguous number to whichever value seems more plausible without noting the original verbatim claim",
+        "Names the correct CLI command `wakil ingest text` with a --context string, not an invented ingestion command"
+      ],
+      "related_skills": ["ingest-source"]
+    },
+    {
+      "id": "handoff-boundary-deciding-and-orchestrating",
+      "query": "I have a folder of 12 old customer support call recordings that I already ran through a transcription service, so I have sources/raw/calls/*.txt for each. I want the whole thing done end-to-end -- decide which of these actually deserve to be captured at all (some are just voicemail hangups), normalize the good ones, run wakil ingest and wakil enrich for each, then commit the result in a branch and open a PR. Walk me through it.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/raw/calls/call-01.txt": "Hi this is a voicemail, please call me back, thanks, bye.",
+          "sources/raw/calls/call-02.txt": "Customer: My claim got rejected and I don't understand why.\nAgent: Let me look into that, can you give me your claim number?\nCustomer: Sure, it's 88213.\nAgent: I see it now, it looks like it was routed incorrectly. I'll escalate this."
+        }
+      },
+      "expected_behavior": [
+        "Explicitly declines to decide which recordings are worth capturing at all (e.g. filtering out voicemail hangups) and names `ingest-source` as the skill that owns that judgment, rather than making the call itself",
+        "Explicitly declines to orchestrate the full ingest/enrich sequence, branches, and PR/commit workflow, naming `ingest-source` (orchestration) and `kb-commit` (committing) as the right skills for that territory",
+        "For the calls it does address, still performs the normalization step itself -- classifying call-02 as a `wakil ingest transcript` candidate (multi-party dialogue) with attendee/context detail, since that part is this skill's own job",
+        "Does NOT run wakil enrich, create branches, or commit changes itself",
+        "Names the correct CLI capture command `wakil ingest transcript` for the multi-party call rather than `wakil ingest text`"
+      ],
+      "related_skills": ["ingest-source", "kb-commit"]
+    },
+    {
+      "id": "youtube-transcript-unavailable",
+      "query": "Found a YouTube interview that seems really relevant to our claims-routing work: a 40-minute conversation with an insurtech founder. I want to get it into the knowledge base, but when I try to pull the transcript/captions, YouTube says captions are disabled for this video and there's no auto-transcript available either. What should I do?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "States plainly that a missing/disabled transcript is a dead end for this skill, rather than proceeding anyway",
+        "Does NOT fabricate or summarize a normalized capture from the video's title, description, or thumbnail text",
+        "Does NOT invent or guess at a wakil ingest command to run for a video with no extractable transcript",
+        "Explains that the video is a multi-party interview so it would have been destined for `wakil ingest transcript` had a transcript been available, showing it understood the classification even though it correctly stops short of fabricating content",
+        "Suggests a legitimate alternative path only if grounded in the material actually available (e.g. trying another caption source, or waiting/checking again later) rather than papering over the gap with a guess"
+      ],
+      "related_skills": ["ingest-source"]
+    },
+    {
+      "id": "meeting-date-vs-capture-date-and-prep-doc",
+      "query": "I'm finally getting around to capturing a meeting transcript export from a call that actually happened back on 2026-06-15, but I'm normalizing and ingesting it today. The exported file is sources/raw/followup-call.txt. We also keep a prep doc ahead of meetings in this workspace -- there's one for this call at drafts/rough-idea.md (yes, I know the filename doesn't match, it was renamed).",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/raw/followup-call.txt": "Jane: So following up from last time, are we still on track for the FNOL routing prototype?\nMe: Yes, on track. One open question: do we handle partial claims the same way?\nJane: Good question, let's flag that as open for now.\n"
+        }
+      },
+      "expected_behavior": [
+        "Distinguishes the meeting_date (2026-06-15, when the call actually happened) from the capture date (today), and puts the real meeting date in the --context string rather than trusting today's date or a filename timestamp",
+        "Reads drafts/rough-idea.md as the workspace's prep-doc content before normalizing, but does NOT invent a frontmatter shape for it -- treats prep-doc reconciliation as workspace-owned judgment rather than a wakil schema field",
+        "Notes the open question about partial claims (raised in the call) in the --context string so the extraction step can see what's still unresolved",
+        "Names the correct CLI command `wakil ingest transcript` (multi-party dialogue between Jane and the user) with a --context string, not `wakil ingest text`",
+        "Does NOT create or resolve Jane Doe's entity page directly -- defers that to wakil enrich's entity-resolution step",
+        "Does NOT fabricate a RESOLVER.md or SCHEMA.md-defined prep-note frontmatter shape that isn't actually present in the workspace"
+      ],
+      "related_skills": ["note-routing"]
+    }
+  ]
+}

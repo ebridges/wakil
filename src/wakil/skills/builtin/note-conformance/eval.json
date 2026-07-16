@@ -1,0 +1,59 @@
+{
+  "skill": "note-conformance",
+  "scenarios": [
+    {
+      "id": "happy-path-mechanical-plus-manual-fixes",
+      "query": "I just drafted people/jack-nguyen.md and want to commit it. Run note-conformance on it before kb-commit — audit it and fix what's mechanical, flag what isn't.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jack-nguyen.md": "---\ntype: person\nname: Jack Nguyen\nstatus: active\nend_date: 2026-06-01\ncreated: 2026-07-15\nupdated: 2026-07-15\n---\n\n# Jack N.\n\nIt's worth noting that Jack used to work at Acme Corp on the routing team. He might still be involved, though this isn't confirmed anywhere.\n"
+        }
+      },
+      "expected_behavior": [
+        "Names `wakil schema migrate --dry-run --type person` as the correct first step and describes reading its diff before applying, rather than inventing a different command for the mechanical pass",
+        "Identifies `end_date` as a mechanical rename to `end-date` that the migrate pass handles, not something to hand-edit",
+        "Identifies the slug mismatch between the filename (jack-nguyen) and the H1 (\"Jack N.\") and resolves it by fixing the H1 to match the filename, not by renaming the file to match the heading",
+        "Flags (or fixes) \"It's worth noting that\" as a no-slop filler phrase per the output-quality bar",
+        "Does NOT fabricate a source or citation for the Acme Corp claim and does NOT silently delete it — flags it as an uncited fact per 'Deterministic links, uncitable facts'",
+        "Shows the migrate dry-run diff / proposed changes for review rather than claiming the file was already rewritten"
+      ],
+      "related_skills": ["kb-commit"]
+    },
+    {
+      "id": "unrecognized-entity-type-hard-stop",
+      "query": "Run note-conformance on drafts/acme-vendor-review.md before I commit it.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "drafts/acme-vendor-review.md": "---\ntype: vendor-review\nname: Acme Corp Vendor Review\nstatus: draft\ncreated: 2026-07-15\n---\n\n# Acme Corp Vendor Review\n\nNotes on Acme Corp as a potential claims-routing vendor.\n"
+        }
+      },
+      "expected_behavior": [
+        "Recognizes that `vendor-review` is not a type any entity schema defines and treats this as a hard schema error (a SchemaError from validate_frontmatter), not a minor style nit",
+        "Does NOT best-guess or silently substitute the closest-sounding known type (e.g. does NOT retype it to `assessment` or `company` on its own)",
+        "Flags the unrecognized type explicitly for the user to resolve rather than proceeding to write or fix the file",
+        "Notes that `wakil schema migrate` would not retype an unrecognized type either, so running it here would not resolve this class of problem",
+        "Does NOT invent additional frontmatter fields for a `vendor-review` schema that doesn't exist just to make the file appear to pass validation"
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "handoff-boundary-content-change-vs-shape-check",
+      "query": "New information changes what's actually true in concepts/graph-memory.md — the relationship to claims-routing is now bidirectional, not just a one-way \"related to\" mention. Run note-conformance on the file, fix its shape, and also update its content to reflect this new fact.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Performs the shape/schema audit on graph-memory.md (category rule, slug consistency, link form, no-slop bar) and reports its findings",
+        "Declines to merge the new bidirectional-relationship fact into the note's content itself, stating that changing what a note says is out of this skill's scope",
+        "Names `note-revision` by its exact directory name as the skill responsible for merging the new fact into the existing note, since the page already exists",
+        "Does NOT rewrite the note's body or its Graph Memory / Claims Routing relationship description on its own initiative to incorporate the new fact",
+        "Frames its own output as a list of shape fixes applied and issues flagged, not as a content update",
+        "Notes (or implies) that after note-revision merges the fact, the note should come back through note-conformance again before kb-commit"
+      ],
+      "related_skills": ["note-revision"]
+    }
+  ]
+}

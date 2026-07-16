@@ -1,0 +1,95 @@
+{
+  "skill": "skill-authoring",
+  "scenarios": [
+    {
+      "id": "new-skill-mece-scan-and-placement",
+      "query": "I keep doing the same thing by hand after every ingest batch: check each newly-created source note's domain against my own allowlist of trusted domains, and flag any source whose domain isn't on the list in a running audit-log note. I do this every single time a batch lands. Can you turn this into a skill for me?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "skills/weekly-review/SKILL.md": "---\nname: weekly-review\ndescription: Summarize the past week's meeting notes into a single digest entry. Use at the end of each week to compress meetings/ activity into one synthesis note.\nskill_api: 1\n---\n\n# weekly-review\n\n## When to use\n\n- End of week, to compress the week's meeting notes into one digest.\n\n## Procedure\n\n1. Gather the week's meetings/ notes.\n2. Write one digest entry summarizing decisions and open items.\n"
+        }
+      },
+      "expected_behavior": [
+        "Runs, or explicitly states it would run, `wakil skills list` before deciding anything, per the MECE-scan step, rather than assuming outright that a new skill is needed",
+        "Notices the existing kb-local skills/weekly-review/SKILL.md as part of the scan and confirms it doesn't already cover domain-allowlist auditing, rather than only checking whatever is already loaded in context",
+        "Applies the skill-shaped test (repeatable, carries real procedural judgment, a description distinguishable from siblings like weekly-review) before deciding to create a new file rather than just noting a one-off in conversation",
+        "If creating a new skill, places it at <kb-root>/skills/<name>/ (kb-local) rather than under src/wakil/skills/builtin/, since a new workflow for one knowledge base is kb-local by default and adding a shipped built-in is a maintainer decision, not a mid-task one",
+        "Produces frontmatter matching the contract exactly: lowercase kebab-case name matching the directory, skill_api: 1, and a one-line description specific enough not to be confused with weekly-review or another sibling",
+        "Does NOT invent a new wakil CLI command (e.g. a fictitious `wakil audit` or `wakil allowlist-check`) to describe how the procedure runs, framing it instead as an agent procedure"
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "genuine-gap-escalation",
+      "query": "We just discovered people/jane-doe.md and people/jane-m-doe.md are duplicates of the same person that need to be merged into one page. Picking which frontmatter fields survive is one kind of judgment, and preserving both pages' Timeline entries without dropping either is another kind — but no existing skill's stated scope says it owns 'merging two duplicate pages into one.' What should happen here?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-m-doe.md": "---\ntype: person\nname: Jane M. Doe\n---\n\n# Jane M. Doe\n\nSame claims-automation work as people/jane-doe.md; looks like a duplicate page created by a separate ingest run.\n"
+        }
+      },
+      "expected_behavior": [
+        "Recognizes this as a genuine gap between two existing skills' stated scopes (content-synthesis and note-revision), not a MECE-scan miss it can silently resolve by picking one of them",
+        "Does NOT silently extend either content-synthesis or note-revision on the spot to cover 'merging' without first surfacing the tension to the user",
+        "Does NOT invent a brand-new skill unilaterally in the same turn to paper over the gap",
+        "Escalates to the user, stating plainly what's missing and letting them decide whether it's a new skill, a rescoped existing skill, or out of scope for now, per the skill's own guidance for when a problem is bigger than one skill",
+        "Does NOT treat wakil memory's candidate-fact lifecycle as a task backlog or substitute mechanism for resolving this kind of gap",
+        "Does NOT claim wakil has an umbrella-skill hierarchy that would automatically reroute the gap"
+      ],
+      "related_skills": ["content-synthesis", "note-revision"]
+    },
+    {
+      "id": "handoff-boundary-note-content-and-placement",
+      "query": "While you're looking at this — drafts/rough-idea.md has no frontmatter yet. Can you also decide where it should actually live in the knowledge base, and write proper frontmatter and content structure for it?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Declines to decide drafts/rough-idea.md's destination directory itself, naming note-routing as the skill responsible for that decision",
+        "Declines to draft the note's frontmatter, content, or heading structure itself, naming content-synthesis and/or note-conformance as responsible for that instead",
+        "States plainly that its own scope covers how skill files (SKILL.md) are authored, scoped, and placed, not how a knowledge-base note is authored or placed, echoing its own opening-paragraph boundary",
+        "Does NOT attempt to answer the routing or content question directly as a one-off favor just because it was asked in the same breath",
+        "Names the sibling skills by their exact catalog directory names (note-routing, content-synthesis, note-conformance) rather than a vague 'something else in wakil handles that'"
+      ],
+      "related_skills": ["note-routing", "content-synthesis"]
+    },
+    {
+      "id": "override-a-builtin-for-one-kb",
+      "query": "I need to tweak note-routing's behavior just for my own knowledge base: when RESOLVER.md is missing, I want it to default to drafts/ instead of stopping to ask. How do I make that change just for my KB without touching everyone else's wakil install?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Identifies this as a built-in override rather than a direct edit to the shipped source at src/wakil/skills/builtin/note-routing/",
+        "States the correct destination for the override is <kb-root>/skills/note-routing/, copying note-routing's entire directory rather than only its SKILL.md file",
+        "Warns that the whole-directory copy must also bring along any references/, templates/, or scripts/ files note-routing actually uses, since wakil won't reach back into the built-in for a missing supporting file once the kb-local copy wins resolution",
+        "Names `wakil skills which note-routing --verbose` as the command to confirm the kb-local copy is the one actually winning resolution, not silently shadowed by a higher-precedence root",
+        "Names `wakil skills validate note-routing` as the command to check the override's frontmatter and directory are well-formed before relying on it",
+        "Does NOT propose editing src/wakil/skills/builtin/note-routing/ directly to make this workspace-specific behavior change"
+      ],
+      "related_skills": ["note-routing"]
+    },
+    {
+      "id": "promote-kb-local-skill-genericization",
+      "query": "Our KB has a kb-local skill at skills/priya-review-tracker/SKILL.md that Priya set up for tracking Acme Corp's contract-review requests. It's been useful enough that I want it added to the shipped built-in catalog so every wakil workspace gets it. What needs to happen?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "skills/priya-review-tracker/SKILL.md": "---\nname: priya-review-tracker\ndescription: Track Acme Corp's contract-review requests as they move through Priya's team's queue.\nskill_api: 1\n---\n\n# priya-review-tracker\n\n## When to use\n\n- A new contract-review request comes in from Priya's team at Acme Corp.\n\n## Procedure\n\n1. Log the request in contracts/acme-review-log.md with the requester's Slack handle.\n2. Ping Priya in #legal-ops if the SLA is at risk.\n"
+        }
+      },
+      "expected_behavior": [
+        "Treats this as an editorial genericization pass rather than a plain copy, per skill-authoring's own promoting-or-porting checklist",
+        "Flags the specific person and company names in the draft (Priya, Acme Corp) as needing to become generic placeholders, since a built-in skill ships to every workspace",
+        "Flags the Slack-specific reference (#legal-ops channel) as a tool- or workspace-specific detail to scrub, since it isn't part of wakil itself or this workspace's own RESOLVER.md/SCHEMA.md",
+        "Does NOT propose copying skills/priya-review-tracker/SKILL.md into src/wakil/skills/builtin/ unchanged",
+        "States that if the promoted version intentionally does less than the kb-local original, that narrowing must be documented explicitly in the skill's own body, not left implicit or noted only in a commit message",
+        "Does NOT unilaterally decide to add it to the built-in catalog itself, instead framing this as the kind of built-in-catalog decision that belongs to whoever maintains wakil"
+      ],
+      "related_skills": []
+    }
+  ]
+}

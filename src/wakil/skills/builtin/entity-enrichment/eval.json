@@ -1,0 +1,79 @@
+{
+  "skill": "entity-enrichment",
+  "scenarios": [
+    {
+      "id": "confident-match-plus-create-candidate",
+      "query": "The source below (sources/transcripts/2026-07-15-jane-catchup.md) has already been through wakil's ingest pipeline: `wakil enrich` ran entity-resolution against it, which returned 'Jane Doe' -> confident match to people/jane-doe.md, and 'Acme Corp' -> create candidate (type: company, cleared the notability gate; `wakil enrich` has already written a schema-valid stub for it with empty Compiled Truth, Open Threads, and Timeline / Log sections). Decide how this note should connect to the knowledge base for each entity, and what content belongs on Acme Corp's new page.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-07-15-jane-catchup.md": "Jane Doe called to catch up on the FNOL routing prototype. She's grown skeptical that a single monolithic vendor can handle claims routing at our volume, and said she's been quietly evaluating Acme Corp as a potential routing-engine partner because their claims graph model looks close to what we sketched with graph memory. She wants to pilot Acme Corp's API against a slice of real claims before committing further.\n"
+        }
+      },
+      "expected_behavior": [
+        "Uses the page's real section names when describing the edit to Jane Doe's page -- 'Compiled Truth' and 'Timeline' (or 'Timeline / Log') -- not invented labels like 'bio' or 'summary'.",
+        "Proposes any link to Jane Doe's page as a wikilink in [[path]] form (e.g. [[people/jane-doe]]), not a relative Markdown link.",
+        "Hands the decision of Acme Corp's destination directory and filename to note-routing rather than picking companies/acme-corp.md itself.",
+        "Names note-conformance as the pass that still needs to check the new Acme Corp page before it's committed, rather than treating the content as final.",
+        "Does NOT write placeholder boilerplate like '[No data yet]' into Acme Corp's Compiled Truth -- proposes real texture (Jane's skepticism of monolithic vendors, her motivation for evaluating Acme, the graph-memory tie-in), not a bare fact sheet.",
+        "Does NOT re-run or second-guess entity-resolution's identity call (e.g. does not re-debate whether 'Jane Doe' matches people/jane-doe.md) -- treats that match as already settled and builds on it."
+      ],
+      "related_skills": ["entity-resolution", "note-routing", "note-conformance"]
+    },
+    {
+      "id": "ambiguous-and-non-notable-mentions",
+      "query": "Entity-resolution has already run against the source below (sources/transcripts/2026-07-16-team-sync.md) and returned: 'Jane' -> ambiguous (candidates: people/jane-doe.md, no other match, insufficient signal to pick one), and the rideshare driver -> no match, does not clear the notability gate. Decide how, or whether, this note should connect to the knowledge base for each of these mentions.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-07-16-team-sync.md": "Someone named Jane joined the call briefly to ask about the routing pilot, but it wasn't clear whether this was the same Jane Doe from claims automation or a different Jane from the vendor-risk team -- she dropped off before anyone could confirm. Also on the call: a driver from a rideshare app who dropped off coffee halfway through, not otherwise relevant to the discussion.\n"
+        }
+      },
+      "expected_behavior": [
+        "Does NOT force a link from the ambiguous 'Jane' mention to people/jane-doe.md just because it's the closest-looking candidate.",
+        "Does NOT merge or fold the ambiguous 'Jane' mention into Jane Doe's existing page content.",
+        "Explicitly says the ambiguous mention is left unlinked, rather than silently dropping it without comment.",
+        "Does NOT create a new page or add a back-link for the rideshare driver mention, since it doesn't clear the notability gate.",
+        "Does NOT invent extra biographical detail about either 'Jane' to manufacture enough signal to force a resolution."
+      ],
+      "related_skills": ["entity-resolution"]
+    },
+    {
+      "id": "unresolved-mention-defers-to-entity-resolution",
+      "query": "This draft note (drafts/new-fraud-model-idea.md) mentions 'Behavioral Fraud Scoring' several times as a new modeling approach the user wants to start tracking. No entity-resolution has been run on this note yet -- it hasn't been through `wakil enrich` at all. Decide how the note should connect to the knowledge base.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "drafts/new-fraud-model-idea.md": "# A New Fraud Model Idea\n\nWhat if Behavioral Fraud Scoring became its own workstream, separate from claims routing? Behavioral Fraud Scoring would look at claimant behavior patterns over time rather than single-claim signals.\n"
+        }
+      },
+      "expected_behavior": [
+        "Explicitly names entity-resolution as the skill that needs to run first, before enrichment decides linking or page creation for 'Behavioral Fraud Scoring'.",
+        "Does NOT itself decide that 'Behavioral Fraud Scoring' is a create candidate or an existing-page match -- defers that identity/notability judgment to entity-resolution.",
+        "Does NOT invent or propose a specific wikilink target (e.g. [[concepts/behavioral-fraud-scoring]]) without resolution and note-routing having confirmed it first.",
+        "States the distinction correctly: entity-resolution decides whether a mention refers to an existing page and whether it warrants one, while enrichment decides how a note connects once that's settled.",
+        "Stops short of drafting any Compiled Truth or Timeline content for 'Behavioral Fraud Scoring' until identity resolution has actually happened, rather than proceeding speculatively."
+      ],
+      "related_skills": ["entity-resolution", "note-routing"]
+    },
+    {
+      "id": "re-synthesis-not-clobber-on-existing-page",
+      "query": "Entity-resolution returned a confident match for 'Jane Doe' -> people/jane-doe.md against the source below (sources/transcripts/2026-07-16-jane-standup.md). Update her page based on this new source.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\n---\n\n# Jane Doe\n\n## Compiled Truth\n\nJane leads claims automation and has been the primary champion for prototyping graph-based FNOL routing. She's skeptical of monolithic vendor platforms and prefers composable services she can swap out piece by piece.\n\n## Open Threads\n\n- Evaluating whether a single vendor can handle claims routing at our volume.\n\n## Timeline / Log\n\n- 2026-07-01: July planning meeting -- advocated for a graph-memory-based FNOL routing pilot over a rules-engine rewrite.\n",
+          "sources/transcripts/2026-07-16-jane-standup.md": "Quick standup: Jane Doe said the FNOL routing pilot is going well and the team should plan to demo it next week.\n"
+        }
+      },
+      "expected_behavior": [
+        "Does NOT replace Jane Doe's existing Compiled Truth with only the new standup nugget (e.g. does NOT reduce it to just 'the FNOL pilot is going well') -- re-synthesizes it to cover both the prior texture (skepticism of monolithic vendors, composable-services preference) and the new signal.",
+        "Does NOT delete or reorder the existing Timeline entry for 2026-07-01 -- treats Timeline entries as append-only and adds a new dated entry rather than overwriting the log.",
+        "Uses 'Compiled Truth' and 'Timeline' (or 'Timeline / Log') as the section names when describing the edit, not invented equivalents.",
+        "Flags a shorter rewritten Compiled Truth as a stop-and-check signal rather than treating brevity as confirmation the update is complete.",
+        "Describes checking Jane Doe's existing page and related notes before writing, so the new source contributes only the delta rather than the whole page being re-derived from this one source alone."
+      ],
+      "related_skills": ["entity-resolution", "note-conformance"]
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "skill": "kb-commit",
+  "scenarios": [
+    {
+      "id": "happy-path-single-note-revision",
+      "query": "I just finished hand-revising people/jane-doe.md after a note-revision pass that folded in the 2026-07-14 Acme Corp update call. The working tree is dirty from that one edit. Get this committed the way wakil expects.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\n---\n\n# Jane Doe\n\n## State\n\nWorks on claims automation at Acme Corp. As of the 2026-07-14 update call,\nshe is leading the FNOL routing prototype work with the graph-memory team.\n\n## Timeline\n\n- 2026-07-01 -- Met at the July planning meeting.\n- 2026-07-14 -- Confirmed as lead on the FNOL routing prototype.\n"
+        }
+      },
+      "expected_behavior": [
+        "Names `wakil git summary` as the first step to survey branch and pending-change state before doing anything else.",
+        "Inspects the actual diff (e.g. `git diff people/jane-doe.md`) rather than stopping at `git status --porcelain` or `git diff --stat` to decide what happened.",
+        "Proposes commit kind `note` for this manual content edit, a valid member of COMMIT_PREFIXES, not `ingest` or an invented kind.",
+        "Uses the exact message form `wakil note: <description>` with a description naming the knowledge change (e.g. resynthesizing Jane Doe's state from the update call), not a filename-referencing message like 'update jane-doe.md'.",
+        "States the proposed change set (message plus files) and asks for explicit confirmation before running `git commit`, rather than claiming the commit is already made.",
+        "Does NOT stage unrelated files or run a blanket `git add -A` for this single-file change."
+      ],
+      "related_skills": ["note-revision"]
+    },
+    {
+      "id": "unrelated-edits-must-split-into-separate-commits",
+      "query": "Here's what's sitting dirty in the knowledge base right now -- get everything committed.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\n---\n\n# Jane Doe\n\nWorks on claims automation. Met at the July planning meeting. Promoted to\nlead the FNOL routing prototype as of the 2026-07-14 update call.\n",
+          "concepts/claims-routing.md": "---\ntype: concept\nname: Claims Routing\ntags:\n  - fnol\n  - routing\n---\n\n# Claims Routing\n\nHow incoming insurance claims (FNOL) are triaged and routed to handlers.\n"
+        }
+      },
+      "expected_behavior": [
+        "Inspects the diff of every changed file individually (e.g. `git diff people/jane-doe.md` and `git diff concepts/claims-routing.md`) before deciding on any grouping.",
+        "Recognizes the Jane Doe content edit and the Claims Routing tags-only frontmatter fix are unrelated concerns and proposes two separate commits, not one combined commit.",
+        "Does NOT run `git add -A` and commit both changes together as a single blob, since that is exactly the failure mode this skill's inspection step is meant to prevent.",
+        "Uses distinct, appropriate kinds for each group (e.g. `note` for the Jane Doe edit, `chore` or `link` for the tags-only Claims Routing fix) rather than forcing one kind/message to cover both.",
+        "States both proposed change sets and gets explicit confirmation before committing either group.",
+        "Re-checks `git status --porcelain` after committing the first group before staging and committing the second."
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "prefer-ingest-own-commit-flag-over-manual-procedure",
+      "query": "I'm about to run wakil ingest on a new raw transcript I dropped at sources/transcripts/2026-07-15-standup.md. Once that finishes, how should the resulting output get committed?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-07-15-standup.md": "Raw standup transcript, captured but not yet ingested.\nNo frontmatter, no processing applied yet.\n"
+        }
+      },
+      "expected_behavior": [
+        "Recognizes that `wakil ingest` has its own `--commit`/`--branch` flags that already handle this exact class of change correctly.",
+        "Recommends running `wakil ingest` with `--commit` directly for this case, rather than walking through this skill's manual Survey/Inspect/Group procedure on a not-yet-produced diff.",
+        "States that this skill is the fallback path for what those flags don't cover (manual edits, note-revision output, an uncommitted schema migrate run), not the default for a normal ingest run.",
+        "Does NOT fabricate a general-purpose `wakil commit` CLI command, since the skill states none exists.",
+        "Does NOT propose a `git commit` with a `source` or `ingest` kind for this file before `wakil ingest` has even been run on it."
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "schema-invalid-note-handoff-to-conformance",
+      "query": "I hand-added people/sam-osei.md while taking quick notes on a new contact. It's just sitting there dirty -- can you get it committed?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/sam-osei.md": "---\ntitle: Sam Osei\n---\n\n# Sam Osei\n\nNew contact met at the Acme Corp call, added by hand.\n"
+        }
+      },
+      "expected_behavior": [
+        "Notices, while inspecting the diff, that the frontmatter doesn't conform to the workspace's schema convention (missing `type`, and `title` used where a person entity should use `name`).",
+        "Does NOT commit the note as-is with any kind while it remains schema-invalid.",
+        "Names `note-conformance` as the skill that should run first, per this skill's own guidance that a schema-invalid or badly-slugged note is a conformance problem, not a commit-message problem.",
+        "Does NOT attempt to fix the frontmatter itself (e.g. adding `type: person` or renaming `title` to `name`) as part of committing -- that shaping decision belongs to note-conformance, not this skill.",
+        "Does NOT silently proceed to `git commit` despite having flagged the conformance issue."
+      ],
+      "related_skills": ["note-conformance"]
+    }
+  ]
+}
