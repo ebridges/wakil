@@ -19,7 +19,8 @@ def _write_skill(
     skill_dir.mkdir(parents=True, exist_ok=True)
     frontmatter_name = skill_name if skill_name is not None else name
     (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {frontmatter_name}\nskill_api: {skill_api}\n---\n\nBody.\n"
+        f"---\nname: {frontmatter_name}\nskill_api: {skill_api}\n"
+        "description: Test skill.\n---\n\nBody.\n"
     )
     return skill_dir
 
