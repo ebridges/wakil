@@ -400,6 +400,7 @@ def _run_entity_resolution(
         return
     proposal.entity_resolutions = list(resolution.entities)
     proposal.stub_entities = _build_stub_entities(config, proposal)
+    _reconcile_entity_links(config, proposal)
 
 
 def _build_stub_entities(
@@ -445,6 +446,94 @@ def _build_stub_entities(
                 metadata[date_field] = today
         stubs.append(ProposedFile(path=path, content=_stub_content(metadata, resolution.name)))
     return stubs
+
+
+# Wikilink form per note-conformance/SKILL.md: [[path]] or [[path|display]].
+_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
+
+
+def _deslug(path: str) -> str:
+    """Comparable text for a wikilink with no `|display` part: its slug, deslugged."""
+    stem = path.strip().rsplit("/", 1)[-1]
+    if stem.endswith(".md"):
+        stem = stem[:-3]
+    return stem.replace("-", " ").replace("_", " ")
+
+
+def _normalize_link_path(path: str) -> str:
+    """A path with any trailing `.md` stripped, for same-target comparison.
+
+    This KB's own wikilinks mix both conventions (`[[people/x]]` and
+    `[[sources/y.md]]` both appear for real, valid links) — extraction's
+    `.md`-less link and entity-resolution's `target_note_path` (always
+    `.md`, matching `Note.path`) can refer to the identical page while
+    differing only by this suffix. Only rewrite a link when it points at a
+    genuinely different entity, never just to change its extension style.
+    """
+    stripped = path.strip()
+    return stripped[:-3] if stripped.endswith(".md") else stripped
+
+
+def _reconcile_entity_links(config: WorkspaceConfig, proposal: EnrichmentProposal) -> None:
+    """Correct proposed_note wikilinks that disagree with entity resolution.
+
+    Extraction (proposed_note.markdown) and entity resolution
+    (entity_resolutions) are independent model calls; both can decide where
+    an entity mention should link, and they can disagree — extraction wrote
+    the note's prose without seeing entity-resolution's final answer.
+    Entity-resolution's own decision is already treated as authoritative
+    everywhere else (_build_stub_entities, validate_proposal), so this makes
+    the note's prose agree with it too: a conservative, exact-match-only
+    string rewrite, never a new model call, and never silent — any
+    correction is recorded in proposal.warnings.
+    """
+    if proposal.proposed_note is None:
+        return
+
+    schemas = load_entity_schemas(config.root_path)
+    stub_paths = {stub.path for stub in proposal.stub_entities}
+
+    authoritative: dict[str, str] = {}
+    for resolution in proposal.entity_resolutions:
+        if resolution.action == "update":
+            if resolution.target_note_path:
+                authoritative[resolution.name.lower()] = resolution.target_note_path
+        elif resolution.action == "create":
+            schema = schemas.get(resolution.entity_type)
+            if schema is None or schema.directory is None:
+                continue  # no schema/directory: _build_stub_entities built no stub
+            path = f"{schema.directory}/{slugify(resolution.name)}.md"
+            if path in stub_paths:
+                authoritative[resolution.name.lower()] = path
+            # else: stub was skipped (already exists / path collision) — no
+            # authoritative path to correct against, leave matching links alone.
+        # action == "skip": no correction target.
+
+    if not authoritative:
+        return
+
+    corrections: list[str] = []
+
+    def _replace(match: re.Match) -> str:
+        path = match.group(1).strip()
+        display = match.group(2)
+        key = (display.strip() if display else _deslug(path)).lower()
+        target = authoritative.get(key)
+        if target is None or _normalize_link_path(target) == _normalize_link_path(path):
+            return match.group(0)
+        old = f"[[{path}|{display}]]" if display is not None else f"[[{path}]]"
+        new = f"[[{target}|{display}]]" if display is not None else f"[[{target}]]"
+        corrections.append(f"{old} -> {new}")
+        return new
+
+    new_content = _WIKILINK_RE.sub(_replace, proposal.proposed_note.content)
+    if corrections:
+        proposal.proposed_note.content = new_content
+        plural = "" if len(corrections) == 1 else "s"
+        proposal.warnings.append(
+            f"Corrected {len(corrections)} entity link{plural} in the proposed note to "
+            f"match entity-resolution's own answer: {'; '.join(corrections)}"
+        )
 
 
 def _stub_content(metadata: dict, name: str) -> str:

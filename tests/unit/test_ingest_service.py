@@ -229,6 +229,152 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
         assert session.scalar(select(Relationship)) is not None
 
 
+def test_reconcile_corrects_note_link_to_match_entity_resolution(workspace, transcript):
+    # Extraction and entity resolution are independent model calls that can
+    # disagree about which existing page an entity name refers to: here
+    # extraction's prose links to the wrong "Mosaic" page while entity
+    # resolution correctly resolves to the other one. The reconciliation
+    # pass must rewrite the note's link to match entity-resolution's answer.
+    source_id = _capture(workspace, transcript)
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={
+            "path": "meetings/2026/2026-07-09-claims-kickoff.md",
+            "markdown": (
+                "---\ntype: meeting\ntitle: Claims Kickoff\ndate: 2026-07-09\n"
+                "created: 2026-07-09\n---\n\n"
+                "# Claims Kickoff\n\nDiscussed [[companies/mosaic-app|Mosaic]] deal terms.\n"
+            ),
+        },
+    )
+    resolution = {
+        "entities": RESOLUTION_JSON["entities"]
+        + [
+            {
+                "name": "Mosaic",
+                "entity_type": "company",
+                "action": "update",
+                "target_note_path": "companies/mosaic-private-markets.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON])
+    )
+
+    assert "[[companies/mosaic-private-markets.md|Mosaic]]" in proposal.proposed_note.content
+    assert "[[companies/mosaic-app|Mosaic]]" not in proposal.proposed_note.content
+    assert any(
+        "Corrected 1 entity link" in warning
+        and "companies/mosaic-app|Mosaic" in warning
+        and "companies/mosaic-private-markets.md|Mosaic" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_reconcile_leaves_already_matching_link_untouched(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    markdown = (
+        "---\ntype: meeting\ntitle: Claims Kickoff\ndate: 2026-07-09\n"
+        "created: 2026-07-09\n---\n\n"
+        "# Claims Kickoff\n\nDiscussed [[companies/mosaic-private-markets.md|Mosaic]] terms.\n"
+    )
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={"path": "meetings/2026/2026-07-09-claims-kickoff.md", "markdown": markdown},
+    )
+    resolution = {
+        "entities": RESOLUTION_JSON["entities"]
+        + [
+            {
+                "name": "Mosaic",
+                "entity_type": "company",
+                "action": "update",
+                "target_note_path": "companies/mosaic-private-markets.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON])
+    )
+
+    assert proposal.proposed_note.content == markdown
+    assert not any("Corrected" in warning for warning in proposal.warnings)
+
+
+def test_reconcile_ignores_md_suffix_when_comparing_the_same_target(workspace, transcript):
+    # This KB's own wikilinks mix conventions: extraction wrote the link
+    # without ".md" (matching how entity pages are linked elsewhere in this
+    # vault), entity-resolution's target_note_path has it (matching
+    # Note.path). Same page either way — must not be treated as a mismatch.
+    source_id = _capture(workspace, transcript)
+    markdown = (
+        "---\ntype: meeting\ntitle: Claims Kickoff\ndate: 2026-07-09\n"
+        "created: 2026-07-09\n---\n\n"
+        "# Claims Kickoff\n\nDiscussed [[companies/mosaic-private-markets|Mosaic]] terms.\n"
+    )
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={"path": "meetings/2026/2026-07-09-claims-kickoff.md", "markdown": markdown},
+    )
+    resolution = {
+        "entities": RESOLUTION_JSON["entities"]
+        + [
+            {
+                "name": "Mosaic",
+                "entity_type": "company",
+                "action": "update",
+                "target_note_path": "companies/mosaic-private-markets.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON])
+    )
+
+    assert proposal.proposed_note.content == markdown
+    assert not any("Corrected" in warning for warning in proposal.warnings)
+
+
+def test_reconcile_does_not_touch_unresolved_display_text(workspace, transcript):
+    # A wikilink whose display text doesn't match any entity-resolution name
+    # is left alone — this is a conservative, exact-match-only fix, not
+    # fuzzy/alias guessing.
+    source_id = _capture(workspace, transcript)
+    markdown = (
+        "---\ntype: meeting\ntitle: Claims Kickoff\ndate: 2026-07-09\n"
+        "created: 2026-07-09\n---\n\n"
+        "# Claims Kickoff\n\nSee [[companies/mosaic-app|Some Other Thing]] for background.\n"
+    )
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={"path": "meetings/2026/2026-07-09-claims-kickoff.md", "markdown": markdown},
+    )
+    resolution = {
+        "entities": RESOLUTION_JSON["entities"]
+        + [
+            {
+                "name": "Mosaic",
+                "entity_type": "company",
+                "action": "update",
+                "target_note_path": "companies/mosaic-private-markets.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON])
+    )
+
+    assert proposal.proposed_note.content == markdown
+    assert not any("Corrected" in warning for warning in proposal.warnings)
 def test_enrichment_requires_existing_source(workspace):
     with pytest.raises(IngestError, match="No source with id"):
         prepare_enrichment(workspace, 999, FakeClient())

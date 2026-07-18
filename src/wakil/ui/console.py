@@ -2,6 +2,7 @@
 
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -186,7 +187,10 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
         console.print("[bold]Proposed note:[/bold]")
         _print_file_preview(proposal.proposed_note)
     for warning in proposal.warnings:
-        console.print(f"[yellow]warning:[/yellow] {warning}")
+        # Warnings can quote wikilinks (`[[path|display]]`) or other
+        # bracket-heavy content a correction touched — escape it so Rich's
+        # markup parser doesn't try to read it as style tags and mangle it.
+        console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
 
 
 _ACTION_STYLES = {"create": "green", "update": "cyan", "skip": "dim"}
