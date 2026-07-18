@@ -9,7 +9,10 @@ from wakil.app.ingest_service import (
     EnrichmentProposal,
     EntityUpdate,
     IngestError,
+    _candidate_entity_notes,
     _merge_entity_note,
+    _require_workspace_ids,
+    _title_terms,
     apply_capture,
     apply_enrichment,
     clean_transcript,
@@ -21,9 +24,10 @@ from wakil.app.ingest_service import (
     transcript_frontmatter_template,
     validate_proposal,
 )
-from wakil.app.workspace_service import init_workspace, open_session
+from wakil.app.workspace_service import index_notes, init_workspace, open_session
 from wakil.config.settings import WorkspaceConfig
 from wakil.llm.schemas import EntityRevision
+from wakil.schema.loader import load_entity_schemas
 from wakil.storage.schema import IngestRun, Memory, Note, Relationship, Source
 
 MODEL_JSON = {
@@ -670,6 +674,89 @@ def test_validate_proposal_rejects_entity_update_with_invalid_frontmatter(worksp
     ]
     issues = validate_proposal(proposal)
     assert any("bogus-value" in str(issue) for issue in issues)
+
+
+def test_candidate_entity_notes_finds_pages_relevance_search_would_bury(workspace, kb_path):
+    # A sparse entity stub, indistinguishable from many other short notes by
+    # relevance ranking, but exactly the page entity resolution must match.
+    companies = kb_path / "companies"
+    companies.mkdir()
+    (companies / "mosaic-private-markets.md").write_text(
+        "---\ntype: company\nname: Mosaic\n---\n\n# Mosaic\n\nPrivate markets software.\n"
+    )
+    with open_session(workspace) as session:
+        workspace_id, _ = _require_workspace_ids(session, workspace)
+        index_notes(session, workspace_id, workspace.root_path)
+        session.commit()
+
+        matches = _candidate_entity_notes(
+            session,
+            workspace_id,
+            "Meeting is with Eleni Karahalios to discuss Mosaic and Jane Doe.",
+            load_entity_schemas(),
+        )
+
+    paths = {path for path, _ in matches}
+    assert "companies/mosaic-private-markets.md" in paths
+    assert "people/jane-doe.md" in paths
+    # Sentence-initial "Meeting" must not be treated as a proper noun.
+    assert not any(p.startswith("meetings/") for p in paths)
+
+
+def test_candidate_entity_notes_matches_filename_derived_title_terms(workspace, kb_path):
+    # A company only named in the audio filename ("hovnanian-offer-sync"),
+    # never spoken aloud in the transcript body itself — the humanized
+    # title is lowercase, so _PROPER_NOUN_RE alone can never see it.
+    companies = kb_path / "companies"
+    companies.mkdir()
+    (companies / "hovnanian-homes.md").write_text(
+        "---\ntype: company\nname: K. Hovnanian Homes\naliases:\n- Hovnanian\n---\n\n"
+        "# K. Hovnanian Homes\n"
+    )
+    with open_session(workspace) as session:
+        workspace_id, _ = _require_workspace_ids(session, workspace)
+        index_notes(session, workspace_id, workspace.root_path)
+        session.commit()
+
+        no_hint = _candidate_entity_notes(
+            session, workspace_id, "We talked about the offer and the team.", load_entity_schemas()
+        )
+        with_hint = _candidate_entity_notes(
+            session,
+            workspace_id,
+            "We talked about the offer and the team.",
+            load_entity_schemas(),
+            extra_terms=_title_terms("hovnanian kyle carnes offer sync"),
+        )
+
+    assert "companies/hovnanian-homes.md" not in {p for p, _ in no_hint}
+    assert "companies/hovnanian-homes.md" in {p for p, _ in with_hint}
+
+
+def test_title_terms_drops_generic_filename_words():
+    terms = _title_terms("hovnanian kyle carnes offer sync")
+    assert "hovnanian" in terms
+    assert "kyle" in terms
+    assert "carnes" in terms
+    assert "offer" not in terms
+    assert "sync" not in terms
+
+
+def test_enrichment_related_notes_include_name_matched_entities(workspace, transcript, kb_path):
+    companies = kb_path / "companies"
+    companies.mkdir()
+    (companies / "mosaic-private-markets.md").write_text(
+        "---\ntype: company\nname: Mosaic\n---\n\n# Mosaic\n\nPrivate markets software.\n"
+    )
+    with open_session(workspace) as session:
+        workspace_id, _ = _require_workspace_ids(session, workspace)
+        index_notes(session, workspace_id, workspace.root_path)
+        session.commit()
+
+    source_id = _capture(workspace, transcript, context="Backchannel call about Mosaic.")
+    proposal = prepare_enrichment(workspace, source_id, FakeClient())
+
+    assert any(hit.ref == "companies/mosaic-private-markets.md" for hit in proposal.related_notes)
 
 
 def test_enrichment_requires_existing_source(workspace):

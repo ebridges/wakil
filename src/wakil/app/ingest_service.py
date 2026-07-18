@@ -29,7 +29,7 @@ from pathlib import Path
 
 import frontmatter as frontmatter_lib
 import yaml
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
@@ -53,7 +53,16 @@ from wakil.llm.schemas import (
 from wakil.llm.skill_loader import SkillLoadError, build_system_prompt, load_skill
 from wakil.schema.loader import load_entity_schemas, resolve_page_shape_template
 from wakil.schema.validate import validate_frontmatter
-from wakil.storage.schema import IngestRun, Memory, Relationship, Source, User, Workspace, utcnow
+from wakil.storage.schema import (
+    IngestRun,
+    Memory,
+    Note,
+    Relationship,
+    Source,
+    User,
+    Workspace,
+    utcnow,
+)
 
 MAX_SOURCE_CHARS = 24_000
 RELATED_NOTE_LIMIT = 5
@@ -320,6 +329,28 @@ def prepare_enrichment(
             if hit.kind == "note" and hit.ref != source.raw_text_path
         ]
 
+        # Relevance search optimizes for "notes that talk about X" and reliably
+        # buries a short entity stub (title literally "Mosaic") behind longer
+        # notes that just mention the name often. Entity resolution needs the
+        # opposite question answered — "does a page named X already exist" —
+        # so supplement with a direct title lookup against known entity
+        # directories, independent of QMD/FTS ranking.
+        workspace_id, _ = _require_workspace_ids(session, config)
+        seen_paths = {hit.ref for hit in related_notes}
+        for path, note_title in _candidate_entity_notes(
+            session,
+            workspace_id,
+            " ".join(filter(None, [context, text])),
+            load_entity_schemas(config.root_path),
+            extra_terms=_title_terms(title),
+        ):
+            if path in seen_paths or path == source.raw_text_path:
+                continue
+            seen_paths.add(path)
+            related_notes.append(
+                SearchHit(kind="note", ref=path, title=note_title, snippet="", engine="entity-name")
+            )
+
     proposal = EnrichmentProposal(
         source_id=source_id, title=title, context=context, related_notes=related_notes
     )
@@ -370,6 +401,112 @@ def prepare_enrichment(
     # DAG node 2: entity resolution — always invoked, never optional.
     _run_entity_resolution(config, client, source_text, related_pairs, proposal, guides)
     return proposal
+
+
+# A run of 1-4 capitalized words: "Mosaic", "Ian Gutwinski", "Riviera Partners".
+_PROPER_NOUN_RE = re.compile(r"\b[A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3}\b")
+# Single capitalized words that are only candidates because they happened to
+# start a sentence — common enough in free-text context strings that they'd
+# otherwise pollute every lookup with irrelevant title matches.
+_PROPER_NOUN_STOPWORDS = {
+    "I",
+    "The",
+    "A",
+    "An",
+    "Meeting",
+    "Call",
+    "Phone",
+    "Yeah",
+    "Well",
+    "So",
+    "But",
+    "And",
+    "This",
+    "That",
+    "We",
+    "She",
+    "He",
+    "They",
+}
+
+
+# Generic words in a humanized filename/title ("offer", "sync", "call") that
+# would otherwise substring-match unrelated entity notes once casing is no
+# longer a filter (see _title_terms).
+_TITLE_TERM_STOPWORDS = {w.lower() for w in _PROPER_NOUN_STOPWORDS} | {
+    "sync",
+    "offer",
+    "prep",
+    "recap",
+    "update",
+    "follow",
+    "notes",
+    "chat",
+    "intro",
+}
+
+
+def _title_terms(title: str) -> set[str]:
+    """Lowercase word tokens from a humanized filename/title.
+
+    A whisper capture's title is derived from the filename by lowercasing
+    and de-hyphenating (see prepare_capture) — it carries no capitalization
+    signal, so _PROPER_NOUN_RE can't see it. A call's company/person is
+    routinely named only in the filename convention (an interview thread's
+    audio files, say), never spoken aloud in the transcript body itself —
+    without this, an existing entity page for that name is never even
+    offered to entity-resolution as a candidate, and it proposes a
+    duplicate page instead of recognizing the one that already exists.
+    """
+    words = re.split(r"[^a-zA-Z0-9]+", title.lower())
+    return {w for w in words if len(w) > 2 and w not in _TITLE_TERM_STOPWORDS}
+
+
+def _candidate_entity_notes(
+    session, workspace_id: int, text: str, schemas: dict, *, extra_terms: set[str] = frozenset()
+) -> list[tuple[str, str]]:
+    """Direct title lookup for proper nouns against known entity directories.
+
+    Complements (does not replace) the relevance search above: a name match
+    here doesn't depend on QMD/FTS ranking a short, sparse entity stub above
+    longer notes that merely mention the same name.
+
+    extra_terms: additional lowercase candidate words (e.g. from
+    _title_terms) that bypass the capitalized-proper-noun requirement —
+    for text sources where casing can't be trusted as a name signal.
+    """
+    directories = tuple(
+        f"{schema.directory}/"
+        for schema in schemas.values()
+        if schema.directory and schema.category in ("identity", "hybrid")
+    )
+    if not directories:
+        return []
+    candidates = {
+        phrase
+        for phrase in _PROPER_NOUN_RE.findall(text)
+        if len(phrase) > 2 and phrase not in _PROPER_NOUN_STOPWORDS
+    }
+    candidates |= extra_terms
+    if not candidates:
+        return []
+    notes = session.scalars(
+        select(Note).where(
+            Note.workspace_id == workspace_id,
+            or_(*(Note.path.like(f"{d}%") for d in directories)),
+        )
+    )
+    matches: list[tuple[str, str]] = []
+    for note in notes:
+        note_title = note.title or ""
+        if not note_title:
+            continue
+        if any(
+            phrase.lower() in note_title.lower() or note_title.lower() in phrase.lower()
+            for phrase in candidates
+        ):
+            matches.append((note.path, note_title))
+    return matches
 
 
 def _run_extraction(
