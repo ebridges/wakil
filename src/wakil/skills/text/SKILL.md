@@ -26,5 +26,12 @@ first, then extract accordingly.
   frontmatter and page shape, and RESOLVER.md for where it belongs. Much
   clipped text is only worth its raw capture — set proposed_note to null
   rather than manufacturing a durable note.
+- If SCHEMA.md defines a field for linking the note back to its raw capture,
+  fill it with the Origin path given above, not a guessed or reconstructed
+  path.
+- Cite non-obvious claims inline as you write them. Wakil's default is a
+  parenthetical tag at the point of the claim (`(self-reported)`,
+  `(reported: <source>)`), overridden by the workspace's own citation format
+  when SCHEMA.md defines one.
 - Memories must be grounded in the clipping; never invent facts. Mark
   uncertainty explicitly.

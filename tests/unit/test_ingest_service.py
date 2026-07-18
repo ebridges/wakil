@@ -173,15 +173,28 @@ def test_capture_writes_source_and_run(workspace, transcript):
 def test_capture_uses_schema_template_when_present(workspace, transcript):
     (workspace.root_path / "SCHEMA.md").write_text(
         "# Schema\n\n## Transcripts\n\nFiles in sources/transcripts use:\n\n"
-        "```yaml\ntype: source\norigin: transcript\ntitle: \ndate: \ncreated: \n```\n"
+        "```yaml\ntype: source\norigin: transcript\nurl: \ntitle: \ndate: \ncreated: \n```\n"
     )
     proposal = prepare_capture(workspace, "transcript", file=transcript)
 
     frontmatter = proposal.raw_file.content.split("---")[1]
     fields = [line.split(":")[0] for line in frontmatter.strip().splitlines()]
-    assert fields == ["type", "origin", "title", "date", "created"]
+    assert fields == ["type", "origin", "url", "title", "date", "created"]
     assert "type: source" in frontmatter  # template value kept
     assert "date: '2026-07-09'" in frontmatter  # meeting date filled into `date`
+    # "origin" is the enumerated kind, not a path; "url" is a KB-root-relative
+    # file: reference, never the machine's absolute path.
+    assert "origin: transcript" in frontmatter
+    assert "url: file:2026-07-09-raw-meeting.txt" in frontmatter
+
+
+def test_capture_origin_is_relative_to_kb_root(workspace, kb_path):
+    nested = kb_path / "sources" / "audio"
+    nested.mkdir(parents=True)
+    file = nested / "call.txt"
+    file.write_text("Ed: hi\n")
+    proposal = prepare_capture(workspace, "transcript", file=file)
+    assert proposal.origin == "sources/audio/call.txt"
 
 
 def test_transcript_frontmatter_template_absent(workspace):
@@ -203,6 +216,19 @@ def test_capture_cleans_transcript(workspace, kb_path):
     proposal = prepare_capture(workspace, "transcript", file=noisy)
     assert "Jane: hello\nBob: hi" in proposal.raw_file.content
     assert "[00:00:01]" not in proposal.raw_file.content
+
+
+def test_capture_title_strips_leading_date_from_filename(workspace, kb_path):
+    dated = kb_path / "2026-07-16-mosaic-eleni-karahalios.txt"
+    dated.write_text("Ed: hi\n")
+    proposal = prepare_capture(workspace, "transcript", file=dated)
+    assert proposal.title == "mosaic eleni karahalios"
+
+
+def test_capture_adds_h1_matching_the_destination_filename(workspace, transcript):
+    proposal = prepare_capture(workspace, "transcript", file=transcript)
+    body = proposal.raw_file.content.split("---", 2)[2].lstrip("\n")
+    assert body.startswith("# 2026-07-09-raw-meeting\n\n")
 
 
 def test_capture_transcript_whisper(workspace, kb_path):

@@ -27,5 +27,12 @@ synthesis.
 - Follow the workspace's SCHEMA.md guidance for the proposed note's
   frontmatter and page shape, and RESOLVER.md for where it belongs. Set
   proposed_note to null for content that is only worth its raw capture.
+- If SCHEMA.md defines a field for linking the note back to its raw capture,
+  fill it with the Origin path given above, not a guessed or reconstructed
+  path.
+- Cite non-obvious claims inline as you write them — a figure, a quote, a
+  stated position. Wakil's default is a parenthetical tag at the point of the
+  claim (`(reported: <author>)`), overridden by the workspace's own citation
+  format when SCHEMA.md defines one.
 - Memories must be grounded in the article; never invent facts. Mark
   uncertainty explicitly.

@@ -212,8 +212,9 @@ def prepare_capture(
             if kind == "transcript":
                 text = clean_transcript(text)
                 meeting_date = infer_meeting_date(file, text)
-        origin = str(file)
-        title = file.stem.replace("-", " ").replace("_", " ").strip() or file.name
+        origin = _relative_origin(config, file)
+        stem = _LEADING_DATE_RE.sub("", file.stem) or file.stem
+        title = stem.replace("-", " ").replace("_", " ").strip() or file.name
     elif kind == "article":
         if url is None:
             raise IngestError("article ingest needs a URL")
@@ -365,11 +366,14 @@ def prepare_enrichment(
     source_text = text[:MAX_SOURCE_CHARS]
 
     # DAG node 1: extraction judgment (the <kind> skill + ExtractionOutput).
+    # The raw *capture* path (sources/transcripts/...), not source.origin's
+    # pre-capture location — origin may be a binary/external file (a
+    # .whisper archive, a URL) the model can't cite as a KB source.
     extraction = _run_extraction(
         config,
         client,
         source.source_type,
-        source.origin or title,
+        source.raw_text_path or source.origin or title,
         source_text,
         related_pairs,
         proposal,
@@ -1177,6 +1181,10 @@ def parse_whisper_transcript(file: Path) -> tuple[str, str | None]:
 
 _ISO_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 _COMPACT_DATE_RE = re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)")
+# A leading date prefix on a source filename (e.g. "2026-07-16-call") — kept
+# out of both the derived title and the note slug, since the date already
+# lives in frontmatter/the note's own date-prefixed filename.
+_LEADING_DATE_RE = re.compile(r"^\d{4}-?\d{2}-?\d{2}-?")
 
 
 def infer_meeting_date(file: Path, text: str) -> str | None:
@@ -1193,6 +1201,17 @@ def infer_meeting_date(file: Path, text: str) -> str | None:
 def slugify(value: str, max_length: int = 60) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:max_length].rstrip("-") or "untitled"
+
+
+def _relative_origin(config: WorkspaceConfig, file: Path) -> str:
+    """POSIX path from the KB root, so DB rows, prompts, and frontmatter never
+    leak a machine-specific absolute path. Falls back to the absolute path
+    only when the source file lives outside the workspace entirely.
+    """
+    try:
+        return file.resolve().relative_to(config.root_path.resolve()).as_posix()
+    except ValueError:
+        return file.as_posix()
 
 
 # --------------------------------------------------------------------------
@@ -1258,8 +1277,11 @@ _KNOWN_FIELD_VALUES = {
     "date": "meeting_date",
     "title": "title",
     "name": "title",
-    "origin": "origin",
-    "source_file": "origin",
+    # "origin" is conventionally an enumerated kind (transcript/article/...),
+    # not a path — the path/URL goes in "url"/"source_file" as a `file:` ref.
+    "origin": "origin_kind",
+    "url": "file_url",
+    "source_file": "file_url",
     "context": "context",
 }
 
@@ -1269,7 +1291,7 @@ def _build_raw_file(config: WorkspaceConfig, proposal: CaptureProposal) -> Propo
     directory = Path(config.ingest_directory) / RAW_DIRS.get(proposal.source_type, "clippings")
     slug = slugify(proposal.title)
     # Avoid a doubled date when the source filename already carried one.
-    slug = re.sub(r"^\d{4}-?\d{2}-?\d{2}-?", "", slug) or "untitled"
+    slug = _LEADING_DATE_RE.sub("", slug) or "untitled"
     base = f"{proposal.meeting_date or created}-{slug}"
     path = _unused_path(config.root_path, directory, base)
 
@@ -1288,7 +1310,10 @@ def _build_raw_file(config: WorkspaceConfig, proposal: CaptureProposal) -> Propo
             metadata["context"] = proposal.context
 
     frontmatter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
-    return ProposedFile(path=str(path), content=f"---\n{frontmatter}---\n\n" + proposal.text + "\n")
+    body = proposal.text
+    if proposal.source_type == "transcript":
+        body = f"# {path.stem}\n\n{body}"
+    return ProposedFile(path=str(path), content=f"---\n{frontmatter}---\n\n" + body + "\n")
 
 
 def _transcript_metadata(config: WorkspaceConfig, proposal: CaptureProposal, created: str) -> dict:
@@ -1296,7 +1321,8 @@ def _transcript_metadata(config: WorkspaceConfig, proposal: CaptureProposal, cre
         "created": created,
         "meeting_date": proposal.meeting_date,
         "title": proposal.title,
-        "origin": proposal.origin,
+        "origin_kind": proposal.source_type,
+        "file_url": f"file:{proposal.origin}",
         "context": proposal.context,
     }
     template = transcript_frontmatter_template(config)
