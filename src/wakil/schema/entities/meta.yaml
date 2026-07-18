@@ -4,6 +4,7 @@
 type: meta
 directory: null
 category: document
+page_shape: single-occurrence
 fields:
   title: {required: true, kind: string}
   created: {required: true, kind: date}

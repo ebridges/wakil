@@ -19,6 +19,8 @@ from wakil.ui.console import (
     print_proposal_issues,
     print_query_result,
     print_root_issues,
+    print_schema_list,
+    print_schema_which,
     print_search_hits,
     print_skill_lint,
     print_skill_list,
@@ -623,6 +625,45 @@ def schema_migrate(
                 console.print(f"[red]Commit failed:[/red] {exc}")
                 raise typer.Exit(code=1) from exc
             console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]")
+
+
+@schema_app.command("list")
+def schema_list(ctx: typer.Context) -> None:
+    """List effective entity types and their resolved source (kb-local/user/builtin)."""
+    from wakil.schema.loader import SchemaLoadError, load_entity_schemas, resolve_entity_schema
+
+    root = _resolve_workspace(ctx)
+    try:
+        schemas = load_entity_schemas(root)
+    except SchemaLoadError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    rows: list[tuple[str, str, str]] = []
+    for entity_type in sorted(schemas):
+        resolved = resolve_entity_schema(entity_type, root)
+        if resolved is None:
+            continue
+        _, schema_root = resolved
+        rows.append((entity_type, schema_root.source, str(schema_root.path)))
+    print_schema_list(rows)
+
+
+@schema_app.command("which")
+def schema_which(
+    ctx: typer.Context,
+    entity_type: Annotated[str, typer.Argument(help="Entity type to resolve.")],
+) -> None:
+    """Show which root's schema file wins for an entity type."""
+    from wakil.schema.loader import resolve_entity_schema
+
+    root = _resolve_workspace(ctx)
+    resolved = resolve_entity_schema(entity_type, root)
+    if resolved is None:
+        console.print(f"[red]No entity schema defines type {entity_type!r}.[/red]")
+        raise typer.Exit(code=1)
+    _, schema_root = resolved
+    print_schema_which(entity_type, schema_root.source, str(schema_root.path))
 
 
 @git_app.command("summary")

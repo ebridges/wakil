@@ -344,6 +344,26 @@ def print_skill_list(rows: list[tuple[str, str, str]]) -> None:
     console.print(table)
 
 
+def print_schema_list(rows: list[tuple[str, str, str]]) -> None:
+    """rows: (type, source, path) — the entity type, which root won it, and where."""
+    if not rows:
+        console.print("No entity schemas found.")
+        return
+    table = Table(title="Entity schemas")
+    table.add_column("Type", style="bold")
+    table.add_column("Source")
+    table.add_column("Root", overflow="fold")
+    for entity_type, source, path in rows:
+        style = _SKILL_SOURCE_STYLES.get(source, "white")
+        table.add_row(entity_type, f"[{style}]{source}[/{style}]", path)
+    console.print(table)
+
+
+def print_schema_which(entity_type: str, source: str, path: str) -> None:
+    style = _SKILL_SOURCE_STYLES.get(source, "white")
+    console.print(f"[bold]{entity_type}[/bold]  [{style}]{source}[/{style}]  {path}")
+
+
 def print_skill_which(
     resolved: ResolvedSkill,
     *,

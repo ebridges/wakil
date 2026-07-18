@@ -10,9 +10,24 @@ import pytest
 from wakil.schema.loader import (
     DEFAULT_SCHEMA_DIR,
     SchemaLoadError,
+    SchemaResolutionContext,
     load_entity_schemas,
+    resolve_page_shape_template,
 )
 from wakil.schema.validate import known_types, validate_frontmatter
+
+
+def _isolated_context(tmp_path: Path, **overrides) -> SchemaResolutionContext:
+    """A context with no real roots wired in, so tests control exactly what's
+    visible — mirrors test_skills_resolver.py's isolated-context fixtures."""
+    defaults = {
+        "kb_root": None,
+        "user_schema_root": tmp_path / "unused-user-root",
+        "builtin_schema_root": tmp_path,
+        "schema_path": None,
+    }
+    defaults.update(overrides)
+    return SchemaResolutionContext(**defaults)
 
 EXPECTED_TYPES = {
     "person",
@@ -54,7 +69,6 @@ def test_shipped_schemas_load_and_cover_expected_types():
 
 def test_loader_is_cached():
     assert load_entity_schemas() is load_entity_schemas()
-    assert load_entity_schemas(DEFAULT_SCHEMA_DIR) is load_entity_schemas()
 
 
 def test_category_split_matches_entity_metadata_doc():
@@ -76,43 +90,164 @@ def test_source_schema_has_origin_sub_schemas():
 def test_loader_rejects_malformed_yaml(tmp_path: Path):
     (tmp_path / "bad.yaml").write_text(": not [valid yaml")
     with pytest.raises(SchemaLoadError, match="invalid yaml"):
-        load_entity_schemas(tmp_path)
+        load_entity_schemas(context=_isolated_context(tmp_path))
 
 
 def test_loader_rejects_missing_directory(tmp_path: Path):
-    with pytest.raises(SchemaLoadError, match="not found"):
-        load_entity_schemas(tmp_path / "nope")
+    # No root has any files at all -> a clear error, not a silent empty result.
+    ctx = _isolated_context(tmp_path, builtin_schema_root=tmp_path / "nope")
+    with pytest.raises(SchemaLoadError, match="No entity schemas found"):
+        load_entity_schemas(context=ctx)
 
 
 def test_loader_rejects_schema_contradicting_its_category(tmp_path: Path):
     (tmp_path / "broken.yaml").write_text(
-        "type: broken\ndirectory: x\ncategory: identity\n"
+        "type: broken\ndirectory: x\ncategory: identity\npage_shape: compiled-truth-timeline\n"
         "fields:\n  name: {required: true, kind: string}\n"
         "  title: {required: false, kind: string}\n"
     )
     with pytest.raises(SchemaLoadError, match="must not define `title`"):
-        load_entity_schemas(tmp_path)
+        load_entity_schemas(context=_isolated_context(tmp_path))
 
 
 def test_loader_rejects_enum_without_values(tmp_path: Path):
     (tmp_path / "broken.yaml").write_text(
-        "type: broken\ndirectory: x\ncategory: document\n"
+        "type: broken\ndirectory: x\ncategory: document\npage_shape: single-occurrence\n"
         "fields:\n  title: {required: true, kind: string}\n"
         "  status: {required: false, kind: enum}\n"
     )
     with pytest.raises(SchemaLoadError, match="values"):
-        load_entity_schemas(tmp_path)
+        load_entity_schemas(context=_isolated_context(tmp_path))
 
 
-def test_loader_rejects_duplicate_types(tmp_path: Path):
+def test_loader_rejects_duplicate_types_within_one_root(tmp_path: Path):
     body = (
-        "type: dup\ndirectory: x\ncategory: document\n"
+        "type: dup\ndirectory: x\ncategory: document\npage_shape: single-occurrence\n"
         "fields:\n  title: {required: true, kind: string}\n"
     )
     (tmp_path / "a.yaml").write_text(body)
     (tmp_path / "b.yaml").write_text(body)
     with pytest.raises(SchemaLoadError, match="duplicate"):
-        load_entity_schemas(tmp_path)
+        load_entity_schemas(context=_isolated_context(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# Resolution (kb-local/user override wins per type, built-in falls back)
+
+
+def test_kb_local_type_file_overrides_builtin(tmp_path: Path):
+    kb_root = tmp_path / "kb"
+    (kb_root / "schema" / "entities").mkdir(parents=True)
+    (kb_root / "schema" / "entities" / "person.yaml").write_text(
+        "type: person\ndirectory: people\ncategory: identity\n"
+        "page_shape: compiled-truth-timeline\n"
+        "fields:\n  name: {required: true, kind: string}\n"
+        "  nickname: {required: false, kind: string}\n"
+    )
+    ctx = SchemaResolutionContext(
+        kb_root=kb_root,
+        user_schema_root=tmp_path / "unused-user-root",
+        builtin_schema_root=DEFAULT_SCHEMA_DIR,
+    )
+    schemas = load_entity_schemas(context=ctx)
+    assert "nickname" in schemas["person"].fields
+    # Untouched types still fall through to built-in.
+    assert "company" in schemas
+
+
+def test_kb_local_only_type_is_additive(tmp_path: Path):
+    kb_root = tmp_path / "kb"
+    (kb_root / "schema" / "entities").mkdir(parents=True)
+    (kb_root / "schema" / "entities" / "recipe.yaml").write_text(
+        "type: recipe\ndirectory: recipes\ncategory: document\n"
+        "page_shape: single-occurrence\n"
+        "fields:\n  title: {required: true, kind: string}\n"
+    )
+    ctx = SchemaResolutionContext(
+        kb_root=kb_root,
+        user_schema_root=tmp_path / "unused-user-root",
+        builtin_schema_root=DEFAULT_SCHEMA_DIR,
+    )
+    schemas = load_entity_schemas(context=ctx)
+    assert "recipe" in schemas
+    assert "person" in schemas  # built-in types still present
+
+
+def test_missing_kb_local_root_falls_back_to_builtin(tmp_path: Path):
+    # kb_root has no schema/entities/ dir at all -> silently dropped, like a
+    # missing default skill root.
+    ctx = SchemaResolutionContext(
+        kb_root=tmp_path / "kb-without-schema-dir",
+        user_schema_root=tmp_path / "unused-user-root",
+        builtin_schema_root=DEFAULT_SCHEMA_DIR,
+    )
+    schemas = load_entity_schemas(context=ctx)
+    assert set(schemas) == EXPECTED_TYPES
+
+
+def test_wakil_schema_path_env_var_is_highest_precedence(tmp_path: Path):
+    override_root = tmp_path / "override"
+    override_root.mkdir()
+    (override_root / "person.yaml").write_text(
+        "type: person\ndirectory: people\ncategory: identity\n"
+        "page_shape: compiled-truth-timeline\n"
+        "fields:\n  name: {required: true, kind: string}\n"
+        "  from_override: {required: false, kind: string}\n"
+    )
+    kb_root = tmp_path / "kb"
+    (kb_root / "schema" / "entities").mkdir(parents=True)
+    (kb_root / "schema" / "entities" / "person.yaml").write_text(
+        "type: person\ndirectory: people\ncategory: identity\n"
+        "page_shape: compiled-truth-timeline\n"
+        "fields:\n  name: {required: true, kind: string}\n"
+        "  from_kb_local: {required: false, kind: string}\n"
+    )
+    ctx = SchemaResolutionContext(
+        kb_root=kb_root,
+        user_schema_root=tmp_path / "unused-user-root",
+        builtin_schema_root=DEFAULT_SCHEMA_DIR,
+        schema_path=str(override_root),
+    )
+    schemas = load_entity_schemas(context=ctx)
+    assert "from_override" in schemas["person"].fields
+    assert "from_kb_local" not in schemas["person"].fields
+
+
+# ---------------------------------------------------------------------------
+# Page-shape templates (same kb-local/user/built-in precedence, independent
+# resolution unit from entity field schemas)
+
+
+def test_shipped_page_shapes_resolve():
+    body, root = resolve_page_shape_template("single-occurrence")
+    assert "Summary" in body
+    assert "Open Questions" in body
+    assert root.source == "builtin"
+
+    body, root = resolve_page_shape_template("compiled-truth-timeline")
+    assert "Timeline" in body
+    assert root.source == "builtin"
+
+
+def test_page_shape_template_rejects_unknown_shape():
+    with pytest.raises(SchemaLoadError, match="No page-shape template named 'nonexistent'"):
+        resolve_page_shape_template("nonexistent")
+
+
+def test_kb_local_page_shape_template_overrides_builtin_without_touching_fields(tmp_path: Path):
+    kb_root = tmp_path / "kb"
+    (kb_root / "schema" / "templates").mkdir(parents=True)
+    (kb_root / "schema" / "templates" / "single-occurrence.md").write_text(
+        "Custom single-occurrence shape for this vault.\n"
+    )
+    body, root = resolve_page_shape_template("single-occurrence", kb_root)
+    assert body == "Custom single-occurrence shape for this vault.\n"
+    assert root.source == "kb-local"
+
+    # Overriding the template doesn't require forking the type's field schema.
+    schemas = load_entity_schemas(kb_root)
+    assert schemas["meeting"].page_shape == "single-occurrence"
+    assert "decisions" in schemas["meeting"].fields  # untouched
 
 
 # ---------------------------------------------------------------------------

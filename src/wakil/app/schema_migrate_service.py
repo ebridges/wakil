@@ -75,7 +75,7 @@ class MigrationPlan:
 
 def plan_schema_migration(config: WorkspaceConfig, entity_type: str | None = None) -> MigrationPlan:
     """Walk indexed notes and propose cheap-tier frontmatter fixes."""
-    schemas = load_entity_schemas()
+    schemas = load_entity_schemas(config.root_path)
     if entity_type is not None and entity_type not in schemas:
         raise MigrateError(
             f"No entity schema defines type '{entity_type}' (known: {', '.join(sorted(schemas))})"

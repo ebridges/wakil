@@ -4,6 +4,7 @@
 type: reflection
 directory: ideas/reflections
 category: document
+page_shape: single-occurrence
 fields:
   title: {required: true, kind: string}
   date: {required: true, kind: date}

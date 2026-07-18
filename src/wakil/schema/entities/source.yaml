@@ -10,6 +10,7 @@
 type: source
 directory: sources
 category: document
+page_shape: single-occurrence
 fields:
   title: {required: true, kind: string}
   origin: {required: true, kind: enum, values: [transcript, article, twitter, export, manual]}

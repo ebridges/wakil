@@ -56,9 +56,11 @@ discussion, not because it's out of scope forever:
 - Provider-native structured output (Anthropic tool-use / OpenAI
   `response_format`) — Pydantic validate + one retry is the v1 contract
   mechanism; revisit only if the retry rate in practice turns out high.
-- Workspace-runtime plugin/extension loading — new entity types and ingest
-  kinds are added by forking and editing wakil's own source tree, not
-  discovered at runtime from a workspace directory.
+- ~~Workspace-runtime plugin/extension loading~~ — superseded: entity schemas
+  now resolve kb-local/user/built-in, the same way skills do
+  (`wakil.schema.loader.resolve_schema_roots`, `wakil schema list/which`).
+  Ingest *kinds* (`transcript`/`text`/`article`) are still fixed by
+  `RAW_DIRS`/capture code, not runtime-discovered.
 
 ## Architecture
 

@@ -4,6 +4,7 @@
 type: journal
 directory: journal
 category: document
+page_shape: compiled-truth-timeline
 fields:
   date: {required: true, kind: date}
   week: {required: true, kind: string}

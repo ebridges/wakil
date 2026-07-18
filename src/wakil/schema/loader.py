@@ -1,11 +1,19 @@
 """Load entity schemas from schema/entities/*.yaml into typed models.
 
-The yaml files ship inside the wakil package (extension happens by forking
-and editing them, not by runtime discovery from a workspace — a decision
-settled in docs/ingestion-refactor-spec.md). Loading is cached per directory
-path, so repeated validation during one command parses the files once.
+Resolution mirrors `wakil.skills.resolver` (docs/skill-resolution-specification.md),
+applied per type-file instead of per skill-directory: an ordered list of
+roots (`WAKIL_SCHEMA_PATH` override, kb-local `schema/entities/`, user-level
+config, built-in) is searched, and for each entity `type`, the first root
+that defines it wins — whole-file, no merging across roots. This supersedes
+the earlier decision (docs/ingestion-refactor-spec.md) that entity-type
+extension only happens by forking wakil's own source tree; a kb-local or
+user-level override now works the same way a skill override does. Loading is
+cached per resolved root set, so repeated validation during one command
+parses the files once.
 """
 
+import os
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -13,7 +21,14 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from wakil.config.registry import config_home
+
 DEFAULT_SCHEMA_DIR = Path(__file__).parent / "entities"
+
+SOURCE_OVERRIDE = "override"
+SOURCE_KB_LOCAL = "kb-local"
+SOURCE_USER = "user"
+SOURCE_BUILTIN = "builtin"
 
 FieldKind = Literal["string", "list", "ref", "enum", "date", "bool", "int"]
 Category = Literal["identity", "document", "hybrid"]
@@ -44,6 +59,15 @@ class EntitySchema(BaseModel):
     type: str
     directory: str | None = None  # canonical directory, None = no single home
     category: Category
+    # Which body-shape template this type's proposed notes should follow
+    # (a name, resolved to actual template prose by
+    # `resolve_page_shape_template` — see that function's docstring for why
+    # this is a separate axis from `category`: category drives the
+    # name/title frontmatter rule, page_shape drives narrative structure,
+    # and they don't always agree — `organization` and `project` are both
+    # "hybrid" category but one is single-occurrence and the other
+    # accumulates).
+    page_shape: str
     fields: dict[str, FieldSpec]
     # Per-origin additive sub-schemas (source only), keyed by the base
     # `origin` enum value.
@@ -65,16 +89,116 @@ class EntitySchema(BaseModel):
         return self
 
 
-def load_entity_schemas(schema_dir: Path | None = None) -> dict[str, EntitySchema]:
-    """All entity schemas keyed by `type`, cached per directory."""
-    return _load_cached(str((schema_dir or DEFAULT_SCHEMA_DIR).resolve()))
+@dataclass(frozen=True)
+class SchemaRoot:
+    """One usable, existing entity-schema root directory."""
+
+    path: Path
+    source: str
 
 
-@lru_cache(maxsize=8)
-def _load_cached(schema_dir: str) -> dict[str, EntitySchema]:
-    directory = Path(schema_dir)
-    if not directory.is_dir():
-        raise SchemaLoadError(f"Entity schema directory not found: {directory}")
+@dataclass(frozen=True)
+class SchemaResolutionContext:
+    """Inputs needed to resolve entity schemas: kb root plus override roots."""
+
+    kb_root: Path | None
+    user_schema_root: Path
+    builtin_schema_root: Path
+    schema_path: str | None = None
+
+
+def parse_schema_path(value: str | None) -> list[Path]:
+    """Split a `WAKIL_SCHEMA_PATH`-style value on the platform path separator."""
+    if not value:
+        return []
+    return [Path(segment) for segment in value.split(os.pathsep) if segment]
+
+
+def _normalize_root(raw: Path) -> Path:
+    expanded = os.path.expandvars(str(raw))
+    return Path(expanded).expanduser().resolve()
+
+
+def resolve_schema_roots(context: SchemaResolutionContext) -> list[SchemaRoot]:
+    """Ordered, deduplicated, existing schema roots: override -> kb-local ->
+    user -> built-in. Missing or non-directory roots are silently dropped,
+    mirroring `wakil.skills.resolver.resolve_roots`."""
+    raw_entries: list[tuple[Path, str]] = [
+        (path, SOURCE_OVERRIDE) for path in parse_schema_path(context.schema_path)
+    ]
+    if context.kb_root is not None:
+        raw_entries.append((context.kb_root / "schema" / "entities", SOURCE_KB_LOCAL))
+    raw_entries.append((context.user_schema_root, SOURCE_USER))
+    raw_entries.append((context.builtin_schema_root, SOURCE_BUILTIN))
+
+    seen: set[Path] = set()
+    roots: list[SchemaRoot] = []
+    for raw_path, source in raw_entries:
+        normalized = _normalize_root(raw_path)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if normalized.is_dir():
+            roots.append(SchemaRoot(path=normalized, source=source))
+    return roots
+
+
+def default_schema_context(
+    kb_root: Path | None = None, *, environ: dict[str, str] | None = None
+) -> SchemaResolutionContext:
+    """The standard `SchemaResolutionContext` for a knowledge base (or none)."""
+    env = environ if environ is not None else os.environ
+    return SchemaResolutionContext(
+        kb_root=kb_root,
+        user_schema_root=config_home() / "schema" / "entities",
+        builtin_schema_root=DEFAULT_SCHEMA_DIR,
+        schema_path=env.get("WAKIL_SCHEMA_PATH"),
+    )
+
+
+def load_entity_schemas(
+    kb_root: Path | None = None, *, context: SchemaResolutionContext | None = None
+) -> dict[str, EntitySchema]:
+    """All entity schemas keyed by `type`, kb-local/user overriding built-in.
+
+    `kb_root`, when given, is the workspace root (its `schema/entities/`
+    subdirectory is one of the search roots) — not a raw schema directory.
+    Pass an explicit `context` for full control (tests, `WAKIL_SCHEMA_PATH`).
+    """
+    ctx = context or default_schema_context(kb_root)
+    roots = resolve_schema_roots(ctx)
+    return _load_cached(tuple((root.path, root.source) for root in roots))
+
+
+def resolve_entity_schema(
+    entity_type: str, kb_root: Path | None = None, *, context: SchemaResolutionContext | None = None
+) -> tuple[EntitySchema, SchemaRoot] | None:
+    """The schema for `entity_type` plus which root won it, for CLI diagnostics."""
+    ctx = context or default_schema_context(kb_root)
+    for root in resolve_schema_roots(ctx):
+        for schema in _load_root(root.path).values():
+            if schema.type == entity_type:
+                return schema, root
+    return None
+
+
+@lru_cache(maxsize=32)
+def _load_cached(roots: tuple[tuple[Path, str], ...]) -> dict[str, EntitySchema]:
+    by_type: dict[str, EntitySchema] = {}
+    for path, _source in roots:
+        for schema in _load_root(path).values():
+            by_type.setdefault(schema.type, schema)
+    if not by_type:
+        searched = ", ".join(str(path) for path, _ in roots) or "(no roots found)"
+        raise SchemaLoadError(f"No entity schemas found in any of: {searched}")
+    return by_type
+
+
+@lru_cache(maxsize=32)
+def _load_root(directory: Path) -> dict[str, EntitySchema]:
+    """One root's own type files, keyed by type. Duplicate types *within*
+    this root are an authoring error; duplicates *across* roots are the
+    override mechanism and are resolved by the caller (first root wins)."""
     schemas: dict[str, EntitySchema] = {}
     for path in sorted(directory.glob("*.yaml")):
         try:
@@ -90,6 +214,49 @@ def _load_cached(schema_dir: str) -> dict[str, EntitySchema]:
         if schema.type in schemas:
             raise SchemaLoadError(f"{path.name}: duplicate schema for type '{schema.type}'")
         schemas[schema.type] = schema
-    if not schemas:
-        raise SchemaLoadError(f"No entity schemas found in {directory}")
     return schemas
+
+
+# --------------------------------------------------------------------------
+# Page-shape templates: narrative body structure, resolved independently of
+# field shape so a kb-local override can change just the shape a type uses
+# (or just a shape's own template prose) without forking that type's whole
+# field list — the same "don't force one override to duplicate the other
+# axis" reasoning that keeps skills and entity fields on separate override
+# units. Same three-tier precedence (kb-local -> user -> built-in) as entity
+# schemas, minus the WAKIL_SCHEMA_PATH override tier — not needed yet; add it
+# if a real need shows up.
+
+DEFAULT_TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+
+def _template_roots(kb_root: Path | None) -> list[SchemaRoot]:
+    raw_entries: list[tuple[Path, str]] = []
+    if kb_root is not None:
+        raw_entries.append((kb_root / "schema" / "templates", SOURCE_KB_LOCAL))
+    raw_entries.append((config_home() / "schema" / "templates", SOURCE_USER))
+    raw_entries.append((DEFAULT_TEMPLATE_DIR, SOURCE_BUILTIN))
+
+    seen: set[Path] = set()
+    roots: list[SchemaRoot] = []
+    for raw_path, source in raw_entries:
+        normalized = _normalize_root(raw_path)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if normalized.is_dir():
+            roots.append(SchemaRoot(path=normalized, source=source))
+    return roots
+
+
+def resolve_page_shape_template(shape: str, kb_root: Path | None = None) -> tuple[str, SchemaRoot]:
+    """The page-shape template body plus which root won it (whole-file,
+    first match wins — same invariant as entity schemas and skills)."""
+    for root in _template_roots(kb_root):
+        candidate = root.path / f"{shape}.md"
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8"), root
+    raise SchemaLoadError(
+        f"No page-shape template named {shape!r} found in any of: "
+        f"{', '.join(str(r.path) for r in _template_roots(kb_root)) or '(no roots found)'}"
+    )

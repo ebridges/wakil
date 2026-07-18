@@ -3,6 +3,7 @@
 type: person
 directory: people
 category: identity        # identity | document | hybrid — entity-metadata.md's 3-way split
+page_shape: compiled-truth-timeline
 fields:
   name: {required: true, kind: string}
   aliases: {required: false, kind: list}
