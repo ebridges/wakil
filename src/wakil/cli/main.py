@@ -50,6 +50,12 @@ schema_app = typer.Typer(help="Entity schema tools for the knowledge base.", no_
 app.add_typer(schema_app, name="schema")
 skills_app = typer.Typer(help="Discover, inspect, and validate skills.", no_args_is_help=True)
 app.add_typer(skills_app, name="skills")
+qmd_app = typer.Typer(help="Manage the QMD search index and collections.", no_args_is_help=True)
+app.add_typer(qmd_app, name="qmd")
+qmd_collection_app = typer.Typer(
+    help="Manage QMD collections (indexed folders).", no_args_is_help=True
+)
+qmd_app.add_typer(qmd_collection_app, name="collection")
 
 
 @app.callback()
@@ -111,8 +117,16 @@ def init(
         "."
     ),
     name: Annotated[
-        str | None, typer.Option("--name", help="Workspace name (defaults to directory name).")
+        str | None,
+        typer.Option("--name", help="Workspace name (defaults to directory name)."),
     ] = None,
+    no_qmd_collection: Annotated[
+        bool,
+        typer.Option(
+            "--no-qmd-collection",
+            help="Skip creating the default QMD collection for the whole workspace.",
+        ),
+    ] = False,
 ) -> None:
     """Initialize a knowledge-base workspace and index its Markdown files."""
     status, index_result = init_workspace(path, name=name)
@@ -122,6 +136,17 @@ def init(
         f"[dim](use -w {status.config.name} from anywhere)[/dim]"
     )
     print_index_result(index_result)
+
+    if status.config.qmd_enabled and not no_qmd_collection:
+        from wakil.app.qmd_service import ensure_default_collection
+
+        result = ensure_default_collection(status.config)
+        if result is not None:
+            if result.success:
+                console.print(f"[green]QMD collection registered:[/green] {result.message}")
+                status.qmd.project_index = True
+            else:
+                console.print(f"[yellow]QMD collection not created:[/yellow] {result.message}")
     print_status(status)
 
 
@@ -228,6 +253,30 @@ def _commit_written_files(
         console.print(f"Opened PR: {outcome.pr_url}")
 
 
+def _refresh_qmd_index(config: WorkspaceConfig) -> None:
+    """Keep QMD current after writing files: re-scan collections, then embed
+    anything new. Best-effort — the ingest itself already succeeded by the
+    time this runs, so a refresh failure only warns, never fails the command.
+    Not wrapped in a spinner: the embed step streams qmd's own progress bar
+    live, which would visually collide with a Rich spinner running at the
+    same time."""
+    from wakil.app.qmd_service import refresh_index
+    from wakil.integrations.qmd import qmd_list_collections
+
+    if not config.qmd_enabled or not qmd_list_collections(config.qmd_dir):
+        return
+    console.print(
+        "[dim]Refreshing QMD index (embedding may take a while on first run "
+        "— downloading the embedding model)...[/dim]"
+    )
+    results = refresh_index(config)
+    for result in results:
+        if not result.success:
+            console.print(f"[yellow]QMD index refresh incomplete:[/yellow] {result.message}")
+            return
+    console.print("[dim]QMD index refreshed.[/dim]")
+
+
 def _run_ingest(
     ctx: typer.Context,
     kind: str,
@@ -288,6 +337,7 @@ def _run_ingest(
             pr,
             kind="source",
         )
+    _refresh_qmd_index(config)
 
 
 @app.command()
@@ -305,17 +355,20 @@ def enrich(
     ] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
     force: Annotated[
-        bool, typer.Option("--force", help="Re-analyze a source that was already enriched.")
+        bool,
+        typer.Option("--force", help="Re-analyze a source that was already enriched."),
     ] = False,
     branch: Annotated[
         bool,
         typer.Option("--branch", "-b", help="Create a wakil/ingest/* branch and commit there."),
     ] = False,
     commit: Annotated[
-        bool, typer.Option("--commit", "-c", help="Commit written files on the current branch.")
+        bool,
+        typer.Option("--commit", "-c", help="Commit written files on the current branch."),
     ] = False,
     pr: Annotated[
-        bool, typer.Option("--pr", help="Push the branch and open a PR via gh (implies -b).")
+        bool,
+        typer.Option("--pr", help="Push the branch and open a PR via gh (implies -b)."),
     ] = False,
 ) -> None:
     """Step 2: analyze a captured source and link it into the knowledge base."""
@@ -379,17 +432,22 @@ def enrich(
         )
     elif branch or commit:
         console.print("[dim]No files were written; nothing to commit.[/dim]")
+    if result.files_written:
+        _refresh_qmd_index(config)
 
 
 _YES = Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")]
 _BRANCH = Annotated[
-    bool, typer.Option("--branch", "-b", help="Create a wakil/ingest/* branch and commit there.")
+    bool,
+    typer.Option("--branch", "-b", help="Create a wakil/ingest/* branch and commit there."),
 ]
 _COMMIT = Annotated[
-    bool, typer.Option("--commit", "-c", help="Commit the ingested files on the current branch.")
+    bool,
+    typer.Option("--commit", "-c", help="Commit the ingested files on the current branch."),
 ]
 _PR = Annotated[
-    bool, typer.Option("--pr", help="Push the ingest branch and open a PR via gh (implies -b).")
+    bool,
+    typer.Option("--pr", help="Push the ingest branch and open a PR via gh (implies -b)."),
 ]
 _CONTEXT = Annotated[
     str | None,
@@ -436,7 +494,16 @@ def ingest_text(
     pr: _PR = False,
 ) -> None:
     """Ingest a plain text file, pasted note, or clipping."""
-    _run_ingest(ctx, "text", yes, file=file, branch=branch, commit=commit, pr=pr, context=context)
+    _run_ingest(
+        ctx,
+        "text",
+        yes,
+        file=file,
+        branch=branch,
+        commit=commit,
+        pr=pr,
+        context=context,
+    )
 
 
 @ingest_app.command("article")
@@ -450,7 +517,16 @@ def ingest_article(
     pr: _PR = False,
 ) -> None:
     """Fetch a web article, extract its text, and ingest it."""
-    _run_ingest(ctx, "article", yes, url=url, branch=branch, commit=commit, pr=pr, context=context)
+    _run_ingest(
+        ctx,
+        "article",
+        yes,
+        url=url,
+        branch=branch,
+        commit=commit,
+        pr=pr,
+        context=context,
+    )
 
 
 def _memory_session(ctx: typer.Context):
@@ -490,11 +566,13 @@ def memory_list(
     state: Annotated[
         str | None,
         typer.Option(
-            "--state", help="Filter by state: working|candidate|durable|rejected|archived."
+            "--state",
+            help="Filter by state: working|candidate|durable|rejected|archived.",
         ),
     ] = None,
     memory_type: Annotated[
-        str | None, typer.Option("--type", help="Filter by memory type (fact, decision, ...).")
+        str | None,
+        typer.Option("--type", help="Filter by memory type (fact, decision, ...)."),
     ] = None,
     limit: Annotated[int, typer.Option("--limit", help="Max memories to show.")] = 50,
 ) -> None:
@@ -564,13 +642,15 @@ def memory_archive(
 def schema_migrate(
     ctx: typer.Context,
     entity_type: Annotated[
-        str | None, typer.Option("--type", help="Migrate only notes of this entity type.")
+        str | None,
+        typer.Option("--type", help="Migrate only notes of this entity type."),
     ] = None,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Show the plan and diffs; write nothing.")
     ] = False,
     yes: Annotated[
-        bool, typer.Option("--yes", "-y", help="Apply every proposed fix without prompting.")
+        bool,
+        typer.Option("--yes", "-y", help="Apply every proposed fix without prompting."),
     ] = False,
     commit: Annotated[
         bool,
@@ -864,7 +944,11 @@ def skills_lint(
     """
     from wakil.skills.errors import SkillResolutionError
     from wakil.skills.lint import LintFinding, builtin_catalog_names, lint_skill
-    from wakil.skills.resolver import default_context, discover_skill_names, resolve_skill
+    from wakil.skills.resolver import (
+        default_context,
+        discover_skill_names,
+        resolve_skill,
+    )
 
     root = _resolve_workspace(ctx)
     context = default_context(root)
@@ -883,6 +967,115 @@ def skills_lint(
     print_skill_lint(findings)
     if findings:
         raise typer.Exit(code=1)
+
+
+@qmd_collection_app.command("add")
+def qmd_collection_add(
+    ctx: typer.Context,
+    path: Annotated[Path, typer.Argument(help="Folder to index, relative to the workspace root.")],
+    name: Annotated[
+        str | None, typer.Option("--name", help="Collection name (defaults to the folder name).")
+    ] = None,
+    pattern: Annotated[
+        str | None, typer.Option("--pattern", help="Glob pattern to index (default: **/*.md).")
+    ] = None,
+) -> None:
+    """Register a folder as a QMD collection."""
+    from wakil.app.qmd_service import QmdPathError, add_collection
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    try:
+        result = add_collection(config, path, name=name, pattern=pattern)
+    except QmdPathError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    if not result.success:
+        console.print(f"[red]{result.message}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]{result.message}[/green]" if result.message else "[green]Done.[/green]")
+
+
+@qmd_collection_app.command("list")
+def qmd_collection_list(ctx: typer.Context) -> None:
+    """List registered QMD collections."""
+    from wakil.integrations.qmd import qmd_list_collections
+    from wakil.ui.console import print_qmd_collections
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    print_qmd_collections(qmd_list_collections(config.qmd_dir))
+
+
+@qmd_collection_app.command("remove")
+def qmd_collection_remove(
+    ctx: typer.Context, name: Annotated[str, typer.Argument(help="Collection name to remove.")]
+) -> None:
+    """Remove a registered QMD collection."""
+    from wakil.integrations.qmd import qmd_remove_collection
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    result = qmd_remove_collection(config.qmd_dir, name)
+    if not result.success:
+        console.print(f"[red]{result.message}[/red]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]{result.message}[/green]" if result.message else "[green]Done.[/green]")
+
+
+@qmd_app.command("sync")
+def qmd_sync(
+    ctx: typer.Context,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Register every proposed collection without prompting."),
+    ] = False,
+) -> None:
+    """Propose registering a single QMD collection covering the whole
+    workspace, but only when no collection exists yet (usually already done
+    by `wakil init`, unless run with --no-qmd-collection)."""
+    from wakil.app.qmd_service import add_collection, plan_default_collections
+    from wakil.ui.console import print_qmd_collection_plan
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    plans = plan_default_collections(config)
+    print_qmd_collection_plan(plans)
+    if not plans:
+        return
+    if not yes and not typer.confirm(f"Register {len(plans)} collection(s)?"):
+        console.print("[dim]Skipped.[/dim]")
+        return
+    for plan in plans:
+        result = add_collection(config, Path(plan.path), name=plan.name, pattern=plan.pattern)
+        if result.success:
+            console.print(f"[green]✓[/green] {plan.name}")
+        else:
+            console.print(f"[red]✗ {plan.name}: {result.message}[/red]")
+
+
+@qmd_app.command("embed")
+def qmd_embed(ctx: typer.Context) -> None:
+    """Generate embeddings for indexed content that doesn't have one yet.
+
+    Needed for --mode vsearch/query; BM25 --mode search doesn't use it. The
+    first run downloads the embedding model, so this may take a while —
+    qmd's own progress bar is shown live rather than hidden.
+    """
+    from wakil.integrations.qmd import qmd_embed as run_qmd_embed
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    console.print(
+        "[dim]Embedding QMD content — first run downloads the embedding model "
+        "from Hugging Face, which can take a few minutes.[/dim]"
+    )
+    result = run_qmd_embed(config.qmd_dir, config.root_path)
+    if result.message:
+        console.print(result.message)
+    if not result.success:
+        raise typer.Exit(code=1)
+    console.print("[green]Done.[/green]")
 
 
 @app.command()

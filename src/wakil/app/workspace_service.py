@@ -7,7 +7,13 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from wakil.config.settings import SPECIAL_FILES, WorkspaceConfig, is_initialized
+from wakil.config.settings import (
+    QMD_DIRNAME,
+    SPECIAL_FILES,
+    WAKIL_DIR,
+    WorkspaceConfig,
+    is_initialized,
+)
 from wakil.integrations.git import GitInfo, inspect_git
 from wakil.integrations.qmd import QmdInfo, detect_qmd
 from wakil.knowledge.markdown import discover_markdown_files, read_markdown_file
@@ -52,7 +58,7 @@ def init_workspace(root: Path, name: str | None = None) -> tuple[WorkspaceStatus
     root.mkdir(parents=True, exist_ok=True)
 
     git_info = inspect_git(root)
-    qmd_info = detect_qmd(root)
+    qmd_info = detect_qmd(root, qmd_dir=root / WAKIL_DIR / QMD_DIRNAME)
 
     if is_initialized(root):
         config = WorkspaceConfig.load(root)
@@ -80,7 +86,7 @@ def init_workspace(root: Path, name: str | None = None) -> tuple[WorkspaceStatus
 def get_status(root: Path) -> WorkspaceStatus:
     config = WorkspaceConfig.load(root)
     git_info = inspect_git(root)
-    qmd_info = detect_qmd(root)
+    qmd_info = detect_qmd(root, qmd_dir=config.qmd_dir)
     with open_session(config) as session:
         workspace = _ensure_workspace(session, config)
         session.commit()

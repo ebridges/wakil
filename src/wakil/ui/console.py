@@ -18,9 +18,11 @@ from wakil.app.ingest_service import (
     ProposedFile,
     slugify,
 )
+from wakil.app.qmd_service import CollectionPlan
 from wakil.app.query_service import QueryResult
 from wakil.app.search_service import SearchHit
 from wakil.app.workspace_service import IndexResult, WorkspaceStatus
+from wakil.integrations.qmd import QmdCollection
 from wakil.skills.lint import LintFinding
 from wakil.skills.models import ResolvedSkill, RootIssue, SkillRoot
 
@@ -48,7 +50,41 @@ def print_search_hits(hits: list[SearchHit], query: str) -> None:
     table.add_column("Via", style="dim")
     for hit in hits:
         style = _KIND_STYLES.get(hit.kind, "white")
-        table.add_row(f"[{style}]{hit.kind}[/{style}]", hit.ref, hit.title, hit.snippet, hit.engine)
+        table.add_row(
+            f"[{style}]{hit.kind}[/{style}]",
+            hit.ref,
+            hit.title,
+            hit.snippet,
+            hit.engine,
+        )
+    console.print(table)
+
+
+def print_qmd_collections(collections: list[QmdCollection]) -> None:
+    if not collections:
+        console.print(
+            "No QMD collections registered. Run [bold]wakil qmd sync[/bold] to propose some."
+        )
+        return
+    table = Table(title="QMD collections")
+    table.add_column("Name", style="bold")
+    table.add_column("Path", overflow="fold")
+    table.add_column("Pattern", style="dim")
+    for collection in collections:
+        table.add_row(collection.name, str(collection.path), collection.pattern)
+    console.print(table)
+
+
+def print_qmd_collection_plan(plans: list[CollectionPlan]) -> None:
+    if not plans:
+        console.print("No new collections to propose — everything already registered.")
+        return
+    table = Table(title="Proposed QMD collections")
+    table.add_column("Name", style="bold")
+    table.add_column("Path", overflow="fold")
+    table.add_column("Pattern", style="dim")
+    for plan in plans:
+        table.add_row(plan.name, plan.path, plan.pattern)
     console.print(table)
 
 
@@ -86,6 +122,11 @@ def print_status(status: WorkspaceStatus) -> None:
     table.add_row("QMD", qmd_value)
     if status.qmd.workspace_scripts:
         table.add_row("QMD scripts", ", ".join(status.qmd.workspace_scripts))
+    if status.qmd.available:
+        if status.qmd.project_index:
+            table.add_row("QMD index", "[green]workspace-scoped[/green]")
+        else:
+            table.add_row("QMD index", "[dim]not yet created (run 'wakil qmd sync')[/dim]")
 
     if status.special_files:
         table.add_row("Workspace context", ", ".join(status.special_files))
