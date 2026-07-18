@@ -59,7 +59,7 @@ def search_notes(session: Session, workspace_id: int, query: str, limit: int = 1
         session,
         """
         SELECT n.path AS ref, n.title AS title,
-               snippet(notes_fts, 0, '', '', '…', 12) AS snippet,
+               snippet(notes_fts, -1, '', '', '…', 12) AS snippet,
                bm25(notes_fts) AS score
         FROM notes_fts JOIN notes n ON n.id = notes_fts.rowid
         WHERE notes_fts MATCH :match AND n.workspace_id = :workspace_id
@@ -77,7 +77,7 @@ def search_memories(session: Session, workspace_id: int, query: str, limit: int 
         """
         SELECT 'memory:' || m.id AS ref,
                coalesce(m.summary, substr(m.content, 1, 80)) AS title,
-               snippet(memories_fts, 0, '', '', '…', 12) AS snippet,
+               snippet(memories_fts, -1, '', '', '…', 12) AS snippet,
                bm25(memories_fts) AS score,
                m.state AS state,
                m.created_at AS created_at
@@ -97,7 +97,7 @@ def search_sources(session: Session, workspace_id: int, query: str, limit: int =
         session,
         """
         SELECT 'source:' || s.id AS ref, s.title AS title,
-               snippet(sources_fts, 0, '', '', '…', 12) AS snippet,
+               snippet(sources_fts, -1, '', '', '…', 12) AS snippet,
                bm25(sources_fts) AS score
         FROM sources_fts JOIN sources s ON s.id = sources_fts.rowid
         WHERE sources_fts MATCH :match AND s.workspace_id = :workspace_id
