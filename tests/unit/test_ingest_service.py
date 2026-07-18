@@ -1,4 +1,5 @@
 import json
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from wakil.app.ingest_service import (
     apply_enrichment,
     clean_transcript,
     infer_meeting_date,
+    parse_whisper_transcript,
     prepare_capture,
     prepare_enrichment,
     slugify,
@@ -112,6 +114,24 @@ def transcript(kb_path: Path) -> Path:
     return path
 
 
+def _write_whisper(path: Path, transcripts: list[dict], date_created: float | None = None) -> Path:
+    metadata = {
+        "transcripts": transcripts,
+        "speakers": [],
+        "originalMediaFilename": "Voice Memo",
+    }
+    if date_created is not None:
+        metadata["dateCreated"] = date_created
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("metadata.json", json.dumps(metadata))
+        archive.writestr("originalAudio", b"")
+    return path
+
+
+def _segment(speaker: str, text: str, start: int) -> dict:
+    return {"start": start, "end": start + 1000, "speaker": {"name": speaker}, "text": text}
+
+
 def _capture(workspace, transcript, context=None) -> int:
     proposal = prepare_capture(workspace, "transcript", file=transcript, context=context)
     return apply_capture(workspace, proposal).source_id
@@ -183,6 +203,66 @@ def test_capture_cleans_transcript(workspace, kb_path):
     proposal = prepare_capture(workspace, "transcript", file=noisy)
     assert "Jane: hello\nBob: hi" in proposal.raw_file.content
     assert "[00:00:01]" not in proposal.raw_file.content
+
+
+def test_capture_transcript_whisper(workspace, kb_path):
+    whisper = _write_whisper(
+        kb_path / "2026-07-16-mosaic-eleni-karahalios.whisper",
+        [
+            _segment("Edward Bridges", "Hi, this is Ed.", 0),
+            _segment("Eleni Karahalios", "Hey Ed, this is Eleni.", 1000),
+            _segment("Eleni Karahalios", "How are you?", 2000),
+            _segment("Edward Bridges", "I'm glad we managed to uh work through it.", 3000),
+        ],
+    )
+    proposal = prepare_capture(workspace, "transcript", file=whisper)
+
+    assert proposal.meeting_date == "2026-07-16"  # from the filename, not dateCreated
+    assert (
+        "**Edward Bridges**: Hi, this is Ed.\n\n"
+        "**Eleni Karahalios**: Hey Ed, this is Eleni. How are you?\n\n"
+        "**Edward Bridges**: I'm glad we managed to work through it."
+    ) in proposal.raw_file.content
+    body = proposal.raw_file.content.split("---", 2)[2].lstrip("\n")
+    assert body.startswith("# 2026-07-16-mosaic-eleni-karahalios\n\n")
+
+
+def test_capture_transcript_whisper_falls_back_to_recorded_at(workspace, kb_path):
+    # No date in the filename, so meeting_date must come from the archive's
+    # own dateCreated (seconds since the 2001-01-01 reference epoch).
+    whisper = _write_whisper(
+        kb_path / "call.whisper",
+        [_segment("Ed", "hello", 0)],
+        date_created=805926332.753,  # 2026-07-16
+    )
+    proposal = prepare_capture(workspace, "transcript", file=whisper)
+    assert proposal.meeting_date == "2026-07-16"
+
+
+def test_capture_transcript_whisper_rejects_non_zip(workspace, kb_path):
+    bad = kb_path / "broken.whisper"
+    bad.write_bytes(b"not a zip file")
+    with pytest.raises(IngestError, match="not a valid whisper archive"):
+        prepare_capture(workspace, "transcript", file=bad)
+
+
+def test_capture_transcript_whisper_rejects_missing_metadata(workspace, kb_path):
+    empty = kb_path / "empty.whisper"
+    with zipfile.ZipFile(empty, "w") as archive:
+        archive.writestr("originalAudio", b"")
+    with pytest.raises(IngestError, match="no metadata.json"):
+        prepare_capture(workspace, "transcript", file=empty)
+
+
+def test_parse_whisper_transcript_strips_filler_words_only(kb_path):
+    whisper = _write_whisper(
+        kb_path / "sample.whisper",
+        [_segment("Jane", "I um I was calling you, uh, about the offer.", 0)],
+    )
+    dialogue, _ = parse_whisper_transcript(whisper)
+    # Only the isolated filler tokens are removed; the repeated "I" and the
+    # rest of the phrasing are left exactly as spoken (no ASR repair).
+    assert dialogue == "**Jane**: I I was calling you, about the offer."
 
 
 # --------------------------------------------------------------------------

@@ -58,7 +58,11 @@ existing notes — that's `content-synthesis`'s territory, not this skill's.
 ## The three CLI-native shapes, and everything else
 
 - **`wakil ingest transcript <file>`** — a meeting or call transcript
-  (`.txt`, `.md`, `.srt`). Multi-party, dated, attributable to speakers.
+  (`.txt`, `.md`, `.srt`, `.whisper`). Multi-party, dated, attributable to
+  speakers. `.whisper` (a zip of Apple-style diarized `metadata.json`) is
+  parsed natively — speaker turns merged, filler tokens stripped — so it
+  does not need `source-ingestion` normalization first, unlike the other
+  non-native shapes below.
 - **`wakil ingest text <file>`** — a plain text file, pasted note, or
   clipping. Solo narration, a fragment, anything that isn't a dialogue
   between named parties.

@@ -23,8 +23,9 @@ are only written in apply, so declining a preview leaves no trace.
 import hashlib
 import json
 import re
+import zipfile
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import frontmatter as frontmatter_lib
@@ -199,14 +200,18 @@ def prepare_capture(
     if kind in ("transcript", "text"):
         if file is None:
             raise IngestError(f"{kind} ingest needs a file path")
-        try:
-            raw = file.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            raise IngestError(f"Could not read {file}: {exc}") from exc
-        text = strip_srt(raw) if file.suffix.lower() == ".srt" else raw
-        if kind == "transcript":
-            text = clean_transcript(text)
-            meeting_date = infer_meeting_date(file, text)
+        if kind == "transcript" and file.suffix.lower() == ".whisper":
+            text, recorded_at = parse_whisper_transcript(file)
+            meeting_date = infer_meeting_date(file, text) or recorded_at
+        else:
+            try:
+                raw = file.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                raise IngestError(f"Could not read {file}: {exc}") from exc
+            text = strip_srt(raw) if file.suffix.lower() == ".srt" else raw
+            if kind == "transcript":
+                text = clean_transcript(text)
+                meeting_date = infer_meeting_date(file, text)
         origin = str(file)
         title = file.stem.replace("-", " ").replace("_", " ").strip() or file.name
     elif kind == "article":
@@ -1090,6 +1095,84 @@ def clean_transcript(raw: str) -> str:
         if line or (cleaned_lines and cleaned_lines[-1]):
             cleaned_lines.append(line)
     return "\n".join(cleaned_lines).strip()
+
+
+# Standalone ASR disfluency tokens (Whisper/parakeet-style transcribers emit
+# these as isolated words). Stripping them is mechanical, not transcription
+# repair: duplicated words, false starts, and grammar are left exactly as
+# spoken — deciding what a stutter or garbled phrase "really meant" is
+# judgment, and judgment belongs in a model-assisted step, not here.
+_FILLER_WORD_RE = re.compile(r"\b(?:uh+|umm?|erm)\b,?", re.IGNORECASE)
+
+
+def _strip_filler_words(text: str) -> str:
+    text = _FILLER_WORD_RE.sub("", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    return text.strip()
+
+
+# Seconds between the Whisper/Apple "reference date" epoch (2001-01-01 UTC,
+# the same epoch macOS uses for NSDate/CFAbsoluteTime) and a given timestamp.
+_WHISPER_EPOCH = datetime(2001, 1, 1, tzinfo=UTC)
+
+
+def _whisper_recorded_at(raw_seconds: object) -> str | None:
+    if not isinstance(raw_seconds, int | float):
+        return None
+    try:
+        return (_WHISPER_EPOCH + timedelta(seconds=raw_seconds)).date().isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _read_whisper_metadata(file: Path) -> dict:
+    try:
+        with zipfile.ZipFile(file) as archive, archive.open("metadata.json") as fh:
+            return json.load(fh)
+    except zipfile.BadZipFile as exc:
+        raise IngestError(f"{file} is not a valid whisper archive (expected a zip): {exc}") from exc
+    except KeyError as exc:
+        raise IngestError(f"{file} has no metadata.json inside the archive") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise IngestError(f"Could not read whisper metadata from {file}: {exc}") from exc
+
+
+def parse_whisper_transcript(file: Path) -> tuple[str, str | None]:
+    """Extract speaker-labeled dialogue from an Apple-style .whisper archive.
+
+    A `.whisper` file is a zip containing `metadata.json`: diarized
+    `transcripts` segments (speaker name, start/end ms, text) plus a
+    `speakers` roster and capture timestamps. Consecutive segments from the
+    same speaker are merged into one turn, and standalone ASR filler tokens
+    are stripped (see `_strip_filler_words`) — otherwise the text is kept
+    verbatim.
+
+    Returns (dialogue_text, recorded_at) where recorded_at is an ISO date
+    derived from the archive's own capture timestamp, or None if absent.
+    """
+    data = _read_whisper_metadata(file)
+    segments = data.get("transcripts")
+    if not isinstance(segments, list) or not segments:
+        raise IngestError(f"{file}: metadata.json has no transcript segments")
+
+    turns: list[tuple[str, list[str]]] = []
+    for segment in sorted(segments, key=lambda s: s.get("start", 0)):
+        text = _strip_filler_words(str(segment.get("text", "")).strip())
+        if not text:
+            continue
+        speaker = str((segment.get("speaker") or {}).get("name") or "").strip() or "Unknown speaker"
+        if turns and turns[-1][0] == speaker:
+            turns[-1][1].append(text)
+        else:
+            turns.append((speaker, [text]))
+
+    if not turns:
+        raise IngestError(f"{file}: transcript segments contained no text")
+
+    dialogue = "\n\n".join(f"**{speaker}**: {' '.join(parts)}" for speaker, parts in turns)
+    recorded_at = _whisper_recorded_at(data.get("dateCreated"))
+    return dialogue, recorded_at
 
 
 _ISO_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")

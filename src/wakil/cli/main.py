@@ -404,7 +404,7 @@ _CONTEXT = Annotated[
 @ingest_app.command("transcript")
 def ingest_transcript(
     ctx: typer.Context,
-    file: Annotated[Path, typer.Argument(help="Transcript file (.txt, .md, or .srt).")],
+    file: Annotated[Path, typer.Argument(help="Transcript file (.txt, .md, .srt, or .whisper).")],
     context: _CONTEXT = None,
     yes: _YES = False,
     branch: _BRANCH = False,
@@ -413,7 +413,14 @@ def ingest_transcript(
 ) -> None:
     """Ingest a meeting or call transcript."""
     _run_ingest(
-        ctx, "transcript", yes, file=file, branch=branch, commit=commit, pr=pr, context=context
+        ctx,
+        "transcript",
+        yes,
+        file=file,
+        branch=branch,
+        commit=commit,
+        pr=pr,
+        context=context,
     )
 
 
