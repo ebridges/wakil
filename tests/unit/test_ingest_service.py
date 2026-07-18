@@ -6,7 +6,10 @@ import pytest
 from sqlalchemy import select
 
 from wakil.app.ingest_service import (
+    EnrichmentProposal,
+    EntityUpdate,
     IngestError,
+    _merge_entity_note,
     apply_capture,
     apply_enrichment,
     clean_transcript,
@@ -20,6 +23,7 @@ from wakil.app.ingest_service import (
 )
 from wakil.app.workspace_service import init_workspace, open_session
 from wakil.config.settings import WorkspaceConfig
+from wakil.llm.schemas import EntityRevision
 from wakil.storage.schema import IngestRun, Memory, Note, Relationship, Source
 
 MODEL_JSON = {
@@ -70,14 +74,18 @@ RESOLUTION_JSON = {
 }
 
 
+REVISION_JSON = {"revisions": []}  # no-op: no entity update warrants a content change
+
+
 class FakeClient:
-    """Scripted responses, one per model call (extraction, then resolution)."""
+    """Scripted responses, one per model call (extraction, resolution, then
+    entity-updates whenever a resolution's `update` target exists on disk)."""
 
     model = "fake-model"
 
     def __init__(self, payloads=None):
         if payloads is None:
-            payloads = [MODEL_JSON, RESOLUTION_JSON]
+            payloads = [MODEL_JSON, RESOLUTION_JSON, REVISION_JSON]
         self.queue = [json.dumps(p) if isinstance(p, dict) else p for p in payloads]
         self.calls: list[tuple[str, str]] = []
 
@@ -183,16 +191,44 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
 
     proposal = prepare_enrichment(workspace, source_id, client)
 
-    # Two model calls: extraction with the transcript skill, then entity
-    # resolution — always invoked, with the type catalog in its prompt.
-    assert len(client.calls) == 2
+    # Three model calls: extraction, entity resolution (always invoked),
+    # then entity-updates — triggered here because RESOLUTION_JSON resolves
+    # Jane Doe to action=update against the fixture's real people/jane-doe.md.
+    assert len(client.calls) == 3
     extraction_system, extraction_prompt = client.calls[0]
     resolution_system, resolution_prompt = client.calls[1]
+    revision_system, revision_prompt = client.calls[2]
     assert "Find the resolution, not the first option" in extraction_system
     assert '"ExtractionOutput"' in extraction_system  # contract schema injected
     assert "Jane Doe (Acme)" in extraction_prompt
     assert "entity-resolution step" in resolution_system
     assert "Known entity types" in resolution_prompt
+    # The revision call's system prompt is note-revision/SKILL.md itself,
+    # and it's given the target's full current content, per "read the
+    # existing note in full before writing anything."
+    assert "note-revision" in revision_system
+    assert "Works on claims automation" in revision_prompt  # jane-doe.md's own body
+
+    # The full field catalog (required + optional) for every entity type is
+    # in the extraction prompt regardless of whether SCHEMA.md defines
+    # anything — this fixture's SCHEMA.md has no templates at all (see
+    # test_transcript_frontmatter_template_absent), so this is wakil's own
+    # built-in schema, not workspace prose.
+    assert "meeting (directory: meetings" in extraction_prompt
+    assert "decisions (optional, list)" in extraction_prompt
+    assert "action-items (optional, list)" in extraction_prompt
+    # Each type names its page_shape, and the matching template body is
+    # rendered once — a meeting is single-occurrence (no Timeline), a
+    # person is compiled-truth-timeline (no Key Decisions/Action Items).
+    assert "page_shape: single-occurrence" in extraction_prompt
+    assert "page_shape: compiled-truth-timeline" in extraction_prompt
+    assert "Page shape 'single-occurrence'" in extraction_prompt
+    assert "Page shape 'compiled-truth-timeline'" in extraction_prompt
+    assert "Timeline / Log" in extraction_prompt
+    # `type` names a schema rather than being one of its fields, so it never
+    # appears in the rendered field catalog — the model needs to be told
+    # explicitly to still write it as its own frontmatter line.
+    assert "`type: <name>`" in extraction_prompt
     assert "person" in resolution_prompt
 
     assert any(hit.ref == "people/jane-doe.md" for hit in proposal.related_notes)
@@ -375,6 +411,267 @@ def test_reconcile_does_not_touch_unresolved_display_text(workspace, transcript)
 
     assert proposal.proposed_note.content == markdown
     assert not any("Corrected" in warning for warning in proposal.warnings)
+
+
+# --------------------------------------------------------------------------
+# Entity updates (DAG node 3) — the only place wakil edits an existing file.
+# REAL_SHAPED_PERSON mirrors actual entity pages in production use, not an
+# idealized one: no explicit "## Compiled Truth" heading (the top section is
+# just prose after the H1), and a trailing block of auto-generated back-link
+# bullets after the dated entries that must never be touched.
+
+REAL_SHAPED_PERSON = (
+    "---\n"
+    "type: person\n"
+    "name: Priya Shah\n"
+    "status: active\n"
+    "tags:\n  - job-search\n"
+    "created: 2026-06-01\n"
+    "updated: 2026-06-01\n"
+    "---\n\n"
+    "# priya-shah\n\n"
+    "**Recruiter** at [[companies/acme|Acme]]. First screen 2026-06-01.\n\n"
+    "Cross-references: [[companies/acme|Acme]]\n\n"
+    "---\n\n"
+    "## Timeline / Log\n\n"
+    "### 2026-06-01 — recruiter screen\n"
+    "- Introductory call, discussed the VP Eng role.\n\n"
+    "- **2026-06-01** | Referenced in [some-meeting](meetings/2026/2026-06-01-screen.md)\n"
+)
+
+
+def test_merge_entity_note_replaces_top_section_preserves_h1_and_prepends_timeline(workspace):
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="**Recruiter** at [[companies/acme|Acme]]. Now running a second search.\n\n"
+        "Cross-references: [[companies/acme|Acme]]",
+        timeline_entry="### 2026-07-16 — second search kicked off\n- New role, same recruiter.",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16")
+
+    assert new_content is not None
+    assert "# priya-shah\n\n**Recruiter** at [[companies/acme|Acme]]. Now running" in new_content
+    # Old top-section prose is gone, replaced, not appended alongside.
+    assert "First screen 2026-06-01" not in new_content
+    # New timeline entry comes first...
+    lines = new_content.splitlines()
+    new_idx = next(i for i, line in enumerate(lines) if "second search kicked off" in line)
+    old_idx = next(i for i, line in enumerate(lines) if "recruiter screen" in line)
+    assert new_idx < old_idx
+    # ...but the old entry and the trailing auto-generated back-link bullet
+    # both survive, verbatim, untouched.
+    assert "### 2026-06-01 — recruiter screen" in new_content
+    assert "- Introductory call, discussed the VP Eng role." in new_content
+    assert "- **2026-06-01** | Referenced in [some-meeting]" in new_content
+    # updated: bumped since the field already existed; created: left alone.
+    assert "updated: '2026-07-16'" in new_content or "updated: 2026-07-16" in new_content
+    assert "created: 2026-06-01" in new_content
+
+
+def test_merge_entity_note_only_changes_specified_frontmatter_fields(workspace):
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### 2026-07-16 — note\n- detail",
+        frontmatter_updates={"status": "former"},
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16")
+
+    assert "status: former" in new_content
+    assert "name: Priya Shah" in new_content  # untouched field survives
+    assert "- job-search" in new_content  # untouched list field survives
+
+
+def test_merge_entity_note_returns_none_for_unexpected_shape(workspace):
+    # No "## Timeline / Log" heading at all — the real people/jane-doe.md
+    # fixture shape. The caller must not guess a different structure.
+    minimal = "---\ntype: person\nname: Jane Doe\n---\n\n# Jane Doe\n\nWorks on claims.\n"
+    revision = EntityRevision(
+        target_note_path="people/jane-doe.md",
+        has_update=True,
+        compiled_truth="Something",
+        timeline_entry="### 2026-07-16 — x\n- y",
+    )
+    assert _merge_entity_note(minimal, revision, "2026-07-16") is None
+
+
+def _write_person(kb_path: Path, slug: str, content: str = REAL_SHAPED_PERSON) -> None:
+    people = kb_path / "people"
+    people.mkdir(exist_ok=True)
+    (people / f"{slug}.md").write_text(content.replace("priya-shah", slug))
+
+
+def test_entity_update_applies_when_model_says_has_update(workspace, transcript, kb_path):
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    update = proposal.entity_updates[0]
+    assert update.target_note_path == "people/priya-shah.md"
+    assert "New synthesized truth." in update.new_content
+    assert "new info" in update.new_content
+
+    result = apply_enrichment(workspace, proposal)
+    assert "people/priya-shah.md" in result.files_written
+    on_disk = (workspace.root_path / "people/priya-shah.md").read_text()
+    assert "New synthesized truth." in on_disk
+
+
+def test_entity_update_skipped_when_model_says_has_update_false(workspace, transcript, kb_path):
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    revisions = {"revisions": [{"target_note_path": "people/priya-shah.md", "has_update": False}]}
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert proposal.entity_updates == []
+
+
+def test_entity_update_skipped_for_single_occurrence_shape_type(workspace, transcript, kb_path):
+    # meeting is single-occurrence — note-revision's State/Timeline
+    # discipline doesn't define what "update" means for it, so it's never
+    # even offered to the revision call.
+    meetings = kb_path / "meetings"
+    meetings.mkdir(exist_ok=True)
+    (meetings / "past-sync.md").write_text(
+        "---\ntype: meeting\ntitle: Past Sync\ndate: 2026-06-01\ncreated: 2026-06-01\n---\n\n"
+        "# past-sync\n\n## Summary\n\nOld content.\n"
+    )
+    resolution = {
+        "entities": [
+            {
+                "name": "Past Sync",
+                "entity_type": "meeting",
+                "action": "update",
+                "target_note_path": "meetings/past-sync.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution])  # no 3rd response needed/consumed
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.entity_updates == []
+    assert len(client.calls) == 2
+
+
+def test_entity_update_warns_when_target_missing_on_disk(workspace, transcript):
+    resolution = {
+        "entities": [
+            {
+                "name": "Ghost Person",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/ghost-person.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution])  # no 3rd response needed/consumed
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.entity_updates == []
+    assert any("doesn't exist on disk" in warning for warning in proposal.warnings)
+    assert len(client.calls) == 2
+
+
+def test_apply_enrichment_skips_stale_entity_update_without_clobbering(
+    workspace, transcript, kb_path
+):
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    # The file changes on disk after prepare, before apply.
+    target = workspace.root_path / "people/priya-shah.md"
+    hand_edit = target.read_text() + "\n<!-- user's own concurrent edit -->\n"
+    target.write_text(hand_edit)
+
+    result = apply_enrichment(workspace, proposal)
+
+    assert "people/priya-shah.md" not in result.files_written
+    assert any("changed on disk" in msg for msg in result.stale_updates_skipped)
+    # Never clobbered — the user's concurrent edit is exactly what's on disk.
+    assert target.read_text() == hand_edit
+
+
+def test_validate_proposal_rejects_entity_update_with_invalid_frontmatter(workspace, kb_path):
+    _write_person(kb_path, "priya-shah")
+    proposal = EnrichmentProposal(source_id=1, title="t")
+    proposal.entity_updates = [
+        EntityUpdate(
+            target_note_path="people/priya-shah.md",
+            old_content=REAL_SHAPED_PERSON,
+            new_content=REAL_SHAPED_PERSON.replace("status: active", "status: bogus-value"),
+        )
+    ]
+    issues = validate_proposal(proposal)
+    assert any("bogus-value" in str(issue) for issue in issues)
+
+
 def test_enrichment_requires_existing_source(workspace):
     with pytest.raises(IngestError, match="No source with id"):
         prepare_enrichment(workspace, 999, FakeClient())
@@ -394,18 +691,20 @@ def test_enrichment_refuses_double_run_without_force(workspace, transcript):
 def test_enrichment_unsafe_note_path_falls_back_to_drafts(workspace, transcript):
     source_id = _capture(workspace, transcript)
     payload = dict(MODEL_JSON, proposed_note={"path": "../escape.md", "markdown": "# Escape\n"})
-    proposal = prepare_enrichment(workspace, source_id, FakeClient([payload, RESOLUTION_JSON]))
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, RESOLUTION_JSON, REVISION_JSON])
+    )
     assert proposal.proposed_note.path.startswith("drafts/")
 
 
 def test_extraction_retry_then_success(workspace, transcript):
     source_id = _capture(workspace, transcript)
-    client = FakeClient(["not json at all", MODEL_JSON, RESOLUTION_JSON])
+    client = FakeClient(["not json at all", MODEL_JSON, RESOLUTION_JSON, REVISION_JSON])
 
     proposal = prepare_enrichment(workspace, source_id, client)
 
     # Call 2 is the retry: same extraction system prompt, error appended.
-    assert len(client.calls) == 3
+    assert len(client.calls) == 4
     assert client.calls[1][0] == client.calls[0][0]
     assert "was not valid" in client.calls[1][1]
     assert proposal.summary == MODEL_JSON["summary"]

@@ -36,16 +36,22 @@ from wakil.app.workspace_service import index_notes, open_session
 from wakil.config.settings import WorkspaceConfig
 from wakil.integrations.web import fetch_article
 from wakil.llm.client import ModelClient
-from wakil.llm.prompts import build_extraction_prompt, build_resolution_prompt
+from wakil.llm.prompts import (
+    build_extraction_prompt,
+    build_resolution_prompt,
+    build_revision_prompt,
+)
 from wakil.llm.schemas import (
     EntityResolution,
     EntityResolutionOutput,
+    EntityRevision,
+    EntityRevisionOutput,
     ExtractionOutput,
     ModelContractError,
     complete_with_contract,
 )
 from wakil.llm.skill_loader import SkillLoadError, build_system_prompt, load_skill
-from wakil.schema.loader import load_entity_schemas
+from wakil.schema.loader import load_entity_schemas, resolve_page_shape_template
 from wakil.schema.validate import validate_frontmatter
 from wakil.storage.schema import IngestRun, Memory, Relationship, Source, User, Workspace, utcnow
 
@@ -110,6 +116,18 @@ class CaptureResult:
 
 
 @dataclass
+class EntityUpdate:
+    """A proposed, deterministic edit to an *existing* note — DAG node 3's
+    output. `old_content` is what was read during prepare; apply_enrichment
+    re-reads and refuses to apply if the file changed since (mirrors
+    schema_migrate_service's stale-file guard)."""
+
+    target_note_path: str
+    old_content: str
+    new_content: str
+
+
+@dataclass
 class EnrichmentProposal:
     source_id: int
     title: str
@@ -123,6 +141,9 @@ class EnrichmentProposal:
     # What the entity-resolution step decided, and the stub pages it implies.
     entity_resolutions: list[EntityResolution] = field(default_factory=list)
     stub_entities: list[ProposedFile] = field(default_factory=list)
+    # Deterministic merges into existing notes for action=update resolutions
+    # entity-resolution decided actually warrant a content change.
+    entity_updates: list[EntityUpdate] = field(default_factory=list)
     # Visible degradations (a failed resolution call, a downgraded create) —
     # shown in the preview, never silently swallowed.
     warnings: list[str] = field(default_factory=list)
@@ -147,6 +168,10 @@ class EnrichmentResult:
     files_written: list[str]
     memories_created: int
     relationships_created: int
+    # Entity updates skipped because the target changed on disk since this
+    # enrichment was prepared — the preview's warnings are shown pre-apply
+    # and don't cover this, so it's surfaced here instead.
+    stale_updates_skipped: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -363,8 +388,20 @@ def _run_extraction(
         # unknown kinds get the generic clipping judgment
         skill = load_skill("text", config.root_path)
     system = build_system_prompt(skill, ExtractionOutput)
+    schemas = load_entity_schemas(config.root_path)
+    page_shapes = {
+        schema.page_shape: resolve_page_shape_template(schema.page_shape, config.root_path)[0]
+        for schema in schemas.values()
+    }
     prompt = build_extraction_prompt(
-        source_type, origin, text, related_pairs, context=proposal.context, guides=guides
+        source_type,
+        origin,
+        text,
+        related_pairs,
+        schemas,
+        page_shapes,
+        context=proposal.context,
+        guides=guides,
     )
     try:
         return complete_with_contract(client, system, prompt, ExtractionOutput)
@@ -389,7 +426,7 @@ def _run_entity_resolution(
         proposal.summary,
         proposal.proposed_note.content if proposal.proposed_note else None,
         related_pairs,
-        load_entity_schemas(),
+        load_entity_schemas(config.root_path),
         context=proposal.context,
         guides=guides,
     )
@@ -401,6 +438,7 @@ def _run_entity_resolution(
     proposal.entity_resolutions = list(resolution.entities)
     proposal.stub_entities = _build_stub_entities(config, proposal)
     _reconcile_entity_links(config, proposal)
+    _run_entity_updates(config, client, text, proposal)
 
 
 def _build_stub_entities(
@@ -412,7 +450,7 @@ def _build_stub_entities(
     stub here — validate_proposal() reports them as hard stops instead of
     best-guessing a location or frontmatter shape.
     """
-    schemas = load_entity_schemas()
+    schemas = load_entity_schemas(config.root_path)
     today = datetime.now(UTC).date().isoformat()
     stubs: list[ProposedFile] = []
     taken = {proposal.proposed_note.path} if proposal.proposed_note else set()
@@ -536,6 +574,141 @@ def _reconcile_entity_links(config: WorkspaceConfig, proposal: EnrichmentProposa
         )
 
 
+# --------------------------------------------------------------------------
+# DAG node 3: entity updates — the only place wakil edits an *existing* file.
+# Scoped to compiled-truth-timeline-shaped entities: note-revision's own
+# discipline (State vs. Timeline) doesn't define what "update" means for a
+# single-occurrence note, so those are left exactly as reconciliation leaves
+# them (correct links, no content change).
+
+_H1_RE = re.compile(r"(?m)^#\s+.*$")
+_TIMELINE_HEADING_RE = re.compile(r"(?m)^##\s+Timeline\s*/\s*Log\s*$")
+
+
+def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
+    """Prepend `entry` as the new first dated entry, right after the
+    heading line — before every existing entry, including any
+    auto-generated back-link bullets at the bottom, which are never
+    touched."""
+    newline_idx = timeline_section.find("\n")
+    heading_line = timeline_section if newline_idx == -1 else timeline_section[:newline_idx]
+    rest = "" if newline_idx == -1 else timeline_section[newline_idx:].lstrip("\n")
+    entry = entry.strip()
+    if not entry:
+        return timeline_section
+    return f"{heading_line}\n\n{entry}\n\n{rest}" if rest else f"{heading_line}\n\n{entry}\n"
+
+
+def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -> str | None:
+    """Deterministic surgical merge — never a full-file regeneration (the
+    "clobbering bug" note-revision's own skill warns against): existing
+    frontmatter with only the delta keys changed, the H1 line preserved
+    verbatim (slug consistency), everything between the H1 and the Timeline
+    heading replaced with the re-synthesized compiled_truth, and one new
+    entry prepended inside the Timeline section. Returns None if the note
+    doesn't have the expected H1 + '## Timeline / Log' shape — the caller
+    surfaces that as a warning rather than guessing at a different one.
+    """
+    try:
+        post = frontmatter_lib.loads(old_content)
+    except Exception:
+        return None
+    body = post.content
+
+    h1_match = _H1_RE.search(body)
+    timeline_match = _TIMELINE_HEADING_RE.search(body)
+    if h1_match is None or timeline_match is None or timeline_match.start() <= h1_match.end():
+        return None
+
+    h1_line = body[h1_match.start() : h1_match.end()]
+    timeline_section = body[timeline_match.start() :]
+
+    metadata = dict(post.metadata)
+    if revision.frontmatter_updates:
+        metadata.update(revision.frontmatter_updates)
+    if "updated" in metadata:
+        metadata["updated"] = today
+
+    compiled_truth = (revision.compiled_truth or "").strip()
+    new_top = f"{h1_line}\n\n{compiled_truth}\n\n---" if compiled_truth else h1_line
+    new_timeline = _insert_timeline_entry(timeline_section, revision.timeline_entry or "")
+
+    new_body = f"{new_top}\n\n{new_timeline}".rstrip("\n") + "\n"
+    frontmatter_yaml = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
+    return f"---\n{frontmatter_yaml}---\n\n{new_body}"
+
+
+def _run_entity_updates(
+    config: WorkspaceConfig, client: ModelClient, text: str, proposal: EnrichmentProposal
+) -> None:
+    """Third model call: for each action=update resolution on a
+    compiled-truth-timeline entity, decide whether it warrants a real
+    content change and, if so, merge it. Degrades visibly — a failed call
+    here doesn't block the already-validated create/stub-entity write path.
+    """
+    schemas = load_entity_schemas(config.root_path)
+    candidates: list[tuple[EntityResolution, Path, str]] = []
+    for resolution in proposal.entity_resolutions:
+        if resolution.action != "update" or not resolution.target_note_path:
+            continue
+        schema = schemas.get(resolution.entity_type)
+        if schema is None or schema.page_shape != "compiled-truth-timeline":
+            continue
+        target = config.root_path / resolution.target_note_path
+        if not target.is_file():
+            proposal.warnings.append(
+                f"{resolution.name}: entity resolution says update "
+                f"{resolution.target_note_path}, but that file doesn't exist on disk — "
+                "skipped"
+            )
+            continue
+        try:
+            content = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            proposal.warnings.append(
+                f"{resolution.name}: could not read {resolution.target_note_path}: {exc} — "
+                "skipped"
+            )
+            continue
+        candidates.append((resolution, target, content))
+
+    if not candidates:
+        return
+
+    targets = [(res.target_note_path, content) for res, _, content in candidates]
+    skill = load_skill("note-revision", config.root_path)
+    system = build_system_prompt(skill, EntityRevisionOutput)
+    prompt = build_revision_prompt(text, proposal.summary, targets, context=proposal.context)
+    try:
+        result = complete_with_contract(client, system, prompt, EntityRevisionOutput)
+    except ModelContractError as exc:
+        proposal.warnings.append(f"Entity updates failed; existing notes left unchanged: {exc}")
+        return
+
+    today = datetime.now(UTC).date().isoformat()
+    by_path = {res.target_note_path: content for res, _, content in candidates}
+    for revision in result.revisions:
+        old_content = by_path.get(revision.target_note_path)
+        if old_content is None or not revision.has_update:
+            continue
+        new_content = _merge_entity_note(old_content, revision, today)
+        if new_content is None:
+            proposal.warnings.append(
+                f"{revision.target_note_path}: doesn't match the expected H1 / "
+                "'Timeline / Log' shape — update skipped, left unchanged"
+            )
+            continue
+        if new_content == old_content:
+            continue
+        proposal.entity_updates.append(
+            EntityUpdate(
+                target_note_path=revision.target_note_path,
+                old_content=old_content,
+                new_content=new_content,
+            )
+        )
+
+
 def _stub_content(metadata: dict, name: str) -> str:
     """Compiled Truth / Timeline skeleton per docs/entity-model.md."""
     frontmatter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
@@ -550,7 +723,9 @@ def _stub_content(metadata: dict, name: str) -> str:
     )
 
 
-def validate_proposal(proposal: EnrichmentProposal) -> list[ProposalIssue]:
+def validate_proposal(
+    proposal: EnrichmentProposal, kb_root: Path | None = None
+) -> list[ProposalIssue]:
     """Invariant gate between prepare and apply; any issue blocks the write.
 
     Implements entity-resolution.md's constraints plus the schema check:
@@ -559,9 +734,13 @@ def validate_proposal(proposal: EnrichmentProposal) -> list[ProposalIssue]:
     not a best-guess write; no two proposed files may share a path. Routing
     is 1:N by construction (proposed_note + stub_entities), and content-hash
     dedup is already enforced upstream at capture time.
+
+    `kb_root` should be the workspace root so a kb-local schema override
+    validates against the same schema extraction/entity-resolution used —
+    omitted only by tests that don't exercise the override mechanism.
     """
     issues: list[ProposalIssue] = []
-    schemas = load_entity_schemas()
+    schemas = load_entity_schemas(kb_root)
 
     proposed_files = list(proposal.stub_entities)
     if proposal.proposed_note is not None:
@@ -580,8 +759,27 @@ def validate_proposal(proposal: EnrichmentProposal) -> list[ProposalIssue]:
         if not isinstance(entity_type, str) or not entity_type:
             issues.append(ProposalIssue(proposed.path, "proposed file has no `type:` frontmatter"))
             continue
-        for error in validate_frontmatter(entity_type, metadata):
+        for error in validate_frontmatter(entity_type, metadata, kb_root):
             issues.append(ProposalIssue(proposed.path, str(error)))
+
+    # Edits to existing notes must still satisfy their type's schema —
+    # frontmatter_updates could otherwise merge in a value that breaks it.
+    for update in proposal.entity_updates:
+        try:
+            metadata = frontmatter_lib.loads(update.new_content).metadata
+        except Exception:
+            issues.append(
+                ProposalIssue(update.target_note_path, "merged content is not valid frontmatter")
+            )
+            continue
+        entity_type = metadata.get("type") if isinstance(metadata, dict) else None
+        if not isinstance(entity_type, str) or not entity_type:
+            issues.append(
+                ProposalIssue(update.target_note_path, "merged file has no `type:` frontmatter")
+            )
+            continue
+        for error in validate_frontmatter(entity_type, metadata, kb_root):
+            issues.append(ProposalIssue(update.target_note_path, str(error)))
 
     # Creates that could not even build a stub: missing schema or directory.
     for resolution in proposal.entity_resolutions:
@@ -608,7 +806,7 @@ def validate_proposal(proposal: EnrichmentProposal) -> list[ProposalIssue]:
 
 
 def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> EnrichmentResult:
-    issues = validate_proposal(proposal)
+    issues = validate_proposal(proposal, config.root_path)
     if issues:
         detail = "; ".join(str(issue) for issue in issues)
         raise IngestError(f"Proposal failed validation, nothing was written: {detail}")
@@ -624,6 +822,25 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(proposed.content, encoding="utf-8")
         files_written.append(proposed.path)
+
+    # Edits to existing notes: re-read immediately before writing and skip
+    # (rather than overwrite blind) any file that changed since prepare —
+    # mirrors schema_migrate_service.apply_migrations' stale-file guard.
+    stale_updates_skipped: list[str] = []
+    for update in proposal.entity_updates:
+        target = config.root_path / update.target_note_path
+        try:
+            current = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            stale_updates_skipped.append(f"{update.target_note_path}: unreadable ({exc})")
+            continue
+        if current != update.old_content:
+            stale_updates_skipped.append(
+                f"{update.target_note_path}: changed on disk since this enrichment was prepared"
+            )
+            continue
+        target.write_text(update.new_content, encoding="utf-8")
+        files_written.append(update.target_note_path)
 
     with open_session(config) as session:
         workspace_id, user_id = _require_workspace_ids(session, config)
@@ -696,6 +913,7 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
             files_written=files_written,
             memories_created=len(memory_rows),
             relationships_created=relationships_created,
+            stale_updates_skipped=stale_updates_skipped,
         )
 
 

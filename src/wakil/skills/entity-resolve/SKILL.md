@@ -13,9 +13,8 @@ mention be left alone?
 Decide one action per entity:
 
 - **update** — a page for this entity already exists among the existing
-  notes provided. Point at its exact path. Propose in proposed_frontmatter
-  only the fields that should change (say, a new role or status); never
-  restate the whole frontmatter.
+  notes provided. Point at its exact path. Leave proposed_frontmatter null —
+  a later step decides what, if anything, on the page should change.
 - **create** — no page exists, and the entity clears the notability bar:
   it is likely to accumulate history. A colleague the user will meet again,
   a company being evaluated, a concept the source substantially develops.
@@ -24,6 +23,26 @@ Decide one action per entity:
 - **skip** — a drive-by mention. A name that appears once with no role in
   what happened, a company named only as someone's past employer, a concept
   mentioned but not developed. Not every mentioned name deserves a page.
+
+Notability gate — apply before every create, not after: a missing page
+costs nothing (it can be created the next time the entity actually
+matters); a junk page costs real attention and degrades search for
+everyone later. **When in doubt, don't create — skip instead.**
+
+- Person: will the user plausibly interact with them again, or are they
+  otherwise relevant to ongoing work? A name surfaced once with no
+  continuing role does not clear this bar on its own.
+- Company: relevant to the user's work, interests, or an active
+  evaluation (a job search, a vendor decision, a deal)?
+- Concept/project/other: an actual reusable idea or body of work, not a
+  passing reference.
+- Identity uncertainty is its own reason to skip: if a name looks like it
+  could be a mishearing or transcription error (one odd, uncorroborated
+  mention, especially where the role it's attached to — "the CEO," "my
+  manager" — is already known some other way), don't invent a low-
+  confidence page for a possibly-wrong name. A skipped mention is
+  reviewable later; a wrong page fragments the entity it should have
+  pointed at.
 
 Rules:
 

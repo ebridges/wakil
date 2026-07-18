@@ -47,13 +47,15 @@ def workspace(kb_path: Path) -> WorkspaceConfig:
     return WorkspaceConfig.load(kb_path)
 
 
-def _enrich(workspace, kb_path, entities, extraction=None):
+def _enrich(workspace, kb_path, entities, extraction=None, revisions=None):
     transcript = kb_path / "sync.txt"
     transcript.write_text("We reviewed the routing plan.\n")
     source_id = apply_capture(
         workspace, prepare_capture(workspace, "transcript", file=transcript)
     ).source_id
-    client = FakeClient([extraction or EXTRACTION, {"entities": entities}])
+    client = FakeClient(
+        [extraction or EXTRACTION, {"entities": entities}, revisions or {"revisions": []}]
+    )
     return prepare_enrichment(workspace, source_id, client)
 
 

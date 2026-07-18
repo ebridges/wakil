@@ -1,5 +1,7 @@
 """Rich console output helpers."""
 
+import difflib
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
@@ -12,6 +14,7 @@ from wakil.app.ingest_service import (
     CaptureResult,
     EnrichmentProposal,
     EnrichmentResult,
+    EntityUpdate,
     ProposedFile,
     slugify,
 )
@@ -108,6 +111,27 @@ def _print_file_preview(proposed: ProposedFile) -> None:
     )
 
 
+def _print_entity_update(update: EntityUpdate) -> None:
+    diff_lines = list(
+        difflib.unified_diff(
+            update.old_content.splitlines(keepends=True),
+            update.new_content.splitlines(keepends=True),
+            fromfile=f"{update.target_note_path} (current)",
+            tofile=f"{update.target_note_path} (proposed)",
+        )
+    )
+    diff_text = "".join(diff_lines) or "(no textual difference)"
+    if len(diff_text) > 2000:
+        diff_text = diff_text[:2000] + "\n…"
+    console.print(
+        Panel(
+            Syntax(diff_text, "diff", background_color="default"),
+            title=f"UPDATE {update.target_note_path}",
+            border_style="yellow",
+        )
+    )
+
+
 def print_capture_proposal(proposal: CaptureProposal) -> None:
     header = f"[bold]{proposal.title}[/bold]\n[dim]{proposal.source_type}: {proposal.origin}[/dim]"
     if proposal.meeting_date:
@@ -176,13 +200,21 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
                 target = "-"
             conf = f"{res.confidence:.2f}" if res.confidence is not None else "-"
             table.add_row(
-                res.name, res.entity_type, f"[{style}]{res.action}[/{style}]", target, conf
+                res.name,
+                res.entity_type,
+                f"[{style}]{res.action}[/{style}]",
+                target,
+                conf,
             )
         console.print(table)
     if proposal.stub_entities:
         console.print(f"[bold]New entity pages ({len(proposal.stub_entities)}):[/bold]")
         for stub in proposal.stub_entities:
             _print_file_preview(stub)
+    if proposal.entity_updates:
+        console.print(f"[bold]Updates to existing pages ({len(proposal.entity_updates)}):[/bold]")
+        for update in proposal.entity_updates:
+            _print_entity_update(update)
     if proposal.proposed_note is not None:
         console.print("[bold]Proposed note:[/bold]")
         _print_file_preview(proposal.proposed_note)
@@ -214,6 +246,8 @@ def print_enrichment_result(result: EnrichmentResult) -> None:
     )
     for path in result.files_written:
         console.print(f"  [green]+ {path}[/green]")
+    for skipped in result.stale_updates_skipped:
+        console.print(f"  [yellow]skipped:[/yellow] {escape(skipped)}")
     console.print(
         "[dim]Review files with git diff/status; review memories with "
         "`wakil memory list --state candidate`.[/dim]"

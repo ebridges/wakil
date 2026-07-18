@@ -346,7 +346,7 @@ def enrich(
         raise typer.Exit(code=1) from exc
 
     print_enrichment_proposal(proposal)
-    issues = validate_proposal(proposal)
+    issues = validate_proposal(proposal, kb_root=config.root_path)
     if issues:
         print_proposal_issues(issues)
         raise typer.Exit(code=1)
