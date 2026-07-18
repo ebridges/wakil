@@ -22,6 +22,7 @@ from wakil.ui.console import (
     print_schema_list,
     print_schema_which,
     print_search_hits,
+    print_skill_description,
     print_skill_lint,
     print_skill_list,
     print_skill_validation,
@@ -782,6 +783,32 @@ def skills_which(
     roots = root_resolution.roots if verbose else None
     shadowed = find_shadowed_roots(name, context) if verbose else None
     print_skill_which(resolved, verbose=verbose, roots=roots, shadowed=shadowed)
+
+
+@skills_app.command("describe")
+def skills_describe(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Skill name to describe.")],
+) -> None:
+    """Provide a description of the skill."""
+    from wakil.skills.errors import SkillResolutionError
+    from wakil.skills.resolver import (
+        default_context,
+        resolve_roots,
+        resolve_skill,
+    )
+
+    root = _resolve_workspace(ctx)
+    context = default_context(root)
+    root_resolution = resolve_roots(context)
+    print_root_issues(root_resolution.issues)
+    try:
+        resolved = resolve_skill(name, context)
+    except SkillResolutionError as exc:
+        console.print(f"[red]{exc.reason}:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    print_skill_description(resolved)
 
 
 @skills_app.command("validate")

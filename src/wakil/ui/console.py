@@ -366,6 +366,13 @@ def print_root_issues(issues: list[RootIssue], *, prefix: str = "Warning") -> No
         console.print(f"[{style}]{prefix}:[/{style}] {issue.reason} — {issue.message}")
 
 
+def print_skill_description(skill: ResolvedSkill) -> None:
+    table = Table(title="Skill description")
+    table.add_column(skill.name, style="bold")
+    table.add_row(skill.metadata.description)
+    console.print(table)
+
+
 def print_skill_list(rows: list[tuple[str, str, str]]) -> None:
     """rows: (name, source, detail) — detail is the skill directory on success,
     or an error description when source == "error"."""
