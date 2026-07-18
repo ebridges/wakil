@@ -1,0 +1,422 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "wakil: init",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "init",
+        "${input:wakilInitPath}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: status",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "status"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: index",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "index"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: search",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "search",
+        "${input:wakilSearchQuery}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: query",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "query",
+        "${input:wakilQueryQuestion}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: enrich",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "enrich",
+        "${input:wakilSourceId}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: ingest transcript",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "ingest",
+        "transcript",
+        "${input:wakilTranscriptFile}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: ingest text",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "ingest",
+        "text",
+        "${input:wakilTextFile}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: ingest article",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "ingest",
+        "article",
+        "${input:wakilArticleUrl}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: memory list",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "memory",
+        "list"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: memory show",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "memory",
+        "show",
+        "${input:wakilMemoryId}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: memory promote",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "memory",
+        "promote",
+        "${input:wakilMemoryId}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: memory reject",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "memory",
+        "reject",
+        "${input:wakilMemoryId}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: memory archive",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "memory",
+        "archive",
+        "${input:wakilMemoryId}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: schema migrate (dry-run)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "schema",
+        "migrate",
+        "--dry-run"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: git summary",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "git",
+        "summary"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: git history",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "git",
+        "history",
+        "${input:wakilGitHistoryPath}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: skills list",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "skills",
+        "list"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: skills which",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "skills",
+        "which",
+        "${input:wakilSkillName}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: skills describe",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "skills",
+        "describe",
+        "${input:wakilSkillName}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: skills validate",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "skills",
+        "validate"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: skills lint",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "--workspace",
+        "${input:wakilWorkspace}",
+        "skills",
+        "lint"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "wakil: version",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "version"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ],
+  "inputs": [
+    {
+      "id": "wakilWorkspace",
+      "type": "promptString",
+      "description": "Workspace directory or registered workspace name",
+      "default": "."
+    },
+    {
+      "id": "wakilInitPath",
+      "type": "promptString",
+      "description": "Knowledge-base directory to initialize",
+      "default": "."
+    },
+    {
+      "id": "wakilSearchQuery",
+      "type": "promptString",
+      "description": "Free-text search query",
+      "default": ""
+    },
+    {
+      "id": "wakilQueryQuestion",
+      "type": "promptString",
+      "description": "Question to answer from the knowledge base",
+      "default": ""
+    },
+    {
+      "id": "wakilSourceId",
+      "type": "promptString",
+      "description": "Source id from the capture step",
+      "default": "1"
+    },
+    {
+      "id": "wakilTranscriptFile",
+      "type": "promptString",
+      "description": "Transcript file (.txt, .md, or .srt)",
+      "default": ""
+    },
+    {
+      "id": "wakilTextFile",
+      "type": "promptString",
+      "description": "Text or Markdown file to ingest",
+      "default": ""
+    },
+    {
+      "id": "wakilArticleUrl",
+      "type": "promptString",
+      "description": "Web article URL",
+      "default": "https://"
+    },
+    {
+      "id": "wakilMemoryId",
+      "type": "promptString",
+      "description": "Memory id (see wakil memory list)",
+      "default": "1"
+    },
+    {
+      "id": "wakilGitHistoryPath",
+      "type": "promptString",
+      "description": "Workspace-relative file path",
+      "default": ""
+    },
+    {
+      "id": "wakilSkillName",
+      "type": "promptString",
+      "description": "Skill name",
+      "default": ""
+    }
+  ]
+}
