@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 WAKIL_DIR = ".wakil"
 CONFIG_FILENAME = "config.yaml"
 DATABASE_FILENAME = "wakil.db"
+QMD_DIRNAME = "qmd"
 
 # Top-level files treated as high-priority workspace context when present.
 SPECIAL_FILES = ("README.md", "AGENTS.md", "SCHEMA.md", "RESOLVER.md")
@@ -41,6 +42,13 @@ class WorkspaceConfig(BaseModel):
     @property
     def config_path(self) -> Path:
         return self.wakil_dir / CONFIG_FILENAME
+
+    @property
+    def qmd_dir(self) -> Path:
+        """Where this workspace's QMD index/collections live (separate file
+        from wakil.db — qmd manages its own SQLite schema via an independent
+        process with no locking coordination with wakil's connection)."""
+        return self.wakil_dir / QMD_DIRNAME
 
     def save(self) -> None:
         self.wakil_dir.mkdir(parents=True, exist_ok=True)

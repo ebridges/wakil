@@ -81,12 +81,43 @@ class EntityResolution(BaseModel):
     proposed_frontmatter: dict | None = Field(
         default=None,
         description="For action=create: frontmatter satisfying the type's required "
-        "fields. For action=update: only the fields to change.",
+        "fields. Ignored for action=update.",
     )
 
 
 class EntityResolutionOutput(BaseModel):
     entities: list[EntityResolution] = Field(default_factory=list)
+
+
+class EntityRevision(BaseModel):
+    """Third model call, one decision per action=update entity: does this
+    mention actually warrant touching the page, and if so, how."""
+
+    target_note_path: str = Field(description="Must match one of the update targets given.")
+    has_update: bool = Field(
+        description="False when the mention is too light to change the page — "
+        "no compiled_truth/timeline_entry/frontmatter_updates needed."
+    )
+    compiled_truth: str | None = Field(
+        default=None,
+        description="For has_update=True: the full re-synthesized top section — "
+        "the union of what was already there plus what's new, never just the new "
+        "source's content. Do NOT include the '# Title' heading line itself (kept "
+        "as-is) or the 'Timeline / Log' heading; only the content between them.",
+    )
+    timeline_entry: str | None = Field(
+        default=None,
+        description="For has_update=True: one new dated entry to prepend to the "
+        "Timeline, e.g. '### 2026-07-16 — what happened\\n- detail'. Existing "
+        "entries are never touched.",
+    )
+    frontmatter_updates: dict | None = Field(
+        default=None, description="Only the frontmatter fields that should change."
+    )
+
+
+class EntityRevisionOutput(BaseModel):
+    revisions: list[EntityRevision] = Field(default_factory=list)
 
 
 def validate_model_response[T: BaseModel](raw: str, schema: type[T]) -> T:

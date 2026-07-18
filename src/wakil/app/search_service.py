@@ -40,7 +40,7 @@ def search_workspace(
     seen_notes: set[str] = set()
 
     if config.qmd_enabled:
-        for result in qmd_search(config.root_path, query, limit=limit, mode=mode):
+        for result in qmd_search(config.root_path, config.qmd_dir, query, limit=limit, mode=mode):
             seen_notes.add(result.path)
             hits.append(
                 SearchHit(

@@ -4,6 +4,7 @@
 type: idea
 directory: ideas
 category: hybrid
+page_shape: single-occurrence
 fields:
   name: {required: true, kind: string}
   title: {required: false, kind: string}

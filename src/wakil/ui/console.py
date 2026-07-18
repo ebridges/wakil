@@ -1,7 +1,10 @@
 """Rich console output helpers."""
 
+import difflib
+
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -11,12 +14,15 @@ from wakil.app.ingest_service import (
     CaptureResult,
     EnrichmentProposal,
     EnrichmentResult,
+    EntityUpdate,
     ProposedFile,
     slugify,
 )
+from wakil.app.qmd_service import CollectionPlan
 from wakil.app.query_service import QueryResult
 from wakil.app.search_service import SearchHit
 from wakil.app.workspace_service import IndexResult, WorkspaceStatus
+from wakil.integrations.qmd import QmdCollection
 from wakil.skills.lint import LintFinding
 from wakil.skills.models import ResolvedSkill, RootIssue, SkillRoot
 
@@ -44,7 +50,41 @@ def print_search_hits(hits: list[SearchHit], query: str) -> None:
     table.add_column("Via", style="dim")
     for hit in hits:
         style = _KIND_STYLES.get(hit.kind, "white")
-        table.add_row(f"[{style}]{hit.kind}[/{style}]", hit.ref, hit.title, hit.snippet, hit.engine)
+        table.add_row(
+            f"[{style}]{hit.kind}[/{style}]",
+            hit.ref,
+            hit.title,
+            hit.snippet,
+            hit.engine,
+        )
+    console.print(table)
+
+
+def print_qmd_collections(collections: list[QmdCollection]) -> None:
+    if not collections:
+        console.print(
+            "No QMD collections registered. Run [bold]wakil qmd sync[/bold] to propose some."
+        )
+        return
+    table = Table(title="QMD collections")
+    table.add_column("Name", style="bold")
+    table.add_column("Path", overflow="fold")
+    table.add_column("Pattern", style="dim")
+    for collection in collections:
+        table.add_row(collection.name, str(collection.path), collection.pattern)
+    console.print(table)
+
+
+def print_qmd_collection_plan(plans: list[CollectionPlan]) -> None:
+    if not plans:
+        console.print("No new collections to propose — everything already registered.")
+        return
+    table = Table(title="Proposed QMD collections")
+    table.add_column("Name", style="bold")
+    table.add_column("Path", overflow="fold")
+    table.add_column("Pattern", style="dim")
+    for plan in plans:
+        table.add_row(plan.name, plan.path, plan.pattern)
     console.print(table)
 
 
@@ -82,6 +122,11 @@ def print_status(status: WorkspaceStatus) -> None:
     table.add_row("QMD", qmd_value)
     if status.qmd.workspace_scripts:
         table.add_row("QMD scripts", ", ".join(status.qmd.workspace_scripts))
+    if status.qmd.available:
+        if status.qmd.project_index:
+            table.add_row("QMD index", "[green]workspace-scoped[/green]")
+        else:
+            table.add_row("QMD index", "[dim]not yet created (run 'wakil qmd sync')[/dim]")
 
     if status.special_files:
         table.add_row("Workspace context", ", ".join(status.special_files))
@@ -103,6 +148,27 @@ def _print_file_preview(proposed: ProposedFile) -> None:
             Syntax(preview, "markdown", background_color="default"),
             title=f"NEW {proposed.path}",
             border_style="green",
+        )
+    )
+
+
+def _print_entity_update(update: EntityUpdate) -> None:
+    diff_lines = list(
+        difflib.unified_diff(
+            update.old_content.splitlines(keepends=True),
+            update.new_content.splitlines(keepends=True),
+            fromfile=f"{update.target_note_path} (current)",
+            tofile=f"{update.target_note_path} (proposed)",
+        )
+    )
+    diff_text = "".join(diff_lines) or "(no textual difference)"
+    if len(diff_text) > 2000:
+        diff_text = diff_text[:2000] + "\n…"
+    console.print(
+        Panel(
+            Syntax(diff_text, "diff", background_color="default"),
+            title=f"UPDATE {update.target_note_path}",
+            border_style="yellow",
         )
     )
 
@@ -175,18 +241,29 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
                 target = "-"
             conf = f"{res.confidence:.2f}" if res.confidence is not None else "-"
             table.add_row(
-                res.name, res.entity_type, f"[{style}]{res.action}[/{style}]", target, conf
+                res.name,
+                res.entity_type,
+                f"[{style}]{res.action}[/{style}]",
+                target,
+                conf,
             )
         console.print(table)
     if proposal.stub_entities:
         console.print(f"[bold]New entity pages ({len(proposal.stub_entities)}):[/bold]")
         for stub in proposal.stub_entities:
             _print_file_preview(stub)
+    if proposal.entity_updates:
+        console.print(f"[bold]Updates to existing pages ({len(proposal.entity_updates)}):[/bold]")
+        for update in proposal.entity_updates:
+            _print_entity_update(update)
     if proposal.proposed_note is not None:
         console.print("[bold]Proposed note:[/bold]")
         _print_file_preview(proposal.proposed_note)
     for warning in proposal.warnings:
-        console.print(f"[yellow]warning:[/yellow] {warning}")
+        # Warnings can quote wikilinks (`[[path|display]]`) or other
+        # bracket-heavy content a correction touched — escape it so Rich's
+        # markup parser doesn't try to read it as style tags and mangle it.
+        console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
 
 
 _ACTION_STYLES = {"create": "green", "update": "cyan", "skip": "dim"}
@@ -210,6 +287,8 @@ def print_enrichment_result(result: EnrichmentResult) -> None:
     )
     for path in result.files_written:
         console.print(f"  [green]+ {path}[/green]")
+    for skipped in result.stale_updates_skipped:
+        console.print(f"  [yellow]skipped:[/yellow] {escape(skipped)}")
     console.print(
         "[dim]Review files with git diff/status; review memories with "
         "`wakil memory list --state candidate`.[/dim]"
@@ -328,6 +407,13 @@ def print_root_issues(issues: list[RootIssue], *, prefix: str = "Warning") -> No
         console.print(f"[{style}]{prefix}:[/{style}] {issue.reason} — {issue.message}")
 
 
+def print_skill_description(skill: ResolvedSkill) -> None:
+    table = Table(title="Skill description")
+    table.add_column(skill.name, style="bold")
+    table.add_row(skill.metadata.description)
+    console.print(table)
+
+
 def print_skill_list(rows: list[tuple[str, str, str]]) -> None:
     """rows: (name, source, detail) — detail is the skill directory on success,
     or an error description when source == "error"."""
@@ -342,6 +428,26 @@ def print_skill_list(rows: list[tuple[str, str, str]]) -> None:
         style = _SKILL_SOURCE_STYLES.get(source, "white")
         table.add_row(name, f"[{style}]{source}[/{style}]", detail)
     console.print(table)
+
+
+def print_schema_list(rows: list[tuple[str, str, str]]) -> None:
+    """rows: (type, source, path) — the entity type, which root won it, and where."""
+    if not rows:
+        console.print("No entity schemas found.")
+        return
+    table = Table(title="Entity schemas")
+    table.add_column("Type", style="bold")
+    table.add_column("Source")
+    table.add_column("Root", overflow="fold")
+    for entity_type, source, path in rows:
+        style = _SKILL_SOURCE_STYLES.get(source, "white")
+        table.add_row(entity_type, f"[{style}]{source}[/{style}]", path)
+    console.print(table)
+
+
+def print_schema_which(entity_type: str, source: str, path: str) -> None:
+    style = _SKILL_SOURCE_STYLES.get(source, "white")
+    console.print(f"[bold]{entity_type}[/bold]  [{style}]{source}[/{style}]  {path}")
 
 
 def print_skill_which(

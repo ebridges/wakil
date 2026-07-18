@@ -39,16 +39,42 @@ def build_extraction_prompt(
     origin: str,
     text: str,
     related_notes: list[tuple[str, str]],
+    entity_types: dict[str, EntitySchema],
+    page_shapes: dict[str, str],
     context: str | None = None,
     guides: dict[str, str] | None = None,
 ) -> str:
     """User content for the extraction call.
 
     related_notes: (path, title) pairs from searching the knowledge base.
+    entity_types: wakil's own resolved schema catalog (kb-local/user/built-in)
+    — the structural source of truth for a proposed note's frontmatter shape,
+    independent of whatever survives `guides`' truncation.
+    page_shapes: shape name -> resolved template body, one entry per distinct
+    `page_shape` value used by `entity_types` (pre-resolved by the caller via
+    `wakil.schema.loader.resolve_page_shape_template` — this module stays
+    I/O-free). Each type below names its shape; the matching body tells the
+    model what that shape actually looks like.
     """
     parts = [f"Source type: {source_type}", f"Origin: {origin}", ""]
     if context:
         parts += ["User-provided context about this source:", context, ""]
+    parts += [
+        "If you propose a note, its frontmatter must be valid for its type "
+        "below: every required field filled, and every optional field filled "
+        "too whenever the source actually supports it — don't leave a field "
+        "blank by default just because it isn't required. It must also "
+        "include a `type: <name>` line of its own matching that type "
+        "exactly (e.g. `type: meeting`) — this is required for every type "
+        "even though `type` is never listed among that type's fields below, "
+        "since it names the type rather than being one of its fields. Its "
+        "body must follow that type's page_shape — match the shape name "
+        "against the templates that follow.",
+        describe_entity_types_full(entity_types),
+        "",
+        describe_page_shapes(page_shapes),
+        "",
+    ]
     for name, content in (guides or {}).items():
         purpose = "page shape and metadata" if name == "SCHEMA.md" else "where notes belong"
         parts += [f"Workspace guidance from {name} ({purpose}):", content, ""]
@@ -96,6 +122,46 @@ def build_resolution_prompt(
     return "\n".join(parts)
 
 
+def build_revision_prompt(
+    text: str,
+    extraction_summary: str,
+    targets: list[tuple[str, str]],
+    context: str | None = None,
+) -> str:
+    """User content for the entity-update call (DAG node 3).
+
+    targets: (target_note_path, current_full_content) for every entity
+    entity-resolution decided should be updated. The system prompt is
+    `note-revision/SKILL.md` itself — its "read the existing note in full
+    before writing anything" rule is why the full content is inlined here
+    rather than a summary or a diff.
+
+    Scoped to compiled-truth-timeline-shaped entities only (the caller
+    filters); note-revision's own discipline (State vs. Timeline) doesn't
+    define what an update means for a single-occurrence type.
+    """
+    parts = [
+        "For each existing note below, decide whether this source's mention "
+        "of that entity actually warrants updating the page (has_update) — "
+        "a passing reference that adds no new fact gets has_update=false, "
+        "no compiled_truth/timeline_entry/frontmatter_updates. When it does "
+        "warrant an update: compiled_truth re-synthesizes the union of what "
+        "was already there plus what's new (never just the new source), and "
+        "timeline_entry is one new dated entry to prepend — existing "
+        "entries, including any auto-generated back-link lines, are never "
+        "restated or reordered.",
+        "",
+    ]
+    if context:
+        parts += ["User-provided context about this source:", context, ""]
+    if extraction_summary:
+        parts += [f"What this source is about:\n{extraction_summary}", ""]
+    for path, content in targets:
+        parts += [f"### Existing note to consider: {path}\n\n{content}", ""]
+    parts += [f"Source document:\n\n{text}"]
+    return "\n".join(parts)
+
+
 def describe_entity_types(schemas: dict[str, EntitySchema]) -> str:
     """A compact, schema-derived catalog of entity types for the prompt."""
     lines = []
@@ -114,6 +180,38 @@ def describe_entity_types(schemas: dict[str, EntitySchema]) -> str:
             f"{', '.join(required) if required else '(none)'}"
         )
     return "\n".join(lines)
+
+
+def describe_entity_types_full(schemas: dict[str, EntitySchema]) -> str:
+    """Every entity type's complete field shape (required + optional).
+
+    Unlike `describe_entity_types` (required fields only, for matching an
+    entity against a compact catalog), extraction needs the full menu of
+    optional fields too — this is what tells the model a `meeting` note can
+    carry `decisions`/`action-items`/`transcript`, not just `title`/`date`.
+    """
+    lines = []
+    for type_name, schema in sorted(schemas.items()):
+        directory = schema.directory or "(no canonical directory)"
+        lines.append(
+            f"- {type_name} (directory: {directory}, category: {schema.category}, "
+            f"page_shape: {schema.page_shape})"
+        )
+        for field_name, spec in schema.fields.items():
+            requirement = "required" if spec.required else "optional"
+            kind = spec.kind
+            if kind == "enum" and spec.values:
+                kind = f"enum: {', '.join(spec.values)}"
+            lines.append(f"    - {field_name} ({requirement}, {kind})")
+    return "\n".join(lines)
+
+
+def describe_page_shapes(page_shapes: dict[str, str]) -> str:
+    """Render each distinct page-shape template once, labeled by name."""
+    parts = []
+    for shape, body in sorted(page_shapes.items()):
+        parts.append(f"### Page shape '{shape}'\n\n{body}")
+    return "\n\n".join(parts)
 
 
 def _render_related(related_notes: list[tuple[str, str]]) -> str:

@@ -35,18 +35,23 @@ mechanical part, and reserve this skill's judgment for what it can't cover.
 - [ ] Step 2: **Check the category rule.** Confirm `name:` vs `title:`
       matches the entity's schema category — see "Category rule" below. This
       is a hard schema error, not a style preference.
-- [ ] Step 3: **Check the three-part slug.** Filename, H1, and every
+- [ ] Step 3: **Check the page shape matches its category.** An identity-type
+      note should read as Compiled Truth + Timeline; a document-type note
+      should read as a synthesis of what happened, not a running log — see
+      "Page shape by category" below.
+- [ ] Step 4: **Check the three-part slug.** Filename, H1, and every
       wikilink pointing at this note must agree — see "Slug consistency"
       below.
-- [ ] Step 4: **Check links.** Internal cross-references are `[[path]]`
+- [ ] Step 5: **Check links.** Internal cross-references are `[[path]]`
       wikilinks using the note's full workspace-relative path; external
       links are copied verbatim from their source, never reconstructed. See
       "Links" below.
-- [ ] Step 5: **Check prose against the no-slop bar.** No filler, no hedged
-      citations, no LLM preamble, no placeholder dates, exact phrasing
-      preserved where the phrasing is the insight, titles under 60
-      characters and specific. See "No-slop output bar" below.
-- [ ] Step 6: **Report, don't silently resolve, what you can't fix.** A fact
+- [ ] Step 6: **Check prose against the no-slop bar**, including citations.
+      No filler, no hedged citations, no LLM preamble, no placeholder dates,
+      exact phrasing preserved where the phrasing is the insight, titles
+      under 60 characters and specific, every non-obvious claim traceable to
+      its source. See "No-slop output bar" and "Citations" below.
+- [ ] Step 7: **Report, don't silently resolve, what you can't fix.** A fact
       with no traceable source, an entity type unknown to the schema, an
       ambiguous frontmatter conflict — flag these explicitly rather than
       guessing or deleting. See "Deterministic links, uncitable facts"
@@ -120,6 +125,48 @@ created: 2026-07-16
 An `entity_type` the schema doesn't recognize is itself a hard error — don't
 best-guess a schema for an unfamiliar `type:`; flag it.
 
+## Page shape by `page_shape`, not by category
+
+Every entity type declares its own `page_shape:` in its schema file
+(`src/wakil/schema/entities/*.yaml`) — a separate axis from `category`.
+Using the wrong shape is a conformance failure even when frontmatter
+validates cleanly, and `category` is the wrong signal to infer it from:
+`category` drives the `name:`/`title:` rule (does this type accumulate an
+*identity*), while `page_shape` drives narrative structure (does this type
+describe one occurrence or an ongoing subject) — they usually agree but not
+always. `organization` and `project` are both `hybrid` category, but
+`organization` uses the `single-occurrence.md` shape and `project` uses
+`compiled-truth-timeline.md`; check the schema's own `page_shape:` field,
+don't re-derive it from category.
+
+The two shape templates currently defined (`src/wakil/schema/templates/`):
+
+- **`compiled-truth-timeline.md`** — for a subject that accumulates
+  knowledge across many separate sources over time (`person`, `company`,
+  `project`, `concept`, `journal`, `assessment`...). Compiled Truth on top
+  (synthesized, always-current — `entity-enrichment`'s "texture over facts"
+  belongs here), an append-only Timeline/Log at the bottom
+  (`note-revision`'s Timeline discipline governs how it grows). Never
+  regenerate the top section from only the newest source — see
+  `note-revision`'s "clobbering bug."
+- **`single-occurrence.md`** — for a note describing one dated event or
+  standalone artifact, not an accumulating subject (`meeting`, `reflection`,
+  `idea`, `organization`, `meta`, `source`...). No Timeline — a log of one
+  occurrence is just the occurrence restated. Summary / Key Decisions /
+  Action Items / Discussion Notes / Open Questions, but only the sections
+  that actually apply to the type in front of you (a meeting almost always
+  has action items; a reflection almost never does — see the template's own
+  guidance on when to omit a section versus state "None").
+
+`resolve_page_shape_template()` (`src/wakil/schema/loader.py`) resolves each
+shape's template the same kb-local/user/built-in way entity schemas resolve
+— but as its *own* override unit (`schema/templates/<shape>.md`, not
+`schema/entities/<type>.yaml`), so a workspace can restyle a shape's prose
+without forking any type's field list, or repoint a type at a different
+shape without touching that shape's template. Both are read directly by
+`wakil enrich`'s extraction step now (`build_extraction_prompt` renders the
+full catalog), not left to survive `SCHEMA.md` prose truncation.
+
 ## Slug consistency
 
 A note's slug appears in three places, and all three must be the same
@@ -168,6 +215,22 @@ Notes are durable artifacts, not chat output:
 - Titles are descriptive enough to find in a search result, under 60
   characters, not full sentences, and not generic ("Jane Doe, VP Eng at
   Acme" not "Person Page").
+
+## Citations
+
+Every non-obvious claim in a note — a figure, a quote, a stated intention,
+anything that isn't common knowledge — should carry inline provenance so a
+reader can tell what's grounded versus inferred. Wakil's default annotation:
+a parenthetical tag naming the kind of provenance — `(observed)`,
+`(self-reported)`, `(inferred)`, `(reported: <source>)` — placed at the point
+of the claim, not batched into a footnote. Use the workspace's own citation
+format instead when its `SCHEMA.md` defines one; the point is that *some*
+consistent, checkable annotation exists, not the exact bracket shape.
+
+A note with zero inline provenance markers anywhere is itself a conformance
+smell worth flagging, the same way a missing citation on one specific claim
+is — durable notes get reread and acted on long after the source context is
+gone, so "what does this rest on" needs to survive that gap.
 
 ## Deterministic links, uncitable facts
 

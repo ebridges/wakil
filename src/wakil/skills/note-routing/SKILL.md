@@ -97,6 +97,57 @@ make before routing is even asked to place a new file — but if you find
 yourself about to route a create for something that never cleared this bar,
 that's a signal to send it back rather than file it.
 
+## Default judgment patterns for hard filing calls
+
+`RESOLVER.md`, when present, is the authority for a workspace's specific
+vocabulary — which subject directories exist, what counts as sensitive, its
+own hard calls. Two judgment *patterns* recur often enough across knowledge
+bases that they're worth carrying as a default reasoning template. Apply
+them only when the workspace's own `RESOLVER.md` doesn't already settle the
+case in front of you — a workspace's own answer always wins over the
+default.
+
+**Instructional/timeless vs. productive/time-bound.** Many workspaces
+distinguish a concept-like type (a reusable framework or mental model, no
+owner, no due date, transferable across contexts) from a project-like type
+(a specific, owned, time-bound effort with a status and an execution log).
+When content mixes both — a thesis plus its own execution log — split it:
+route the timeless part to the concept-like home, the dated execution
+tracking to the project-like home, rather than forcing one artifact to serve
+both.
+
+**Raw vs. synthesized.** A capture that hasn't been interpreted yet (a
+transcript, a clipping — exactly what `wakil ingest` writes under
+`sources/`) and a note that synthesizes what it means are different
+artifacts even when they're about the same event. Don't route interpretive
+content into a `source`-type location just because that's where the raw
+material landed, and don't leave raw material uninterpreted in a directory
+meant for synthesis.
+
+## Sensitive content
+
+If a workspace routes anything to a directory or entity type it flags as
+sensitive (a schema's `sensitive: true` field, or `RESOLVER.md`'s own
+sensitive-content section), treat that routing decision itself as sensitive:
+don't surface its content in summaries, exports, or shared context without
+being explicitly asked. This extends the working agreement every wakil
+session already operates under to the routing decision itself, not just
+downstream handling of the resulting note.
+
+## Naming defaults
+
+Absent a workspace-specific naming convention in `RESOLVER.md`, use:
+
+- lowercase kebab-case for every filename (`slugify()`,
+  `src/wakil/app/ingest_service.py`, is the reference implementation — see
+  `note-conformance`'s "Slug consistency");
+- a qualifier suffix to disambiguate two entities that would otherwise
+  collide on the same slug (`david-liu-acme.md`, `david-liu-example.md`),
+  rather than picking one arbitrarily or silently overwriting;
+- a leading ISO date (`YYYY-MM-DD-`) for slugs naming a specific dated
+  occurrence — a meeting, a journal entry — not for identity- or
+  concept-type slugs, which name a subject rather than an occurrence.
+
 ## Decision tree
 
 - [ ] Step 1: Check whether this content is a single resolved entity (the
@@ -116,9 +167,11 @@ that's a signal to send it back rather than file it.
 - [ ] Step 4: Within a subject-matter directory, file by primary subject,
       not format or source (see above). Apply the sui-generis-synthesis
       exception only if `RESOLVER.md` itself defines a home for that case.
+      For a hard call `RESOLVER.md` doesn't resolve directly, check "Default
+      judgment patterns" above before asking.
 - [ ] Step 5: Generate the filename using the workspace's own slug/naming
-      convention as stated in `RESOLVER.md` (or, absent one, ask rather
-      than invent a convention).
+      convention as stated in `RESOLVER.md`, or the "Naming defaults" above
+      when it doesn't specify one.
 - [ ] Step 6: When the routing decision isn't obvious — genuinely fits two
       destinations, or the workspace's rules underdetermine it — surface
       the ambiguity and your reasoning rather than silently picking one.

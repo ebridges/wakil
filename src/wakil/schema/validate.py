@@ -26,12 +26,12 @@ class SchemaError:
         return f"{self.field}: {self.message}" if self.field else self.message
 
 
-def known_types(schema_dir: Path | None = None) -> list[str]:
-    return sorted(load_entity_schemas(schema_dir))
+def known_types(kb_root: Path | None = None) -> list[str]:
+    return sorted(load_entity_schemas(kb_root))
 
 
 def validate_frontmatter(
-    entity_type: str, frontmatter: dict, schema_dir: Path | None = None
+    entity_type: str, frontmatter: dict, kb_root: Path | None = None
 ) -> list[SchemaError]:
     """Validate a new page's frontmatter; empty list means valid.
 
@@ -39,7 +39,7 @@ def validate_frontmatter(
     (validate_proposal, the migration tool) rely on this rather than
     best-guessing a schema.
     """
-    schemas = load_entity_schemas(schema_dir)
+    schemas = load_entity_schemas(kb_root)
     schema = schemas.get(entity_type)
     if schema is None:
         return [
@@ -130,5 +130,5 @@ def _is_date(value) -> bool:
     return isinstance(value, str) and bool(_ISO_DATE_RE.match(value.strip()))
 
 
-def schema_for(entity_type: str, schema_dir: Path | None = None) -> EntitySchema | None:
-    return load_entity_schemas(schema_dir).get(entity_type)
+def schema_for(entity_type: str, kb_root: Path | None = None) -> EntitySchema | None:
+    return load_entity_schemas(kb_root).get(entity_type)

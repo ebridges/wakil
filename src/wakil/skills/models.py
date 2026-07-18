@@ -19,6 +19,7 @@ class SkillMetadata(BaseModel):
     """Parsed `SKILL.md` frontmatter."""
 
     name: str
+    description: str
     skill_api: int
     version: int | None = None
 

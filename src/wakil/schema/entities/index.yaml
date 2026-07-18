@@ -3,6 +3,7 @@
 type: index
 directory: null
 category: document
+page_shape: compiled-truth-timeline
 fields:
   title: {required: true, kind: string}
   tags: {required: false, kind: list}

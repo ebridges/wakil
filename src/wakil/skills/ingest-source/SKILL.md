@@ -76,7 +76,7 @@ automatic output is the finished product just because it applied cleanly.
 
 | Material | Path |
 |---|---|
-| Meeting/call transcript file (`.txt`, `.md`, `.srt`) | CLI-native — `wakil ingest transcript` directly |
+| Meeting/call transcript file (`.txt`, `.md`, `.srt`, `.whisper`) | CLI-native — `wakil ingest transcript` directly |
 | Plain text, pasted note, clipping | CLI-native — `wakil ingest text` directly |
 | Web article URL | CLI-native — `wakil ingest article` directly |
 | PDF, voice note, YouTube video, scanned/OCR document, or anything else not already one of the three shapes above | Normalize first via `source-ingestion`, then continue through the same two-command backbone |
@@ -155,6 +155,43 @@ or `note-conformance` — writing or moving files those flags don't know
 about — skip the CLI's own commit flags and hand the full set of changes to
 `kb-commit` for one reviewable commit instead of committing the DAG's
 output separately from what came after it.
+
+## Reporting back
+
+Once a run completes (through the DAG alone, or all the way through
+`kb-commit`), tell the user what happened in two parts:
+
+1. **A one-line status.** What was ingested, how many entities were touched
+   or created, and the commit hash(es) if anything was committed — e.g.
+   "Ingested call with Eleni Karahalios: 2 entities updated, 1 created,
+   committed as `a1b2c3d`."
+2. **A prioritized action-items list — only when the source drove or will
+   drive a downstream decision the user needs to act on** (a call that
+   produced next steps, a decline/accept, a negotiation). Skip this part
+   entirely for purely informational sources (a status update with no open
+   thread). When it applies, group by urgency — this week / before the next
+   milestone / informational — and distinguish what the user owes from what
+   they're waiting on the counterparty for:
+
+   ```text
+   ## Action Items for You
+
+   ### This week
+   1. Do X. Why: ... Tone/approach: ...
+   2. Waiting on Y from {counterparty} — what to look for in their response: ...
+
+   ### Before {next milestone}
+   3. ...
+
+   ### Informational
+   4. ...
+   ```
+
+The meeting/call note's own `## Action Items` or equivalent section (if
+`content-synthesis` produced one) records items as stated in the source —
+"Jane: send updated section 6." This list is different: it's the user's own
+next moves, synthesized in priority order, not a re-listing of what was said
+in the call.
 
 ## Batch ingestion
 

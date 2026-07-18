@@ -7,6 +7,7 @@
 type: project
 directory: projects
 category: hybrid
+page_shape: compiled-truth-timeline
 fields:
   name: {required: true, kind: string}
   title: {required: false, kind: string}

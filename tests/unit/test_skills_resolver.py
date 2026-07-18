@@ -45,7 +45,7 @@ def _write_manifest(skill_dir: Path, metadata: dict, body: str = "Body text.\n")
 def _write_skill(root: Path, dirname: str, *, metadata: dict | None = None) -> Path:
     """Create `<root>/<dirname>/SKILL.md` with valid-by-default frontmatter."""
     skill_dir = root / dirname
-    meta = {"name": dirname, "skill_api": SKILL_API_VERSION}
+    meta = {"name": dirname, "skill_api": SKILL_API_VERSION, "description": "Test skill."}
     if metadata:
         meta.update(metadata)
     _write_manifest(skill_dir, meta)
