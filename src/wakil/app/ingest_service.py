@@ -847,7 +847,13 @@ def _run_entity_updates(
     try:
         result = complete_with_contract(client, system, prompt, EntityRevisionOutput)
     except ModelContractError as exc:
-        proposal.warnings.append(f"Entity updates failed; existing notes left unchanged: {exc}")
+        count = len(candidates)
+        entity_word = "entity" if count == 1 else "entities"
+        proposal.warnings.append(
+            f"Entity updates failed while revising {count} {entity_word} in one call "
+            f"({', '.join(res.name for res, _, _ in candidates)}); "
+            f"existing notes left unchanged: {exc}"
+        )
         return
 
     today = datetime.now(UTC).date().isoformat()

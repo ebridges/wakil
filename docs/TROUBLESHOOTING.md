@@ -115,3 +115,13 @@ Fixed in `a14af48`:
 
 Note: as of 2026-07-20, PR #15 (which contains this fix along with the broader default-on git-landing work) has not been merged into `main`.
 
+---
+
+### `EOF while parsing a string` from a Pydantic validation error may mean the model response was truncated, not malformed
+
+**Date:** 2026-07-20 · **Source:** `fix/entity-revision-truncation-errors` branch — `ModelTruncatedError` in `src/wakil/llm/client.py`, retry handling in `complete_with_contract` (`src/wakil/llm/schemas.py`)
+
+`wakil enrich` failed with `ModelContractError: EntityRevisionOutput: model output failed validation twice: 1 validation error for EntityRevisionOutput\n  Invalid JSON: EOF while parsing a string ...`. This reads like the model produced garbage JSON, but the actual cause was `_run_entity_updates` (`src/wakil/app/ingest_service.py`) batching every `action=update` entity — 7 of them, several with long histories — into one call that asks the model to re-synthesize each note's full compiled-truth body, which exceeded the fixed `max_tokens=8192` and cut the response off mid-string. Neither `AnthropicClient` nor `OpenAICompatibleClient` (`src/wakil/llm/client.py`) checked `stop_reason`/`finish_reason` for this case, so a truncated response was indistinguishable from a genuinely malformed one until someone counted characters against the token budget.
+
+Fixed by raising a distinct `ModelTruncatedError` when the provider reports `stop_reason == "max_tokens"` / `finish_reason == "length"`, and having `complete_with_contract`'s retry (`src/wakil/llm/schemas.py`) double the token budget and resend the same prompt on truncation, instead of treating it like invalid JSON (appending the error and resending unchanged, which just truncates again at the same length). If a future model-contract call raises this same low-level symptom, check whether the call batches many items into one response before assuming the prompt or schema is wrong.
+

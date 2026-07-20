@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from wakil.llm.client import ModelClient
+from wakil.llm.client import DEFAULT_MAX_TOKENS, ModelClient, ModelTruncatedError
 
 
 class ModelContractError(RuntimeError):
@@ -135,21 +135,29 @@ def complete_with_contract[T: BaseModel](
     """One model call validated against `schema`, with a single retry.
 
     On the first validation failure the error is appended to the prompt and
-    the call repeated; a second failure raises ModelContractError so the
-    caller can surface it visibly.
+    the call repeated. On a truncated response (the model hit max_tokens
+    before finishing its JSON) the prompt is unchanged but the budget is
+    doubled — re-sending the same prompt at the same length would just
+    truncate again. Either way, a second failure raises ModelContractError
+    with the underlying detail so the caller can surface it visibly instead
+    of a bare JSON-parse error.
     """
-    raw = client.complete(system, prompt)
-    try:
-        return validate_model_response(raw, schema)
-    except ValidationError as first:
-        retry_prompt = (
-            f"{prompt}\n\n"
-            f"Your previous response was not valid:\n{first}\n\n"
-            "Respond again with ONLY a single JSON object conforming to the schema "
-            "in the system prompt — no code fences, no prose."
-        )
-        raw = client.complete(system, retry_prompt)
+    max_tokens = DEFAULT_MAX_TOKENS
+    for attempt in (1, 2):
         try:
+            raw = client.complete(system, prompt, max_tokens=max_tokens)
             return validate_model_response(raw, schema)
-        except ValidationError as second:
-            raise ModelContractError(schema.__name__, str(second)) from second
+        except ModelTruncatedError as exc:
+            if attempt == 2:
+                raise ModelContractError(schema.__name__, str(exc)) from exc
+            max_tokens *= 2
+        except ValidationError as exc:
+            if attempt == 2:
+                raise ModelContractError(schema.__name__, str(exc)) from exc
+            prompt = (
+                f"{prompt}\n\n"
+                f"Your previous response was not valid:\n{exc}\n\n"
+                "Respond again with ONLY a single JSON object conforming to the schema "
+                "in the system prompt — no code fences, no prose."
+            )
+    raise AssertionError("unreachable")  # pragma: no cover

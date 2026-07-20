@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from wakil.llm import client as llm_client
@@ -52,3 +54,54 @@ def test_resolve_client_unknown_provider(monkeypatch):
     monkeypatch.setenv("WAKIL_PROVIDER", "carrier-pigeon")
     with pytest.raises(llm_client.ModelError):
         llm_client.resolve_client()
+
+
+def test_anthropic_complete_raises_truncated_on_max_tokens(monkeypatch):
+    client = llm_client.AnthropicClient.__new__(llm_client.AnthropicClient)
+    client.model = "test-model"
+    fake_response = SimpleNamespace(
+        stop_reason="max_tokens",
+        content=[SimpleNamespace(type="text", text='{"partial": "cut off')],
+    )
+    client._client = SimpleNamespace(
+        messages=SimpleNamespace(create=lambda **kwargs: fake_response)
+    )
+    with pytest.raises(llm_client.ModelTruncatedError) as exc_info:
+        client.complete("sys", "prompt", max_tokens=123)
+    assert exc_info.value.max_tokens == 123
+    assert exc_info.value.partial == '{"partial": "cut off'
+
+
+def test_anthropic_complete_returns_text_when_not_truncated(monkeypatch):
+    client = llm_client.AnthropicClient.__new__(llm_client.AnthropicClient)
+    client.model = "test-model"
+    fake_response = SimpleNamespace(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text='{"ok": true}')],
+    )
+    client._client = SimpleNamespace(
+        messages=SimpleNamespace(create=lambda **kwargs: fake_response)
+    )
+    assert client.complete("sys", "prompt") == '{"ok": true}'
+
+
+def test_openai_compatible_complete_raises_truncated_on_length_finish(monkeypatch):
+    client = llm_client.OpenAICompatibleClient(model="m", api_key="k")
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {"content": '{"partial": "cut off'},
+                        "finish_reason": "length",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("httpx.post", lambda *a, **kw: FakeResponse())
+    with pytest.raises(llm_client.ModelTruncatedError) as exc_info:
+        client.complete("sys", "prompt", max_tokens=456)
+    assert exc_info.value.max_tokens == 456

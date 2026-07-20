@@ -23,6 +23,25 @@ class ModelError(RuntimeError):
     pass
 
 
+class ModelTruncatedError(ModelError):
+    """The provider stopped generating because it hit max_tokens.
+
+    Distinct from a generic malformed response: the text is genuinely
+    incomplete (cut off mid-token), not just badly shaped, so callers can
+    retry with a larger budget instead of re-prompting for the same length.
+    """
+
+    def __init__(self, max_tokens: int, partial: str):
+        self.max_tokens = max_tokens
+        self.partial = partial
+        super().__init__(
+            f"model response was truncated: it hit the max_tokens={max_tokens} limit "
+            f"before finishing ({len(partial)} chars generated). This usually means "
+            "the request asked for more output than the budget allows — e.g. too "
+            "many items in one batch."
+        )
+
+
 class ModelClient(Protocol):
     model: str
 
@@ -48,7 +67,10 @@ class AnthropicClient:
         )
         if response.stop_reason == "refusal":
             raise ModelError("The model declined to answer this request.")
-        return "".join(block.text for block in response.content if block.type == "text")
+        text = "".join(block.text for block in response.content if block.type == "text")
+        if response.stop_reason == "max_tokens":
+            raise ModelTruncatedError(max_tokens, text)
+        return text
 
 
 class OpenAICompatibleClient:
@@ -79,9 +101,13 @@ class OpenAICompatibleClient:
             )
         data = response.json()
         try:
-            return data["choices"][0]["message"]["content"] or ""
+            choice = data["choices"][0]
+            content = choice["message"]["content"] or ""
         except (KeyError, IndexError) as exc:
             raise ModelError(f"Unexpected response shape from model endpoint: {exc}") from exc
+        if choice.get("finish_reason") == "length":
+            raise ModelTruncatedError(max_tokens, content)
+        return content
 
 
 def resolve_client() -> ModelClient | None:
