@@ -218,39 +218,47 @@ def query(
     print_query_result(result)
 
 
-def _commit_written_files(
+def _land_written_files(
     config: WorkspaceConfig,
+    landing,
+    *,
+    source_id: int,
     files: list[str],
     title: str,
     summary: str | None,
     ingest_run_id: int,
-    branch_name: str | None,
-    pr: bool,
     kind: str,
+    phase: str,
 ) -> None:
-    from wakil.app.git_service import GitServiceError, commit_ingest
+    from wakil.app.git_service import GitServiceError, land_ingestion
 
+    if landing.local:
+        console.print("[dim]--local: files written, not committed.[/dim]")
+        return
     try:
-        outcome = commit_ingest(
+        outcome = land_ingestion(
             config,
-            files,
-            title,
-            summary,
+            landing,
+            source_id=source_id,
+            files=files,
+            title=title,
+            summary=summary,
             ingest_run_id=ingest_run_id,
-            branch=branch_name,
-            open_pr=pr,
             kind=kind,
+            phase=phase,
         )
     except GitServiceError as exc:
         console.print(
-            f"[red]Commit failed:[/red] {exc}\n"
+            f"[red]Landing failed:[/red] {exc}\n"
             "[dim]The written files are still on disk for manual review.[/dim]"
         )
         raise typer.Exit(code=1) from exc
     location = f" on [bold]{outcome.branch}[/bold]" if outcome.branch else ""
     console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]{location}")
     if outcome.pr_url:
-        console.print(f"Opened PR: {outcome.pr_url}")
+        console.print(f"PR: {outcome.pr_url}")
+    if outcome.returned_to:
+        console.print(f"[dim]Returned to {outcome.returned_to}.[/dim]")
 
 
 def _refresh_qmd_index(config: WorkspaceConfig) -> None:
@@ -283,19 +291,19 @@ def _run_ingest(
     yes: bool,
     file: Path | None = None,
     url: str | None = None,
-    branch: bool = False,
-    commit: bool = False,
-    pr: bool = False,
+    local: bool = False,
     context: str | None = None,
 ) -> None:
-    """Step 1: capture the raw source. Deterministic — no model involved."""
-    from wakil.app.git_service import GitServiceError, start_ingest_branch
+    """Step 1: capture the raw source. Deterministic — no model involved.
+
+    Branches, commits, and opens a draft PR by default; --local writes the
+    raw file only, with no git operations.
+    """
+    from wakil.app.git_service import GitServiceError, prepare_landing
     from wakil.app.ingest_service import IngestError, apply_capture, prepare_capture
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
-    if pr:
-        branch = True
     try:
         with console.status("Preparing capture..."):
             proposal = prepare_capture(config, kind, file=file, url=url, context=context)
@@ -315,28 +323,27 @@ def _run_ingest(
         console.print("Aborted; nothing was written.")
         raise typer.Exit(code=0)
 
-    branch_name: str | None = None
     try:
-        if branch:
-            branch_name = start_ingest_branch(config, proposal.title)
-            console.print(f"Created branch [bold]{branch_name}[/bold]")
+        landing = prepare_landing(config, source_id=None, title=proposal.title, local=local)
+        if landing.branch:
+            console.print(f"On branch [bold]{landing.branch}[/bold]")
         result = apply_capture(config, proposal)
     except (IngestError, GitServiceError) as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
     print_capture_result(result)
 
-    if branch or commit:
-        _commit_written_files(
-            config,
-            [result.raw_file_path],
-            proposal.title,
-            None,
-            result.ingest_run_id,
-            branch_name,
-            pr,
-            kind="source",
-        )
+    _land_written_files(
+        config,
+        landing,
+        source_id=result.source_id,
+        files=[result.raw_file_path],
+        title=proposal.title,
+        summary=None,
+        ingest_run_id=result.ingest_run_id,
+        kind="source",
+        phase="capture",
+    )
     _refresh_qmd_index(config)
 
 
@@ -358,21 +365,20 @@ def enrich(
         bool,
         typer.Option("--force", help="Re-analyze a source that was already enriched."),
     ] = False,
-    branch: Annotated[
+    local: Annotated[
         bool,
-        typer.Option("--branch", "-b", help="Create a wakil/ingest/* branch and commit there."),
-    ] = False,
-    commit: Annotated[
-        bool,
-        typer.Option("--commit", "-c", help="Commit written files on the current branch."),
-    ] = False,
-    pr: Annotated[
-        bool,
-        typer.Option("--pr", help="Push the branch and open a PR via gh (implies -b)."),
+        typer.Option(
+            "--local", "-l", help="Write files without branching, committing, or opening a PR."
+        ),
     ] = False,
 ) -> None:
-    """Step 2: analyze a captured source and link it into the knowledge base."""
-    from wakil.app.git_service import GitServiceError, start_ingest_branch
+    """Step 2: analyze a captured source and link it into the knowledge base.
+
+    Lands on the same branch/PR the capture step started (or a fresh one if
+    the source was captured with --local), flipping a draft PR to ready for
+    review. --local writes files only, with no git operations.
+    """
+    from wakil.app.git_service import GitServiceError, abandon_landing, prepare_landing
     from wakil.app.ingest_service import (
         IngestError,
         apply_enrichment,
@@ -383,8 +389,6 @@ def enrich(
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
-    if pr:
-        branch = True
     client = resolve_client()
     if client is None:
         console.print(
@@ -392,62 +396,71 @@ def enrich(
             "(or OPENAI_API_KEY + WAKIL_MODEL for an OpenAI-compatible endpoint)."
         )
         raise typer.Exit(code=1)
+
+    # Resolve/switch onto the source's branch *before* reading anything --
+    # the raw capture prepare_enrichment reads back was committed there, not
+    # on whatever branch this session started on.
+    try:
+        landing = prepare_landing(
+            config, source_id=source_id, title=f"source-{source_id}", local=local
+        )
+        if landing.branch:
+            console.print(f"On branch [bold]{landing.branch}[/bold]")
+    except GitServiceError as exc:
+        console.print(f"[red]Enrichment failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
     try:
         with console.status(f"Analyzing source #{source_id} with {client.model}..."):
             proposal = prepare_enrichment(config, source_id, client, context=context, force=force)
     except (IngestError, ModelError) as exc:
         console.print(f"[red]Enrichment failed:[/red] {exc}")
+        abandon_landing(config, landing)
         raise typer.Exit(code=1) from exc
 
     print_enrichment_proposal(proposal)
     issues = validate_proposal(proposal, kb_root=config.root_path)
     if issues:
         print_proposal_issues(issues)
+        abandon_landing(config, landing)
         raise typer.Exit(code=1)
     if not yes and not typer.confirm("Apply this enrichment (write files, record memories)?"):
         console.print("Aborted; nothing was written.")
+        abandon_landing(config, landing)
         raise typer.Exit(code=0)
 
-    branch_name: str | None = None
     try:
-        if branch:
-            branch_name = start_ingest_branch(config, proposal.title)
-            console.print(f"Created branch [bold]{branch_name}[/bold]")
         result = apply_enrichment(config, proposal)
-    except (IngestError, GitServiceError) as exc:
+    except IngestError as exc:
         console.print(f"[red]Enrichment failed:[/red] {exc}")
+        abandon_landing(config, landing)
         raise typer.Exit(code=1) from exc
     print_enrichment_result(result)
 
-    if (branch or commit) and result.files_written:
-        _commit_written_files(
-            config,
-            result.files_written,
-            proposal.title,
-            proposal.summary or None,
-            result.ingest_run_id,
-            branch_name,
-            pr,
-            kind="ingest",
-        )
-    elif branch or commit:
-        console.print("[dim]No files were written; nothing to commit.[/dim]")
     if result.files_written:
+        _land_written_files(
+            config,
+            landing,
+            source_id=source_id,
+            files=result.files_written,
+            title=proposal.title,
+            summary=proposal.summary or None,
+            ingest_run_id=result.ingest_run_id,
+            kind="ingest",
+            phase="enrichment",
+        )
         _refresh_qmd_index(config)
+    else:
+        abandon_landing(config, landing)
+        console.print("[dim]No files were written; nothing to land.[/dim]")
 
 
 _YES = Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")]
-_BRANCH = Annotated[
+_LOCAL = Annotated[
     bool,
-    typer.Option("--branch", "-b", help="Create a wakil/ingest/* branch and commit there."),
-]
-_COMMIT = Annotated[
-    bool,
-    typer.Option("--commit", "-c", help="Commit the ingested files on the current branch."),
-]
-_PR = Annotated[
-    bool,
-    typer.Option("--pr", help="Push the ingest branch and open a PR via gh (implies -b)."),
+    typer.Option(
+        "--local", "-l", help="Write files without branching, committing, or opening a PR."
+    ),
 ]
 _CONTEXT = Annotated[
     str | None,
@@ -466,9 +479,7 @@ def ingest_transcript(
     file: Annotated[Path, typer.Argument(help="Transcript file (.txt, .md, .srt, or .whisper).")],
     context: _CONTEXT = None,
     yes: _YES = False,
-    branch: _BRANCH = False,
-    commit: _COMMIT = False,
-    pr: _PR = False,
+    local: _LOCAL = False,
 ) -> None:
     """Ingest a meeting or call transcript."""
     _run_ingest(
@@ -476,9 +487,7 @@ def ingest_transcript(
         "transcript",
         yes,
         file=file,
-        branch=branch,
-        commit=commit,
-        pr=pr,
+        local=local,
         context=context,
     )
 
@@ -489,9 +498,7 @@ def ingest_text(
     file: Annotated[Path, typer.Argument(help="Text or Markdown file to ingest.")],
     context: _CONTEXT = None,
     yes: _YES = False,
-    branch: _BRANCH = False,
-    commit: _COMMIT = False,
-    pr: _PR = False,
+    local: _LOCAL = False,
 ) -> None:
     """Ingest a plain text file, pasted note, or clipping."""
     _run_ingest(
@@ -499,9 +506,7 @@ def ingest_text(
         "text",
         yes,
         file=file,
-        branch=branch,
-        commit=commit,
-        pr=pr,
+        local=local,
         context=context,
     )
 
@@ -512,9 +517,7 @@ def ingest_article(
     url: Annotated[str, typer.Argument(help="Web article URL.")],
     context: _CONTEXT = None,
     yes: _YES = False,
-    branch: _BRANCH = False,
-    commit: _COMMIT = False,
-    pr: _PR = False,
+    local: _LOCAL = False,
 ) -> None:
     """Fetch a web article, extract its text, and ingest it."""
     _run_ingest(
@@ -522,9 +525,7 @@ def ingest_article(
         "article",
         yes,
         url=url,
-        branch=branch,
-        commit=commit,
-        pr=pr,
+        local=local,
         context=context,
     )
 

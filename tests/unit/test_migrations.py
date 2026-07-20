@@ -34,17 +34,24 @@ _LEGACY_RELATIONSHIP_COLUMNS = (
     "id, workspace_id, subject_memory_id, predicate, object_memory_id, source_id, "
     "note_id, confidence, metadata_json, created_at"
 )
+_LEGACY_SOURCE_COLUMNS = (
+    "id, workspace_id, source_type, title, origin, author, published_at, "
+    "retrieved_at, content_hash, raw_text_path, status, metadata_json, "
+    "created_at, updated_at"
+)
 
 
 def _rewind_to_legacy(engine) -> None:
-    """Rebuild memories/relationships without the Phase B columns and drop the
-    version table, simulating a wakil.db written before Alembic existed.
-    (SQLite can't DROP COLUMN on FK-referenced columns, hence the rebuild.)"""
+    """Rebuild memories/relationships/sources without the Phase B/C columns
+    and drop the version table, simulating a wakil.db written before Alembic
+    existed. (SQLite can't DROP COLUMN on FK-referenced columns, hence the
+    rebuild.)"""
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE alembic_version"))
         for table, columns in (
             ("memories", _LEGACY_MEMORY_COLUMNS),
             ("relationships", _LEGACY_RELATIONSHIP_COLUMNS),
+            ("sources", _LEGACY_SOURCE_COLUMNS),
         ):
             connection.execute(
                 text(f"CREATE TABLE {table}_legacy AS SELECT {columns} FROM {table}")
@@ -70,12 +77,14 @@ def test_legacy_database_is_stamped_and_upgraded(tmp_path: Path):
     _rewind_to_legacy(engine)
     assert "event_date" not in _columns(engine, "memories")
     assert "subject_note_id" not in _columns(engine, "relationships")
+    assert "git_branch" not in _columns(engine, "sources")
 
     init_db(engine)  # the upgrade path an existing workspace takes
 
     assert _revision(engine) == _head_revision()
     assert "event_date" in _columns(engine, "memories")
     assert {"subject_note_id", "object_note_id"} <= _columns(engine, "relationships")
+    assert {"git_branch", "git_pr_url"} <= _columns(engine, "sources")
 
 
 def test_legacy_database_data_survives_migration(tmp_path: Path, kb_path: Path):

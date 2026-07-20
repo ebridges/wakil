@@ -64,8 +64,12 @@ def _init(kb_path: Path) -> Path:
 
 
 def _capture(kb_path: Path, transcript: Path, *extra: str):
+    # These fixtures aren't git repos; --local skips the (now default-on)
+    # branch/commit/PR landing so these tests stay focused on capture/
+    # enrichment mechanics. Git landing itself is covered in test_git_cli.py.
     return runner.invoke(
-        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes", *extra]
+        app,
+        ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes", "--local", *extra],
     )
 
 
@@ -113,7 +117,7 @@ def test_enrich_flow(kb_path: Path, monkeypatch):
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
 
-    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes"])
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
     assert result.exit_code == 0, result.output
     assert "Enrichment preview" in result.output
     assert "Entity resolution" in result.output  # decisions shown before confirm
@@ -123,7 +127,7 @@ def test_enrich_flow(kb_path: Path, monkeypatch):
     assert (kb_path / "people" / "dana-prieto.md").exists()  # stub created
 
     # Second run refuses without --force.
-    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes"])
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
     assert result.exit_code == 1
     assert "already enriched" in result.output
 
@@ -138,7 +142,7 @@ def test_enrich_blocked_on_schema_gap(kb_path: Path, monkeypatch):
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
 
-    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes"])
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
     assert result.exit_code == 1
     assert "failed validation" in result.output
     assert "guild" in result.output
@@ -150,7 +154,7 @@ def test_enrich_requires_provider(kb_path: Path, monkeypatch):
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
 
-    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes"])
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
     assert result.exit_code == 1
     assert "needs a model provider" in result.output
 
@@ -158,7 +162,7 @@ def test_enrich_requires_provider(kb_path: Path, monkeypatch):
 def test_enrich_unknown_source(kb_path: Path, monkeypatch):
     monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
     runner.invoke(app, ["init", str(kb_path)])
-    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "42", "--yes"])
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "42", "--yes", "--local"])
     assert result.exit_code == 1
     assert "No source with id" in result.output
 

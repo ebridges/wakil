@@ -36,8 +36,16 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 - [x] Dirty-tree checks before branching
 - [x] Optional gh-based PR creation (`--pr`)
 - [x] `wakil git summary` and `wakil git history <path>`
-- [ ] Return to the original branch after `--branch` ingest (currently stays
-      on the wakil branch, matching manual git workflows)
+- [x] Default-on branch/commit/PR landing (`--local` opts out), tracked per
+      **source** rather than per command: `prepare_landing`/`land_ingestion`
+      in `git_service.py` reuse (or fetch, or recreate) one branch and one
+      PR across a source's whole capture-then-enrich lifecycle, opening the
+      PR as a draft after capture and flipping it to ready-for-review with a
+      summary comment once enrichment lands, instead of two disconnected
+      PRs. Branches now always fork from the resolved default branch
+      (`git.resolve_default_branch`), not whatever happens to be checked
+      out. Returns to the original branch after landing (or abandoning) a
+      change.
 - [ ] `wakil note:`/`wakil link:` commit flows once note editing lands
 
 ## Phase 5: Memory Lifecycle

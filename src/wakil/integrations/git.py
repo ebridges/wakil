@@ -63,8 +63,54 @@ def create_branch(root: Path, name: str) -> None:
     _run_git_checked(root, "switch", "-c", name)
 
 
+def create_branch_from(root: Path, name: str, base: str | None) -> None:
+    """Create and switch to `name`, branching from `base` (a local branch
+    name, e.g. the repo's default branch) rather than whatever is currently
+    checked out. Falls back to branching from current HEAD when `base` is
+    None (no resolvable default branch)."""
+    if base is None:
+        _run_git_checked(root, "switch", "-c", name)
+        return
+    remote_ref = f"origin/{base}"
+    _run_git(root, "fetch", "origin", base)  # best-effort refresh; ignore failure
+    if _run_git(root, "rev-parse", "--verify", remote_ref) is not None:
+        _run_git_checked(root, "switch", "-c", name, remote_ref)
+    else:
+        _run_git_checked(root, "switch", "-c", name, base)
+
+
 def branch_exists(root: Path, name: str) -> bool:
     return _run_git(root, "rev-parse", "--verify", f"refs/heads/{name}") is not None
+
+
+def checkout(root: Path, name: str) -> None:
+    _run_git_checked(root, "switch", name)
+
+
+def checkout_new_tracking(root: Path, name: str) -> None:
+    """Create a local branch `name` tracking the already-fetched
+    `origin/<name>`."""
+    _run_git_checked(root, "switch", "-c", name, f"origin/{name}")
+
+
+def fetch_branch(root: Path, name: str) -> bool:
+    """Fetch a single branch from origin into refs/remotes/origin/<name>.
+    Returns False (never raises) if the branch doesn't exist on the remote
+    or there is no remote — this is a existence probe as much as a fetch."""
+    return _run_git(root, "fetch", "origin", f"{name}:refs/remotes/origin/{name}") is not None
+
+
+def resolve_default_branch(root: Path) -> str | None:
+    """Best-effort: the repo's default branch name ('main', 'master', ...),
+    independent of whatever is currently checked out. Tries the remote's
+    HEAD symref first, then falls back to common local branch names."""
+    ref = _run_git(root, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if ref:
+        return ref.rsplit("/", 1)[-1]
+    for candidate in ("main", "master"):
+        if branch_exists(root, candidate):
+            return candidate
+    return None
 
 
 def stage_and_commit(root: Path, paths: list[str], message: str) -> str:

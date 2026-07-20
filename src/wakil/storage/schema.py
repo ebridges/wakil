@@ -55,6 +55,8 @@ class Source(Base):
     raw_text_path: Mapped[str | None] = mapped_column(Text, default=None)
     status: Mapped[str] = mapped_column(String(30), default="new")
     metadata_json: Mapped[str | None] = mapped_column(Text, default=None)
+    git_branch: Mapped[str | None] = mapped_column(Text, default=None)
+    git_pr_url: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
