@@ -40,15 +40,20 @@ The user asks to "commit", "commit these changes", "split into logical commits",
    - If everything is genuinely one concern, a single commit is correct — don't
      manufacture splits.
 
-3. **Confirm the plan.** Briefly list the proposed commits (message + files) and let the
+3. **Check development-docs.** Apply the `development-docs` skill's judgment: does anything from this
+   session belong in `docs/DEVELOPMENT.md` or `docs/TROUBLESHOOTING.md`? Default is no —
+   only add an entry if it clearly clears that skill's bar. If so, fold the doc edit into
+   one of the change sets below rather than treating it as a separate follow-up.
+
+4. **Confirm the plan.** Briefly list the proposed commits (message + files) and let the
    user adjust before committing, unless they've said to just do it.
 
-4. **Stage and commit each set.** For each change set: stage exactly its files/hunks
+5. **Stage and commit each set.** For each change set: stage exactly its files/hunks
    (`git add <paths>` or `git add -p`), then commit. Verify with `git status` between
    commits that you're only including the intended files. Never `git add -A` blindly when
    splitting.
 
-5. **Report.** Show the resulting `git log --oneline` for the new commits.
+6. **Report.** Show the resulting `git log --oneline` for the new commits.
 
 ## Message format
 
