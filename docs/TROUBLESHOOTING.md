@@ -135,3 +135,13 @@ Fixed by raising a distinct `ModelTruncatedError` when the provider reports `sto
 
 Fixed by loosening `_TIMELINE_HEADING_RE` to accept `## Timeline` with an optional ` / Log` suffix, rather than editing the 36 KB notes to match — per this project's "never silently rewrite user knowledge" rule, a code-level tolerance fix is preferable to a bulk content migration nobody asked for. If a new heading-shape warning appears again, check for this kind of convention drift across the KB (`grep -rlE '^## Timeline\s*$'`) before assuming it's a one-off malformed note.
 
+---
+
+### "updated: required field is missing" after an otherwise-successful entity-note merge
+
+**Date:** 2026-07-20 · **Source:** `fix/entity-revision-truncation-errors` branch — `_merge_entity_note` in `src/wakil/app/ingest_service.py`
+
+After fixing the heading-shape warning above, re-running `wakil enrich` against `people/edward-bridges.md` got further but then failed proposal validation: `updated: required field is missing`, and nothing was written. `person`/`company`/`concept`/`project` all declare `updated` as a required frontmatter field, but `_merge_entity_note` only bumped it when the key was already present (`if "updated" in metadata: metadata["updated"] = today`) — it never added the key. `edward-bridges.md`'s frontmatter has `created` but no `updated` at all, so the merge left the required field permanently missing, no matter how many times you re-ran enrich. A repo-wide check found 48 more notes in the same state (11 people, 35 companies, 2 concepts).
+
+Fixed by stamping `metadata["updated"] = today` unconditionally on every merge — the function only runs when `has_update=True`, so "we just updated this note" is never a special case. If a future proposal-validation error names a required field that a merge *should* be setting, check whether the merge logic conditions on the field already existing rather than always writing it.
+

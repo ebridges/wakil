@@ -611,9 +611,27 @@ def test_merge_entity_note_replaces_top_section_preserves_h1_and_prepends_timeli
     assert "### 2026-06-01 — recruiter screen" in new_content
     assert "- Introductory call, discussed the VP Eng role." in new_content
     assert "- **2026-06-01** | Referenced in [some-meeting]" in new_content
-    # updated: bumped since the field already existed; created: left alone.
+    # updated: bumped to today; created: left alone.
     assert "updated: '2026-07-16'" in new_content or "updated: 2026-07-16" in new_content
     assert "created: 2026-06-01" in new_content
+
+
+def test_merge_entity_note_stamps_updated_even_when_missing_from_original(workspace):
+    # people/edward-bridges.md's real shape: no "updated" key at all, only
+    # "created". Required by schema on every merge target's entity type
+    # (person/company/concept/project all require it), so it must be added,
+    # not left permanently missing just because it wasn't there before.
+    no_updated_field = REAL_SHAPED_PERSON.replace("updated: 2026-06-01\n", "")
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### 2026-07-16 — note\n- detail",
+    )
+    new_content = _merge_entity_note(no_updated_field, revision, "2026-07-16")
+
+    assert new_content is not None
+    assert "updated: '2026-07-16'" in new_content or "updated: 2026-07-16" in new_content
 
 
 def test_merge_entity_note_only_changes_specified_frontmatter_fields(workspace):

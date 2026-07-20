@@ -796,8 +796,7 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
     metadata = dict(post.metadata)
     if revision.frontmatter_updates:
         metadata.update(revision.frontmatter_updates)
-    if "updated" in metadata:
-        metadata["updated"] = today
+    metadata["updated"] = today
 
     compiled_truth = (revision.compiled_truth or "").strip()
     new_top = f"{h1_line}\n\n{compiled_truth}\n\n---" if compiled_truth else h1_line
