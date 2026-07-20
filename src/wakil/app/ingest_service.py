@@ -769,6 +769,9 @@ def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
     return f"{heading_line}\n\n{entry}\n\n{rest}" if rest else f"{heading_line}\n\n{entry}\n"
 
 
+_TRAILING_HR_RE = re.compile(r"\n*-{3,}\s*$")
+
+
 def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -> str | None:
     """Deterministic surgical merge — never a full-file regeneration (the
     "clobbering bug" note-revision's own skill warns against): existing
@@ -791,6 +794,10 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
         return None
 
     h1_line = body[h1_match.start() : h1_match.end()]
+    # Same convention the code below re-applies when writing a new top
+    # section: the "---" divider right before Timeline is not itself part
+    # of the top-section content.
+    old_top = _TRAILING_HR_RE.sub("", body[h1_match.end() : timeline_match.start()]).strip("\n")
     timeline_section = body[timeline_match.start() :]
 
     metadata = dict(post.metadata)
@@ -798,7 +805,12 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
         metadata.update(revision.frontmatter_updates)
     metadata["updated"] = today
 
-    compiled_truth = (revision.compiled_truth or "").strip()
+    # An empty/absent compiled_truth means "no change to the top section",
+    # never "delete the top section" — has_update=True can legitimately mean
+    # only the Timeline changed. Wiping existing State prose whenever the
+    # model didn't re-send it is the exact clobbering bug this merge exists
+    # to prevent (docs/TROUBLESHOOTING.md).
+    compiled_truth = (revision.compiled_truth or "").strip() or old_top
     new_top = f"{h1_line}\n\n{compiled_truth}\n\n---" if compiled_truth else h1_line
     new_timeline = _insert_timeline_entry(timeline_section, revision.timeline_entry or "")
 

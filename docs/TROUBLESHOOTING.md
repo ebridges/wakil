@@ -145,3 +145,13 @@ After fixing the heading-shape warning above, re-running `wakil enrich` against 
 
 Fixed by stamping `metadata["updated"] = today` unconditionally on every merge — the function only runs when `has_update=True`, so "we just updated this note" is never a special case. If a future proposal-validation error names a required field that a merge *should* be setting, check whether the merge logic conditions on the field already existing rather than always writing it.
 
+---
+
+### `enrich` replaced an entire "## Compiled Truth" section with nothing (the clobbering bug, in wakil's own merge code)
+
+**Date:** 2026-07-20 · **Source:** `fix/entity-revision-truncation-errors` branch — `_merge_entity_note` in `src/wakil/app/ingest_service.py`
+
+After the two fixes above got `wakil enrich` writing again, the diff preview for `companies/mosaic-private-markets.md` showed its entire `## Compiled Truth` section — a long, carefully synthesized paragraph-and-bullet block — replaced by nothing, so the file went straight from the H1 to `## Timeline / Log`. Cause: the model returned `has_update=True` (a new Timeline entry was warranted) with an empty/absent `compiled_truth` (nothing about the State needed re-synthesis) — a legitimate combination — but `_merge_entity_note` read "no compiled_truth" as "the top section is now empty" rather than "no change to the top section," and wrote exactly that. This is the precise "clobbering bug" `note-revision/SKILL.md` warns about (full-file-style regeneration silently dropping prior content), except living in wakil's own merge code rather than in model behavior — a diff-preview review would have caught it (per that skill's "diff your draft, stop if it's shorter" step), but it's better to not produce the bad diff in the first place.
+
+Fixed by falling back to the existing top section (stripping its own trailing `---` divider) whenever `compiled_truth` is empty, instead of dropping it. If a future entity-update diff shows content vanishing rather than being added to, check whether the responsible field was actually empty in the model's response before assuming the prompt is at fault.
+
