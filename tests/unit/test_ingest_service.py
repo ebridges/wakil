@@ -210,6 +210,43 @@ def test_capture_duplicate_detected(workspace, transcript):
         apply_capture(workspace, second)
 
 
+def test_capture_race_closes_via_unique_constraint(workspace, kb_path):
+    """Two processes capturing identical content under different filenames
+    both pass prepare_capture's check, since neither has committed yet --
+    the second apply_capture must still catch it via the DB constraint
+    rather than silently creating a second Source row for the same
+    content."""
+    content = "Jane: let's prototype FNOL routing with graph memory.\nBob: agreed.\n"
+    first_file = kb_path / "meeting-one.txt"
+    first_file.write_text(content)
+    second_file = kb_path / "meeting-two.txt"
+    second_file.write_text(content)
+
+    first_proposal = prepare_capture(workspace, "transcript", file=first_file)
+    second_proposal = prepare_capture(workspace, "transcript", file=second_file)
+    assert first_proposal.duplicate_of is None
+    assert second_proposal.duplicate_of is None  # race window: neither committed yet
+    assert first_proposal.raw_file.path != second_proposal.raw_file.path
+
+    first_result = apply_capture(workspace, first_proposal)
+
+    second_target = workspace.root_path / second_proposal.raw_file.path
+    with pytest.raises(IngestError, match="already ingested"):
+        apply_capture(workspace, second_proposal)
+    # The file the loser wrote before losing the race must not be left
+    # behind as an orphan with no Source row.
+    assert not second_target.exists()
+
+    with open_session(workspace) as session:
+        sources = list(
+            session.scalars(
+                select(Source).where(Source.content_hash == first_proposal.content_hash)
+            )
+        )
+    assert len(sources) == 1
+    assert sources[0].id == first_result.source_id
+
+
 def test_capture_cleans_transcript(workspace, kb_path):
     noisy = kb_path / "noisy.txt"
     noisy.write_text("[00:00:01] Jane: hello\n00:00:05 Bob: hi\n")

@@ -31,6 +31,7 @@ from pathlib import Path
 import frontmatter as frontmatter_lib
 import yaml
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
@@ -283,7 +284,26 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
             ),
         )
         session.add(source)
-        session.flush()
+        try:
+            session.flush()
+        except IntegrityError:
+            # Lost a race: another process captured identical content (same
+            # workspace_id, content_hash) between prepare_capture's check
+            # and this insert -- the uq_sources_workspace_content_hash
+            # constraint is what actually closes that window; this is just
+            # surfacing it the same way an early duplicate-of hit is.
+            session.rollback()
+            target.unlink(missing_ok=True)
+            existing_id = session.scalar(
+                select(Source.id).where(
+                    Source.workspace_id == workspace_id,
+                    Source.content_hash == proposal.content_hash,
+                )
+            )
+            raise IngestError(
+                f"Source already ingested (source id {existing_id}); "
+                "lost a race with a concurrent identical capture"
+            ) from None
         run = IngestRun(
             workspace_id=workspace_id,
             source_id=source.id,

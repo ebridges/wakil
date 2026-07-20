@@ -177,17 +177,19 @@ Supabase's own env var conventions) read at connect time, never persisted.
 `.wakil/config.yaml` keeps carrying non-sensitive identity
 (`workspace_id`, `name`) only, exactly as it does today.
 
-### 6. The dedup race this work flagged becomes trivial to close — and doesn't require waiting for this
+### 6. The dedup race this work flagged has since been closed — the fix carries over as-is
 
-`TODO.md` already flags `Source.content_hash` dedup's check-then-insert
+`TODO.md` originally flagged `Source.content_hash` dedup's check-then-insert
 race (no unique constraint, so two concurrent identical-content ingests
-can both create a `Source` row instead of one being caught as a
-duplicate). Worth noting explicitly: **this is not a reason to wait for a
-server database.** `INSERT ... ON CONFLICT DO NOTHING` + a
-`UNIQUE(workspace_id, content_hash)` constraint works in SQLite today
-(via `ON CONFLICT` clauses, available since SQLite 3.24) exactly as it
-would in Postgres. Fix it independently, whenever it's prioritized; a
-storage-backend swap doesn't unlock anything this particular fix needs.
+could both create a `Source` row instead of one being caught as a
+duplicate) — confirming, as noted at the time, that this **wasn't a reason
+to wait for a server database**: `uq_sources_workspace_content_hash`
+(migration 0004) plus `apply_capture` catching the resulting
+`IntegrityError` closed it directly in SQLite, no Postgres required. That
+fix carries over unchanged to a server backend — a `UNIQUE(workspace_id,
+content_hash)` constraint and `ON CONFLICT`/`IntegrityError` handling work
+the same way in Postgres; nothing here is SQLite-specific enough to need
+redoing.
 
 ### 7. Multi-workspace tenancy, if it comes up
 

@@ -87,6 +87,34 @@ def test_ingest_local_skips_git_entirely(git_kb, monkeypatch):
     assert _git(git_kb, "status", "--porcelain") != ""  # captured file left uncommitted
 
 
+def test_ingest_returns_to_original_branch_when_apply_fails(git_kb, monkeypatch):
+    """If apply_capture fails after prepare_landing already switched onto
+    the throwaway ingest branch -- e.g. it lost the content-hash dedup
+    race with a concurrent identical capture -- the session must return to
+    its original branch rather than being left stranded."""
+    from wakil.app.ingest_service import IngestError
+
+    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
+    transcript = git_kb / "meeting.txt"
+    transcript.write_text("Some notes.\n")
+    (git_kb / ".gitignore").write_text("meeting.txt\n")
+    _git(git_kb, "add", ".gitignore")
+    _git(git_kb, "commit", "-q", "-m", "ignore scratch")
+
+    def _lost_the_race(config, proposal):
+        raise IngestError("Source already ingested (source id 1); lost a race")
+
+    monkeypatch.setattr("wakil.app.ingest_service.apply_capture", _lost_the_race)
+
+    result = runner.invoke(
+        app, ["-w", str(git_kb), "ingest", "transcript", str(transcript), "--yes"]
+    )
+    assert result.exit_code == 1
+    assert "lost a race" in result.output
+    assert _git(git_kb, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert _git(git_kb, "status", "--porcelain") == ""
+
+
 def test_enrich_lands_on_the_same_branch_capture_started(git_kb, monkeypatch):
     """Capture then enrich the same source: they must share one branch, not
     open two disconnected ones."""

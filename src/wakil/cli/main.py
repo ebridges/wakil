@@ -299,7 +299,7 @@ def _run_ingest(
     Branches, commits, and opens a draft PR by default; --local writes the
     raw file only, with no git operations.
     """
-    from wakil.app.git_service import GitServiceError, prepare_landing
+    from wakil.app.git_service import GitServiceError, abandon_landing, prepare_landing
     from wakil.app.ingest_service import IngestError, apply_capture, prepare_capture
 
     root = _resolve_workspace(ctx)
@@ -327,9 +327,15 @@ def _run_ingest(
         landing = prepare_landing(config, source_id=None, title=proposal.title, local=local)
         if landing.branch:
             console.print(f"On branch [bold]{landing.branch}[/bold]")
-        result = apply_capture(config, proposal)
-    except (IngestError, GitServiceError) as exc:
+    except GitServiceError as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        result = apply_capture(config, proposal)
+    except IngestError as exc:
+        console.print(f"[red]Ingest failed:[/red] {exc}")
+        abandon_landing(config, landing)
         raise typer.Exit(code=1) from exc
     print_capture_result(result)
 

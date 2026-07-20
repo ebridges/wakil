@@ -118,15 +118,19 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
       immediately erroring — verified sessions never span slow work (LLM
       calls, network fetches), so that lock is only ever held for a
       handful of INSERT/UPDATE statements, not an ingest's full duration.
-      **Known gap surfaced by this fix, not addressed here**: `Source.
-      content_hash` dedup in `prepare_capture` has a pre-existing
-      check-then-insert race (no unique constraint) — two processes
-      ingesting identical content at the same moment can both create a
-      Source row instead of one being flagged a duplicate. Previously
-      masked by git-level lock contention (one process usually failed
-      first anyway); now reachable since concurrent ingests can both
-      genuinely succeed. Needs a unique constraint + conflict handling,
-      scoped separately.
+- [x] `Source.content_hash` dedup race (flagged above, now closed):
+      `uq_sources_workspace_content_hash` (migration 0004, dedupes any
+      pre-existing collisions and repoints referencing memories/
+      relationships/ingest_runs onto the survivor before adding the
+      constraint) plus `apply_capture` catching the resulting
+      `IntegrityError` — cleans up the raw file it already wrote, reports
+      "already ingested" the same way an early duplicate-of hit is
+      reported, and the CLI returns to the original branch on that failure
+      (`_run_ingest`'s `prepare_landing`/`apply_capture` calls split into
+      separate try blocks so `abandon_landing` always has a defined
+      `landing` to fall back to). Verified empirically: concurrent
+      identical-content ingest across two worktrees now leaves exactly one
+      `Source` row and both worktrees clean on their own branches.
 - [ ] Docs: QMD integration, memory lifecycle, git workflow
 - [ ] Wikilink/tag extraction during indexing (feeds relationship discovery)
 - [ ] FUTURE: full agentic eval harness. The current live-model skill evals

@@ -42,6 +42,9 @@ class Workspace(Base):
 
 class Source(Base):
     __tablename__ = "sources"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "content_hash", name="uq_sources_workspace_content_hash"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"))
