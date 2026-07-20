@@ -158,18 +158,18 @@ loading and no merging**:
 - `src/wakil/skills/resolver.py`, module docstring: "an ordered list of
   skill roots ... is normalized, and the first matching, valid skill
   directory wins."
-- Transcript `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/9108d770-b024-4e7a-8789-fefeeed40c49.jsonl`
+- Transcript `~/.claude/projects/-Users-ebridges-Projects-wakil/9108d770-b024-4e7a-8789-fefeeed40c49.jsonl`
   (approx. 2026-07-15T20:55:13Z): "The first matching skill directory is
   authoritative." and "merging files across skill directories; - skill
   dependency resolution; - automatic drift detection or merging;"
-- Transcript `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2.jsonl`
+- Transcript `~/.claude/projects/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2.jsonl`
   (approx. 2026-07-16): "the resolver and the DAG-internal skill loader
   were genuinely disconnected mechanisms — `wakil skills which` could
   inspect a kb-local override correctly (it only needs one tier to match),
   but `ingest_service.py` never consulted the resolver at all" and "make
   skill_loader.load_skill() delegate to the SAME
   resolver.resolve_skill()/default_context() the CLI already uses."
-- Transcript `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/cc7e255d-b19a-449a-82d2-fd2bb127f3f0.jsonl`
+- Transcript `~/.claude/projects/-Users-ebridges-Projects-wakil/cc7e255d-b19a-449a-82d2-fd2bb127f3f0.jsonl`
   (approx. 2026-07-16T18:13:10Z): "Commit `13ef03e` flattened everything
   into `skills/` directly (no more `builtin/` subdirectory), and `cab8f23`
   rewired `skill_loader.load_skill()` to resolve through `resolver.py`'s

@@ -123,19 +123,19 @@ metadata):
 - `src/wakil/config/settings.py`, `WorkspaceConfig.qmd_dir` docstring:
   "separate file from wakil.db — qmd manages its own SQLite schema via an
   independent process with no locking coordination with wakil's connection."
-- Transcript `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/6f77ae00-a4f5-49eb-b09b-3fa836b62e4c.jsonl`
+- Transcript `~/.claude/projects/-Users-ebridges-Projects-wakil/6f77ae00-a4f5-49eb-b09b-3fa836b62e4c.jsonl`
   (approx. 2026-07-18T07:22:47Z): "QMD's own index and collection config are
   scoped to each wakil workspace via the `QMD_CONFIG_DIR`/`INDEX_PATH`
   environment variables it already respects, pointed at
   `<workspace>/.wakil/qmd/` — a sibling of `wakil.db`, not the same physical
   file (qmd manages its own SQLite schema via an independent process with no
   locking coordination with wakil's SQLAlchemy connection)."
-- Transcript `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/09cc95ef-515c-4a06-b5c9-92c68f3679cf.jsonl`
+- Transcript `~/.claude/projects/-Users-ebridges-Projects-wakil/09cc95ef-515c-4a06-b5c9-92c68f3679cf.jsonl`
   (approx. 2026-07-16T19:28:11Z): "Confirmed: `wakil`'s QMD integration
   returns zero results unconditionally, for any query. The root cause is in
   `qmd_search()`'s subprocess invocation — it passes CLI flags that don't
   exist in the installed `qmd` (v2.1.0)."
-- Transcript `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/93aecd7b-3db1-4708-aaf6-81eeb2653a37.jsonl`
+- Transcript `~/.claude/projects/-Users-ebridges-Projects-wakil/93aecd7b-3db1-4708-aaf6-81eeb2653a37.jsonl`
   (approx. 2026-07-17T14:31:45Z): "QMD returned a flat `\"score\": 0.88` on
   *every* result for a \"Mosaic\" query — confirmed by running the raw `qmd`
   CLI directly, not a wakil parsing bug. QMD isn't grading relevance at all

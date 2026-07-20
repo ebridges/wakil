@@ -78,4 +78,4 @@ never a silent rewrite.
   `subject_note_id` / `object_note_id` as nullable `ForeignKey("notes.id")`
   columns with the same rationale in an inline comment.
 - Session transcript:
-  `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/cf777bf3-daa2-4c94-a23b-f7f23c917f52.jsonl`
+  `~/.claude/projects/-Users-ebridges-Projects-wakil/cf777bf3-daa2-4c94-a23b-f7f23c917f52.jsonl`

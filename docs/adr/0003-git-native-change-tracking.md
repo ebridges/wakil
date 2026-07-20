@@ -130,7 +130,7 @@ isn't in the source material.
   2026-07-20, `https://github.com/ebridges/wakil/pull/15`) — follow-on
   evolution, not part of the original decision.
 - Transcript
-  `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil--claude-worktrees-git-integration/8c34f4e5-01ed-4041-8fdd-b1bb7953e8c7.jsonl`:
+  `~/.claude/projects/-Users-ebridges-Projects-wakil--claude-worktrees-git-integration/8c34f4e5-01ed-4041-8fdd-b1bb7953e8c7.jsonl`:
   "one branch and one PR per source** across its whole lifecycle
   (capture → enrich, possibly across separate sessions or agents), rather
   than the two disconnected PRs today's flag-based flow would produce if
@@ -141,7 +141,7 @@ isn't in the source material.
   happens to be checked out — was a latent bug where an ingest kicked off
   mid-review would silently stack on an unrelated branch."
 - Transcript
-  `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/544fe3a7-bef8-42b0-aba3-7ff553cb7a3f.jsonl`:
+  `~/.claude/projects/-Users-ebridges-Projects-wakil/544fe3a7-bef8-42b0-aba3-7ff553cb7a3f.jsonl`:
   "Per this repo's working agreement (\"keep changes small,\" \"show
   reviewable diffs\"), these need to land as separate commits rather than
   one bulk commit."

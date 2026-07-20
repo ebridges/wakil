@@ -66,8 +66,8 @@ demand:
 
 ## Sources
 
-- `/Users/ebridges/Projects/wakil/pyproject.toml` (`[tool.pytest.ini_options]`: `markers = ["eval: live-model skill evaluations (real API calls; excluded by default, run with -m eval)"]`, `addopts = "-m 'not eval'"`)
-- `/Users/ebridges/Projects/wakil/.github/workflows/ci.yml` (default `push`/`pull_request` gate: `uv run pytest -q`, no eval marker, no model API key)
-- `/Users/ebridges/Projects/wakil/.github/workflows/skill-evals.yml` (`on: workflow_dispatch: {}`; `uv run pytest -m eval -q` with `ANTHROPIC_API_KEY` from secrets)
+- `./pyproject.toml` (`[tool.pytest.ini_options]`: `markers = ["eval: live-model skill evaluations (real API calls; excluded by default, run with -m eval)"]`, `addopts = "-m 'not eval'"`)
+- `./.github/workflows/ci.yml` (default `push`/`pull_request` gate: `uv run pytest -q`, no eval marker, no model API key)
+- `./.github/workflows/skill-evals.yml` (`on: workflow_dispatch: {}`; `uv run pytest -m eval -q` with `ANTHROPIC_API_KEY` from secrets)
 - Commit `80da1e9` "ci(skills): wire up opt-in live-model skill evals"
-- Session transcript `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2.jsonl`: "CLAUDE.md's philosophy (simple, no hidden behavior, provider-abstracted but minimal) strongly implies live-model evals shouldn't block the default CI gate."
+- Session transcript `~/.claude/projects/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2.jsonl`: "CLAUDE.md's philosophy (simple, no hidden behavior, provider-abstracted but minimal) strongly implies live-model evals shouldn't block the default CI gate."

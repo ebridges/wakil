@@ -67,4 +67,4 @@ ORDER BY event_date
   event_date` is a marginally cleaner query, at the cost of forking the whole
   Memory lifecycle (state, promotion, dedup) into a second, unmaintained
   path."
-- Session transcript: `/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/cf777bf3-daa2-4c94-a23b-f7f23c917f52.jsonl`
+- Session transcript: `~/.claude/projects/-Users-ebridges-Projects-wakil/cf777bf3-daa2-4c94-a23b-f7f23c917f52.jsonl`
