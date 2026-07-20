@@ -100,6 +100,33 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
       Claude-format `SKILL.md` files (`wakil skills list/which/validate`)
 - [x] Alembic migrations once the schema starts evolving (landed with the
       ingestion/entity refactor Phase B)
+- [x] Concurrent-ingest safety across git worktrees: `WorkspaceConfig` now
+      resolves a `state_root` (via `.git`'s common-dir, shared by a repo's
+      main worktree and every `git worktree add`-linked one) distinct from
+      `root_path` (this checkout's own directory for file I/O) — a
+      `Workspace` DB row, content-hash dedup, and the FTS/note index are
+      keyed on `state_root`, so N linked worktrees running `wakil
+      ingest`/`wakil enrich` concurrently share one workspace instead of
+      each silently getting its own empty one (confirmed empirically: 3-way
+      concurrent ingest across worktrees, one shared `Workspace` row, no
+      note loss). `index_notes` no longer prunes missing notes when run
+      from a linked worktree (a note absent from *this* worktree's checkout
+      may just be on another worktree's branch, not actually gone).
+      `database.py` now sets `PRAGMA journal_mode=WAL` +
+      `PRAGMA busy_timeout=30000` on every connection, so a writer that
+      loses the race for SQLite's single write lock waits instead of
+      immediately erroring — verified sessions never span slow work (LLM
+      calls, network fetches), so that lock is only ever held for a
+      handful of INSERT/UPDATE statements, not an ingest's full duration.
+      **Known gap surfaced by this fix, not addressed here**: `Source.
+      content_hash` dedup in `prepare_capture` has a pre-existing
+      check-then-insert race (no unique constraint) — two processes
+      ingesting identical content at the same moment can both create a
+      Source row instead of one being flagged a duplicate. Previously
+      masked by git-level lock contention (one process usually failed
+      first anyway); now reachable since concurrent ingests can both
+      genuinely succeed. Needs a unique constraint + conflict handling,
+      scoped separately.
 - [ ] Docs: QMD integration, memory lifecycle, git workflow
 - [ ] Wikilink/tag extraction during indexing (feeds relationship discovery)
 - [ ] FUTURE: full agentic eval harness. The current live-model skill evals

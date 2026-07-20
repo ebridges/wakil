@@ -22,6 +22,12 @@ class GitInfo:
     recent_commits: list[str] = field(default_factory=list)
 
 
+@dataclass
+class WorktreeAnchors:
+    toplevel: Path  # this checkout's own top-level directory
+    common_dir: Path  # the shared .git dir -- identical across all linked worktrees
+
+
 def _run_git(root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
@@ -98,6 +104,24 @@ def fetch_branch(root: Path, name: str) -> bool:
     Returns False (never raises) if the branch doesn't exist on the remote
     or there is no remote — this is a existence probe as much as a fetch."""
     return _run_git(root, "fetch", "origin", f"{name}:refs/remotes/origin/{name}") is not None
+
+
+def worktree_anchors(root: Path) -> WorktreeAnchors | None:
+    """Both the current checkout's own top-level directory and the shared
+    `.git` common-dir, in one call -- the common-dir is identical for a
+    repo's main worktree and every `git worktree add`-linked one, which is
+    what makes it a stable identity anchor across them. Returns None when
+    `root` isn't inside a git repo at all."""
+    output = _run_git(root, "rev-parse", "--show-toplevel", "--git-common-dir")
+    if not output:
+        return None
+    lines = output.splitlines()
+    if len(lines) != 2:
+        return None
+    toplevel, common_dir = lines
+    return WorktreeAnchors(
+        toplevel=Path(toplevel).resolve(), common_dir=(root / common_dir).resolve()
+    )
 
 
 def resolve_default_branch(root: Path) -> str | None:

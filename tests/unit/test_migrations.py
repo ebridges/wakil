@@ -113,6 +113,54 @@ def test_baseline_revision_is_the_chain_root():
     assert _head_revision() != BASELINE_REVISION  # 0002 exists past the anchor
 
 
+def test_sqlite_pragmas_configured_for_concurrency(tmp_path: Path):
+    engine = create_db_engine(tmp_path / "pragma.db")
+    init_db(engine)
+    with engine.connect() as connection:
+        assert connection.execute(text("PRAGMA journal_mode")).scalar() == "wal"
+        assert connection.execute(text("PRAGMA busy_timeout")).scalar() == 30_000
+
+
+def test_concurrent_writer_waits_instead_of_failing_immediately(tmp_path: Path):
+    """A second connection's write must wait (busy_timeout) rather than
+    immediately raising 'database is locked' while the first holds the
+    write lock -- proves the PRAGMA changes actual behavior, not just its
+    own reported value. Two engines simulate two separate `wakil`
+    processes writing to the same wakil.db."""
+    import threading
+    import time
+
+    db_path = tmp_path / "concurrent.db"
+    engine_a = create_db_engine(db_path)
+    init_db(engine_a)
+    engine_b = create_db_engine(db_path)
+
+    events: dict[str, float] = {}
+
+    def hold_write_lock() -> None:
+        with engine_a.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(text("BEGIN IMMEDIATE"))
+            events["locked_at"] = time.monotonic()
+            time.sleep(0.5)
+            conn.execute(text("COMMIT"))
+            events["released_at"] = time.monotonic()
+
+    holder = threading.Thread(target=hold_write_lock)
+    holder.start()
+    while "locked_at" not in events:
+        time.sleep(0.01)
+
+    with engine_b.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text("BEGIN IMMEDIATE"))  # blocks here until engine_a commits
+        events["second_acquired_at"] = time.monotonic()
+        conn.execute(text("COMMIT"))
+    holder.join()
+
+    # The second writer waited for the first to release rather than
+    # erroring immediately with "database is locked".
+    assert events["second_acquired_at"] >= events["released_at"] - 0.05
+
+
 def test_init_db_is_idempotent_and_cheap_when_current(tmp_path: Path):
     engine = create_db_engine(tmp_path / "idem.db")
     init_db(engine)

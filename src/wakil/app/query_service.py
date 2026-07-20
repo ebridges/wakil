@@ -40,7 +40,7 @@ def run_query(
 
         run = QueryRun(
             workspace_id=session.scalar(
-                select(Workspace.id).where(Workspace.root_path == str(config.root_path))
+                select(Workspace.id).where(Workspace.root_path == str(config.state_root))
             ),
             query=question,
             status="started",

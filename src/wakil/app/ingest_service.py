@@ -295,7 +295,7 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
             ),
         )
         session.add(run)
-        index_notes(session, workspace_id, config.root_path)
+        index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
         session.commit()
         return CaptureResult(
             source_id=source.id, ingest_run_id=run.id, raw_file_path=proposal.raw_file.path
@@ -812,8 +812,7 @@ def _run_entity_updates(
             content = target.read_text(encoding="utf-8")
         except OSError as exc:
             proposal.warnings.append(
-                f"{resolution.name}: could not read {resolution.target_note_path}: {exc} — "
-                "skipped"
+                f"{resolution.name}: could not read {resolution.target_note_path}: {exc} — skipped"
             )
             continue
         candidates.append((resolution, target, content))
@@ -1050,7 +1049,7 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
             ),
         )
         session.add(run)
-        index_notes(session, workspace_id, config.root_path)
+        index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
         session.commit()
 
         return EnrichmentResult(
@@ -1379,7 +1378,7 @@ def _unused_path(root: Path, directory: Path, base: str) -> Path:
 
 def _require_workspace_ids(session, config: WorkspaceConfig) -> tuple[int, int]:
     workspace_id = session.scalar(
-        select(Workspace.id).where(Workspace.root_path == str(config.root_path))
+        select(Workspace.id).where(Workspace.root_path == str(config.state_root))
     )
     user_id = session.scalar(select(User.id))
     if workspace_id is None or user_id is None:

@@ -91,6 +91,33 @@ def test_resolve_default_branch_independent_of_current_checkout(git_kb):
     assert git.resolve_default_branch(root) == "main"
 
 
+def test_worktree_anchors_not_a_repo(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert git.worktree_anchors(plain) is None
+
+
+def test_worktree_anchors_main_worktree(git_kb):
+    root = git_kb.root_path
+    anchors = git.worktree_anchors(root)
+    assert anchors is not None
+    assert anchors.toplevel == root.resolve()
+    assert anchors.common_dir == (root / ".git").resolve()
+
+
+def test_worktree_anchors_shared_across_linked_worktree(git_kb, tmp_path):
+    root = git_kb.root_path
+    worktree = tmp_path / "linked"
+    _git(root, "worktree", "add", "-q", "-b", "scratch/linked", str(worktree), "main")
+
+    main_anchors = git.worktree_anchors(root)
+    linked_anchors = git.worktree_anchors(worktree)
+    assert linked_anchors.toplevel == worktree.resolve()
+    # The whole point: the common-dir is identical across worktrees, even
+    # though each has its own top-level directory.
+    assert linked_anchors.common_dir == main_anchors.common_dir
+
+
 def test_prepare_landing_branches_from_default_not_current_head(git_kb):
     """A wakil ingest kicked off while on an unrelated branch must not stack
     the new ingest branch on top of it -- it should branch from main."""

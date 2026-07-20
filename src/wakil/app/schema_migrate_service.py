@@ -84,7 +84,7 @@ def plan_schema_migration(config: WorkspaceConfig, entity_type: str | None = Non
     plan = MigrationPlan()
     with open_session(config) as session:
         workspace_id = session.scalar(
-            select(Workspace.id).where(Workspace.root_path == str(config.root_path))
+            select(Workspace.id).where(Workspace.root_path == str(config.state_root))
         )
         if workspace_id is None:
             raise MigrateError("Workspace database is not initialized; run `wakil init` first.")
@@ -225,9 +225,11 @@ def apply_migrations(
     if written:
         with open_session(config) as session:
             workspace_id = session.scalar(
-                select(Workspace.id).where(Workspace.root_path == str(config.root_path))
+                select(Workspace.id).where(Workspace.root_path == str(config.state_root))
             )
             if workspace_id is not None:
-                index_notes(session, workspace_id, config.root_path)
+                index_notes(
+                    session, workspace_id, config.root_path, prune=not config.is_linked_worktree
+                )
                 session.commit()
     return written, stale

@@ -363,7 +363,7 @@ def _record_change(
 ) -> None:
     with open_session(config) as session:
         workspace_id = session.scalar(
-            select(Workspace.id).where(Workspace.root_path == str(config.root_path))
+            select(Workspace.id).where(Workspace.root_path == str(config.state_root))
         )
         session.add(
             GitChange(

@@ -19,7 +19,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from wakil.storage.fts import ensure_fts
@@ -27,6 +27,36 @@ from wakil.storage.schema import Base
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 BASELINE_REVISION = "0001"
+
+# Multiple `wakil` processes (concurrent ingests, capture vs. enrich, several
+# worktrees of the same shared workspace) can legitimately want to write to
+# the same wakil.db around the same time. WAL lets readers proceed without
+# blocking on a writer; busy_timeout makes a writer that loses the race for
+# the single write lock retry for a while instead of failing immediately
+# with "database is locked". This is only ever waiting on another wakil
+# process's own quick commit (a handful of INSERT/UPDATE statements) --
+# sessions are never held open across slow work like an LLM call or a
+# network fetch, so a lock is realistically held for milliseconds, not the
+# duration of an ingest. 30s is a generous margin above that, not a bound
+# tied to LLM latency itself.
+_BUSY_TIMEOUT_MS = 30_000
+
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+    """PRAGMAs are per-connection, not persisted, so this must run on every
+    new DBAPI connection, not just once at init_db time. Only applies to
+    SQLite connections (this listener is process-wide across all engines,
+    including any future non-SQLite one)."""
+    if not hasattr(dbapi_connection, "execute"):
+        return
+    module = type(dbapi_connection).__module__
+    if not module.startswith("sqlite3"):
+        return
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+    cursor.close()
 
 
 def create_db_engine(db_path: Path) -> Engine:
