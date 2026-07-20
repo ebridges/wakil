@@ -179,9 +179,7 @@ def test_qmd_embed_command_reports_failure(kb_path: Path, monkeypatch):
     _init(kb_path, monkeypatch, skip_qmd_collection=True)
     monkeypatch.setattr(
         "wakil.integrations.qmd.subprocess.run",
-        lambda cmd, **kwargs: type(
-            "R", (), {"returncode": 1, "stdout": "", "stderr": "boom\n"}
-        )(),
+        lambda cmd, **kwargs: type("R", (), {"returncode": 1, "stdout": "", "stderr": "boom\n"})(),
     )
 
     result = runner.invoke(app, ["-w", str(kb_path), "qmd", "embed"])
@@ -205,7 +203,7 @@ def test_init_creates_collection_and_ingest_refreshes_index(kb_path: Path, monke
     transcript = kb_path / "meeting.txt"
     transcript.write_text("Q: hi\nA: hi\n")
     result = runner.invoke(
-        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes"]
+        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes", "--local"]
     )
     assert result.exit_code == 0, result.output
     assert "QMD index refreshed" in result.output
@@ -228,7 +226,7 @@ def test_ingest_skips_refresh_when_no_collection_registered(kb_path: Path, monke
     transcript = kb_path / "meeting.txt"
     transcript.write_text("Q: hi\nA: hi\n")
     result = runner.invoke(
-        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes"]
+        app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes", "--local"]
     )
     assert result.exit_code == 0, result.output
     assert ["qmd", "update"] not in calls

@@ -64,6 +64,7 @@ def test_migrate_with_commit(kb_path: Path):
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=kb_path, check=True)
     subprocess.run(["git", "-C", str(kb_path), "config", "user.email", "t@t"], check=True)
     subprocess.run(["git", "-C", str(kb_path), "config", "user.name", "T"], check=True)
+    subprocess.run(["git", "-C", str(kb_path), "config", "commit.gpgsign", "false"], check=True)
     _seed(kb_path)
     subprocess.run(["git", "-C", str(kb_path), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(kb_path), "commit", "-q", "-m", "seed"], check=True)

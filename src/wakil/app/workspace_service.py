@@ -13,6 +13,7 @@ from wakil.config.settings import (
     WAKIL_DIR,
     WorkspaceConfig,
     is_initialized,
+    resolve_state_root,
 )
 from wakil.integrations.git import GitInfo, inspect_git
 from wakil.integrations.qmd import QmdInfo, detect_qmd
@@ -66,6 +67,7 @@ def init_workspace(root: Path, name: str | None = None) -> tuple[WorkspaceStatus
         config = WorkspaceConfig(
             name=name or root.name,
             root_path=root,
+            state_root=resolve_state_root(root),
             git_remote=git_info.remote_url,
             qmd_enabled=qmd_info.available,
         )
@@ -77,7 +79,12 @@ def init_workspace(root: Path, name: str | None = None) -> tuple[WorkspaceStatus
 
     with open_session(config) as session:
         workspace = _ensure_workspace(session, config)
-        index_result = index_notes(session, workspace.id, root)
+        # A linked worktree only ever has a subset of the shared workspace's
+        # branches checked out at once -- notes committed on another
+        # worktree's branch are real, just not on disk *here* right now.
+        # Only the canonical checkout prunes notes that are genuinely gone;
+        # a linked worktree only adds/updates what it can see.
+        index_result = index_notes(session, workspace.id, root, prune=not config.is_linked_worktree)
         session.commit()
         status = _build_status(session, config, workspace.id, git_info, qmd_info)
     return status, index_result
@@ -101,13 +108,13 @@ def _ensure_workspace(session: Session, config: WorkspaceConfig) -> Workspace:
         session.flush()
 
     workspace = session.scalar(
-        select(Workspace).where(Workspace.root_path == str(config.root_path))
+        select(Workspace).where(Workspace.root_path == str(config.state_root))
     )
     if workspace is None:
         workspace = Workspace(
             user_id=user.id,
             name=config.name,
-            root_path=str(config.root_path),
+            root_path=str(config.state_root),
             git_remote=config.git_remote,
             qmd_enabled=config.qmd_enabled,
         )
@@ -120,8 +127,16 @@ def _ensure_workspace(session: Session, config: WorkspaceConfig) -> Workspace:
     return workspace
 
 
-def index_notes(session: Session, workspace_id: int, root: Path) -> IndexResult:
-    """Sync the notes table with the Markdown files currently on disk."""
+def index_notes(
+    session: Session, workspace_id: int, root: Path, *, prune: bool = True
+) -> IndexResult:
+    """Sync the notes table with the Markdown files currently on disk.
+
+    `prune=False` skips removing notes missing from `root` — for a linked
+    git worktree, "missing here" just means "on a different branch," not
+    gone; only the canonical checkout (see `init_workspace`) should be
+    treated as authoritative for deletions.
+    """
     result = IndexResult()
     existing = {
         note.path: note
@@ -154,10 +169,11 @@ def index_notes(session: Session, workspace_id: int, root: Path) -> IndexResult:
         else:
             result.unchanged += 1
 
-    for key, note in existing.items():
-        if key not in seen:
-            session.delete(note)
-            result.removed += 1
+    if prune:
+        for key, note in existing.items():
+            if key not in seen:
+                session.delete(note)
+                result.removed += 1
 
     return result
 

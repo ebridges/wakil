@@ -42,6 +42,9 @@ class Workspace(Base):
 
 class Source(Base):
     __tablename__ = "sources"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "content_hash", name="uq_sources_workspace_content_hash"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"))
@@ -55,6 +58,8 @@ class Source(Base):
     raw_text_path: Mapped[str | None] = mapped_column(Text, default=None)
     status: Mapped[str] = mapped_column(String(30), default="new")
     metadata_json: Mapped[str | None] = mapped_column(Text, default=None)
+    git_branch: Mapped[str | None] = mapped_column(Text, default=None)
+    git_pr_url: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 

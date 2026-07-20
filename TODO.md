@@ -36,8 +36,16 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 - [x] Dirty-tree checks before branching
 - [x] Optional gh-based PR creation (`--pr`)
 - [x] `wakil git summary` and `wakil git history <path>`
-- [ ] Return to the original branch after `--branch` ingest (currently stays
-      on the wakil branch, matching manual git workflows)
+- [x] Default-on branch/commit/PR landing (`--local` opts out), tracked per
+      **source** rather than per command: `prepare_landing`/`land_ingestion`
+      in `git_service.py` reuse (or fetch, or recreate) one branch and one
+      PR across a source's whole capture-then-enrich lifecycle, opening the
+      PR as a draft after capture and flipping it to ready-for-review with a
+      summary comment once enrichment lands, instead of two disconnected
+      PRs. Branches now always fork from the resolved default branch
+      (`git.resolve_default_branch`), not whatever happens to be checked
+      out. Returns to the original branch after landing (or abandoning) a
+      change.
 - [ ] `wakil note:`/`wakil link:` commit flows once note editing lands
 
 ## Phase 5: Memory Lifecycle
@@ -92,6 +100,37 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
       Claude-format `SKILL.md` files (`wakil skills list/which/validate`)
 - [x] Alembic migrations once the schema starts evolving (landed with the
       ingestion/entity refactor Phase B)
+- [x] Concurrent-ingest safety across git worktrees: `WorkspaceConfig` now
+      resolves a `state_root` (via `.git`'s common-dir, shared by a repo's
+      main worktree and every `git worktree add`-linked one) distinct from
+      `root_path` (this checkout's own directory for file I/O) — a
+      `Workspace` DB row, content-hash dedup, and the FTS/note index are
+      keyed on `state_root`, so N linked worktrees running `wakil
+      ingest`/`wakil enrich` concurrently share one workspace instead of
+      each silently getting its own empty one (confirmed empirically: 3-way
+      concurrent ingest across worktrees, one shared `Workspace` row, no
+      note loss). `index_notes` no longer prunes missing notes when run
+      from a linked worktree (a note absent from *this* worktree's checkout
+      may just be on another worktree's branch, not actually gone).
+      `database.py` now sets `PRAGMA journal_mode=WAL` +
+      `PRAGMA busy_timeout=30000` on every connection, so a writer that
+      loses the race for SQLite's single write lock waits instead of
+      immediately erroring — verified sessions never span slow work (LLM
+      calls, network fetches), so that lock is only ever held for a
+      handful of INSERT/UPDATE statements, not an ingest's full duration.
+- [x] `Source.content_hash` dedup race (flagged above, now closed):
+      `uq_sources_workspace_content_hash` (migration 0004, dedupes any
+      pre-existing collisions and repoints referencing memories/
+      relationships/ingest_runs onto the survivor before adding the
+      constraint) plus `apply_capture` catching the resulting
+      `IntegrityError` — cleans up the raw file it already wrote, reports
+      "already ingested" the same way an early duplicate-of hit is
+      reported, and the CLI returns to the original branch on that failure
+      (`_run_ingest`'s `prepare_landing`/`apply_capture` calls split into
+      separate try blocks so `abandon_landing` always has a defined
+      `landing` to fall back to). Verified empirically: concurrent
+      identical-content ingest across two worktrees now leaves exactly one
+      `Source` row and both worktrees clean on their own branches.
 - [ ] Docs: QMD integration, memory lifecycle, git workflow
 - [ ] Wikilink/tag extraction during indexing (feeds relationship discovery)
 - [ ] FUTURE: full agentic eval harness. The current live-model skill evals

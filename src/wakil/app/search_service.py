@@ -25,7 +25,7 @@ class SearchHit:
 
 
 def get_workspace_id(session: Session, config: WorkspaceConfig) -> int | None:
-    return session.scalar(select(Workspace.id).where(Workspace.root_path == str(config.root_path)))
+    return session.scalar(select(Workspace.id).where(Workspace.root_path == str(config.state_root)))
 
 
 def search_workspace(

@@ -31,6 +31,7 @@ from pathlib import Path
 import frontmatter as frontmatter_lib
 import yaml
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
@@ -283,7 +284,26 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
             ),
         )
         session.add(source)
-        session.flush()
+        try:
+            session.flush()
+        except IntegrityError:
+            # Lost a race: another process captured identical content (same
+            # workspace_id, content_hash) between prepare_capture's check
+            # and this insert -- the uq_sources_workspace_content_hash
+            # constraint is what actually closes that window; this is just
+            # surfacing it the same way an early duplicate-of hit is.
+            session.rollback()
+            target.unlink(missing_ok=True)
+            existing_id = session.scalar(
+                select(Source.id).where(
+                    Source.workspace_id == workspace_id,
+                    Source.content_hash == proposal.content_hash,
+                )
+            )
+            raise IngestError(
+                f"Source already ingested (source id {existing_id}); "
+                "lost a race with a concurrent identical capture"
+            ) from None
         run = IngestRun(
             workspace_id=workspace_id,
             source_id=source.id,
@@ -295,7 +315,7 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
             ),
         )
         session.add(run)
-        index_notes(session, workspace_id, config.root_path)
+        index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
         session.commit()
         return CaptureResult(
             source_id=source.id, ingest_run_id=run.id, raw_file_path=proposal.raw_file.path
@@ -812,8 +832,7 @@ def _run_entity_updates(
             content = target.read_text(encoding="utf-8")
         except OSError as exc:
             proposal.warnings.append(
-                f"{resolution.name}: could not read {resolution.target_note_path}: {exc} — "
-                "skipped"
+                f"{resolution.name}: could not read {resolution.target_note_path}: {exc} — skipped"
             )
             continue
         candidates.append((resolution, target, content))
@@ -1050,7 +1069,7 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
             ),
         )
         session.add(run)
-        index_notes(session, workspace_id, config.root_path)
+        index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
         session.commit()
 
         return EnrichmentResult(
@@ -1379,7 +1398,7 @@ def _unused_path(root: Path, directory: Path, base: str) -> Path:
 
 def _require_workspace_ids(session, config: WorkspaceConfig) -> tuple[int, int]:
     workspace_id = session.scalar(
-        select(Workspace.id).where(Workspace.root_path == str(config.root_path))
+        select(Workspace.id).where(Workspace.root_path == str(config.state_root))
     )
     user_id = session.scalar(select(User.id))
     if workspace_id is None or user_id is None:
