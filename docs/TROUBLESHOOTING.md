@@ -125,3 +125,13 @@ Note: as of 2026-07-20, PR #15 (which contains this fix along with the broader d
 
 Fixed by raising a distinct `ModelTruncatedError` when the provider reports `stop_reason == "max_tokens"` / `finish_reason == "length"`, and having `complete_with_contract`'s retry (`src/wakil/llm/schemas.py`) double the token budget and resend the same prompt on truncation, instead of treating it like invalid JSON (appending the error and resending unchanged, which just truncates again at the same length). If a future model-contract call raises this same low-level symptom, check whether the call batches many items into one response before assuming the prompt or schema is wrong.
 
+---
+
+### "doesn't match the expected H1 / 'Timeline / Log' shape" warning on real, otherwise-normal entity notes
+
+**Date:** 2026-07-20 · **Source:** `fix/entity-revision-truncation-errors` branch — `_TIMELINE_HEADING_RE` in `src/wakil/app/ingest_service.py`
+
+`wakil enrich` warned that `people/edward-bridges.md` didn't match the expected shape and left it unchanged. `_merge_entity_note`'s shape check required the exact heading `## Timeline / Log` (per `SCHEMA.md`), but the file just has `## Timeline`. A repo-wide check found this isn't a one-off: 36 entity notes across `people/` and `companies/` use the bare heading, predating when `/ Log` became the documented convention — every one of them would silently fail to update on every future `enrich` run, with only a generic shape-mismatch warning to go on.
+
+Fixed by loosening `_TIMELINE_HEADING_RE` to accept `## Timeline` with an optional ` / Log` suffix, rather than editing the 36 KB notes to match — per this project's "never silently rewrite user knowledge" rule, a code-level tolerance fix is preferable to a bulk content migration nobody asked for. If a new heading-shape warning appears again, check for this kind of convention drift across the KB (`grep -rlE '^## Timeline\s*$'`) before assuming it's a one-off malformed note.
+

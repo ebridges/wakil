@@ -631,6 +631,24 @@ def test_merge_entity_note_only_changes_specified_frontmatter_fields(workspace):
     assert "- job-search" in new_content  # untouched list field survives
 
 
+def test_merge_entity_note_accepts_bare_timeline_heading_without_log_suffix(workspace):
+    # Predates the "## Timeline / Log" convention (e.g. real people/edward-bridges.md) —
+    # must still be recognized, not silently skipped.
+    legacy_shaped = REAL_SHAPED_PERSON.replace("## Timeline / Log", "## Timeline")
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### 2026-07-16 — note\n- detail",
+    )
+    new_content = _merge_entity_note(legacy_shaped, revision, "2026-07-16")
+
+    assert new_content is not None
+    assert "Updated truth." in new_content
+    assert "### 2026-07-16 — note" in new_content
+    assert "### 2026-06-01 — recruiter screen" in new_content
+
+
 def test_merge_entity_note_returns_none_for_unexpected_shape(workspace):
     # No "## Timeline / Log" heading at all — the real people/jane-doe.md
     # fixture shape. The caller must not guess a different structure.

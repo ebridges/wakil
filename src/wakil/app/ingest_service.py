@@ -748,7 +748,11 @@ def _reconcile_entity_links(config: WorkspaceConfig, proposal: EnrichmentProposa
 # them (correct links, no content change).
 
 _H1_RE = re.compile(r"(?m)^#\s+.*$")
-_TIMELINE_HEADING_RE = re.compile(r"(?m)^##\s+Timeline\s*/\s*Log\s*$")
+# SCHEMA.md's canonical heading is "## Timeline / Log", but a notable minority
+# of real entity notes predate that convention and just say "## Timeline" —
+# accept both rather than silently skipping updates to otherwise-well-formed
+# notes (docs/TROUBLESHOOTING.md).
+_TIMELINE_HEADING_RE = re.compile(r"(?m)^##\s+Timeline(?:\s*/\s*Log)?\s*$")
 
 
 def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
