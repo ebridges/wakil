@@ -298,8 +298,7 @@ across the precedence chain, get the built-in default on a clean miss":
 Not yet started. This ADR is the proposal; the repo owner is expected to
 review the mechanism choice (Option B recommended) and the migration list
 above before any implementation PR is opened. This document itself was
-authored and submitted as PR #<opened in this change> (docs-only, no code
-changes).
+authored and submitted as PR #19 (docs-only, no code changes).
 
 ## Sources
 
