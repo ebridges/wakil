@@ -99,7 +99,7 @@ Retire `SCHEMA.md` as a code dependency; keep `RESOLVER.md` exactly as-is.
 
 ## Implementation
 
-- **PR #21** — "Retire code dependency on workspace SCHEMA.md; derive frontmatter template from the entity-schema catalog"
+- **PR #22** — "Retire code dependency on workspace SCHEMA.md; derive frontmatter template from the entity-schema catalog"
 
 ## Sources
 
