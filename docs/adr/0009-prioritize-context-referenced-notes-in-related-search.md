@@ -80,7 +80,7 @@ guarantee rather than a hint.
 
 ## Implementation
 
-- **PR #19** — "Prioritize @-referenced notes in related-notes search, fix query bloat"
+- **PR #23** — "Prioritize @-referenced notes in related-notes search, fix query bloat"
 
 ## Sources
 
