@@ -32,6 +32,7 @@ import frontmatter as frontmatter_lib
 import yaml
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
+from stop_words import get_stop_words
 
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
@@ -434,35 +435,64 @@ def prepare_enrichment(
 
 # A run of 1-4 capitalized words: "Mosaic", "Ian Gutwinski", "Riviera Partners".
 _PROPER_NOUN_RE = re.compile(r"\b[A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3}\b")
-# Single capitalized words that are only candidates because they happened to
-# start a sentence — common enough in free-text context strings that they'd
-# otherwise pollute every lookup with irrelevant title matches.
-_PROPER_NOUN_STOPWORDS = {
-    "I",
-    "The",
-    "A",
-    "An",
-    "Meeting",
-    "Call",
-    "Phone",
-    "Yeah",
-    "Well",
-    "So",
-    "But",
-    "And",
-    "This",
-    "That",
-    "We",
-    "She",
-    "He",
-    "They",
-}
+
+# Function words and backchannel/discourse markers ("the", "well", "so",
+# "right", "okay", "sure", "mm-hmm") that regularly get capitalized only
+# because they open a sentence or a spoken aside — a standard stopword list
+# catches these far more completely than a hand-grown set ever could.
+_DISCOURSE_STOPWORDS = frozenset(get_stop_words("en"))
+
+# The ~5000 most frequent English words (data/common_words.txt, ranked by
+# frequency in conversational/subtitle text), used below to drop single-
+# token candidates that are ordinary nouns/adjectives swept up during
+# tangential small talk ("Indian", "Steak") rather than genuine proper
+# nouns. Only ever applied to single-token candidates: a 2-4 word run like
+# "Ian Gutwinski" or "Riviera Partners" is a much stronger name signal, and
+# short legitimate company/person names ("Mosaic") must still survive.
+_COMMON_SINGLE_WORDS = frozenset(
+    (Path(__file__).parent / "data" / "common_words.txt").read_text().split()
+)
+
+# Exact phrases that regex-match as capitalized word runs but are structural
+# artifacts, not names — the context-expansion delimiter (see
+# wakil.app.context_references) is the only known case.
+_PHRASE_STOPWORDS = {"attached context"}
+
+
+def _is_noise_candidate(phrase: str) -> bool:
+    lowered = phrase.lower()
+    if lowered in _PHRASE_STOPWORDS:
+        return True
+    if " " in phrase:
+        return False
+    return lowered in _DISCOURSE_STOPWORDS or lowered in _COMMON_SINGLE_WORDS
 
 
 # Generic words in a humanized filename/title ("offer", "sync", "call") that
 # would otherwise substring-match unrelated entity notes once casing is no
-# longer a filter (see _title_terms).
-_TITLE_TERM_STOPWORDS = {w.lower() for w in _PROPER_NOUN_STOPWORDS} | {
+# longer a filter (see _title_terms). A separate, smaller mechanism from
+# _is_noise_candidate above: filename-derived terms carry no capitalization
+# signal, so the frequency-based common-word filter (tuned for prose, where
+# "kyle" or "carnes" are common enough to be noise) is too aggressive here.
+_TITLE_TERM_STOPWORDS = {
+    "i",
+    "the",
+    "a",
+    "an",
+    "meeting",
+    "call",
+    "phone",
+    "yeah",
+    "well",
+    "so",
+    "but",
+    "and",
+    "this",
+    "that",
+    "we",
+    "she",
+    "he",
+    "they",
     "sync",
     "offer",
     "prep",
@@ -514,7 +544,7 @@ def _candidate_entity_notes(
     candidates = {
         phrase
         for phrase in _PROPER_NOUN_RE.findall(text)
-        if len(phrase) > 2 and phrase not in _PROPER_NOUN_STOPWORDS
+        if len(phrase) > 2 and not _is_noise_candidate(phrase)
     }
     candidates |= extra_terms
     if not candidates:
