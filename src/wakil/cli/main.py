@@ -285,6 +285,25 @@ def _refresh_qmd_index(config: WorkspaceConfig) -> None:
     console.print("[dim]QMD index refreshed.[/dim]")
 
 
+def _resolve_context_or_exit(
+    context: list[str] | None, context_file: list[Path] | None, workspace_root: Path
+) -> str | None:
+    from wakil.app.context_references import ContextResolutionError, resolve_context
+
+    try:
+        resolved, warnings = resolve_context(
+            context=context or [],
+            context_files=context_file or [],
+            workspace_root=workspace_root,
+        )
+    except ContextResolutionError as exc:
+        console.print(f"[red]Context resolution failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    for warning in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
+    return resolved
+
+
 def _run_ingest(
     ctx: typer.Context,
     kind: str,
@@ -292,7 +311,8 @@ def _run_ingest(
     file: Path | None = None,
     url: str | None = None,
     local: bool = False,
-    context: str | None = None,
+    context: list[str] | None = None,
+    context_file: list[Path] | None = None,
 ) -> None:
     """Step 1: capture the raw source. Deterministic — no model involved.
 
@@ -304,6 +324,7 @@ def _run_ingest(
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
+    context = _resolve_context_or_exit(context, context_file, config.root_path)
     try:
         with console.status("Preparing capture..."):
             proposal = prepare_capture(config, kind, file=file, url=url, context=context)
@@ -353,19 +374,32 @@ def _run_ingest(
     _refresh_qmd_index(config)
 
 
+_CONTEXT = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--context",
+        "-C",
+        help="Context for the model (attendees, company, purpose); repeatable. "
+        "Supports @file:PATH (optionally #Heading or :start-end) and @url:URL "
+        "references, expanded inline before use.",
+    ),
+]
+_CONTEXT_FILE = Annotated[
+    list[Path] | None,
+    typer.Option(
+        "--context-file",
+        help="Read a file's full text as context; repeatable. The same "
+        "@file:/@url: expansion applies inside the file's content.",
+    ),
+]
+
+
 @app.command()
 def enrich(
     ctx: typer.Context,
     source_id: Annotated[int, typer.Argument(help="Source id from the capture step.")],
-    context: Annotated[
-        str | None,
-        typer.Option(
-            "--context",
-            "-C",
-            help="Extra context (attendees, company, purpose); defaults to the "
-            "context given at capture time.",
-        ),
-    ] = None,
+    context: _CONTEXT = None,
+    context_file: _CONTEXT_FILE = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
     force: Annotated[
         bool,
@@ -395,6 +429,7 @@ def enrich(
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
+    context = _resolve_context_or_exit(context, context_file, config.root_path)
     client = resolve_client()
     if client is None:
         console.print(
@@ -468,15 +503,6 @@ _LOCAL = Annotated[
         "--local", "-l", help="Write files without branching, committing, or opening a PR."
     ),
 ]
-_CONTEXT = Annotated[
-    str | None,
-    typer.Option(
-        "--context",
-        "-C",
-        help="A few lines of context about the source (attendees, company, purpose) "
-        "to guide analysis and entity linking.",
-    ),
-]
 
 
 @ingest_app.command("transcript")
@@ -484,6 +510,7 @@ def ingest_transcript(
     ctx: typer.Context,
     file: Annotated[Path, typer.Argument(help="Transcript file (.txt, .md, .srt, or .whisper).")],
     context: _CONTEXT = None,
+    context_file: _CONTEXT_FILE = None,
     yes: _YES = False,
     local: _LOCAL = False,
 ) -> None:
@@ -495,6 +522,7 @@ def ingest_transcript(
         file=file,
         local=local,
         context=context,
+        context_file=context_file,
     )
 
 
@@ -503,6 +531,7 @@ def ingest_text(
     ctx: typer.Context,
     file: Annotated[Path, typer.Argument(help="Text or Markdown file to ingest.")],
     context: _CONTEXT = None,
+    context_file: _CONTEXT_FILE = None,
     yes: _YES = False,
     local: _LOCAL = False,
 ) -> None:
@@ -514,6 +543,7 @@ def ingest_text(
         file=file,
         local=local,
         context=context,
+        context_file=context_file,
     )
 
 
@@ -522,6 +552,7 @@ def ingest_article(
     ctx: typer.Context,
     url: Annotated[str, typer.Argument(help="Web article URL.")],
     context: _CONTEXT = None,
+    context_file: _CONTEXT_FILE = None,
     yes: _YES = False,
     local: _LOCAL = False,
 ) -> None:
@@ -533,6 +564,7 @@ def ingest_article(
         url=url,
         local=local,
         context=context,
+        context_file=context_file,
     )
 
 

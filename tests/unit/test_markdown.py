@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from wakil.knowledge.markdown import discover_markdown_files, read_markdown_file
+from wakil.knowledge.markdown import (
+    discover_markdown_files,
+    read_markdown_file,
+    slice_heading_section,
+)
 
 
 def test_discovers_all_markdown_files(kb_path: Path):
@@ -55,3 +59,41 @@ def test_malformed_frontmatter_does_not_break_indexing(kb_path: Path):
     bad.write_text("---\n: not [valid yaml\n---\n\n# Bad Frontmatter\n")
     md = read_markdown_file(kb_path, Path("drafts/bad.md"))
     assert md.title == "Bad Frontmatter"
+
+
+def test_slice_heading_section_returns_none_when_no_match():
+    text = "# Title\n\nIntro.\n\n## Timeline\n\nSome events.\n"
+    assert slice_heading_section(text, "Notes") is None
+
+
+def test_slice_heading_section_h2_includes_nested_h3_but_stops_at_next_h2():
+    text = (
+        "# Title\n"
+        "\n"
+        "## Timeline\n"
+        "\n"
+        "First event.\n"
+        "\n"
+        "### Subsection\n"
+        "\n"
+        "Nested detail.\n"
+        "\n"
+        "## Notes\n"
+        "\n"
+        "Should not appear.\n"
+    )
+    result = slice_heading_section(text, "Timeline")
+    assert result == "First event.\n\n### Subsection\n\nNested detail."
+    assert "Notes" not in result
+    assert "Should not appear" not in result
+
+
+def test_slice_heading_section_matching_is_case_insensitive_and_trims():
+    text = "# Title\n\n##   Timeline  \n\nBody.\n"
+    assert slice_heading_section(text, "timeline") == "Body."
+    assert slice_heading_section(text, "  TIMELINE  ") == "Body."
+
+
+def test_slice_heading_section_last_heading_runs_to_end_of_text():
+    text = "# Title\n\n## Timeline\n\nEarlier.\n\n## Notes\n\nFinal section.\nMore text.\n"
+    assert slice_heading_section(text, "Notes") == "Final section.\nMore text."

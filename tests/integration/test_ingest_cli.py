@@ -174,3 +174,130 @@ def test_capture_missing_file_fails(kb_path: Path):
     )
     assert result.exit_code == 1
     assert "Ingest failed" in result.output
+
+
+def test_capture_context_file_shows_in_preview(kb_path: Path):
+    transcript = _init(kb_path)
+    context_file = kb_path / "context.txt"
+    context_file.write_text("Extra context from a file.\n")
+
+    result = _capture(kb_path, transcript, "--context-file", str(context_file))
+    assert result.exit_code == 0, result.output
+    assert "Extra context from a file." in result.output
+
+
+def test_capture_repeated_context_joined_in_order(kb_path: Path):
+    transcript = _init(kb_path)
+    result = _capture(kb_path, transcript, "--context", "FirstBit", "--context", "SecondBit")
+    assert result.exit_code == 0, result.output
+    flat = result.output.replace("\n", " ")
+    assert "FirstBit" in flat
+    assert "SecondBit" in flat
+    assert flat.index("FirstBit") < flat.index("SecondBit")
+
+
+def test_capture_context_file_reference_expands(kb_path: Path):
+    transcript = _init(kb_path)
+    referenced = kb_path / "attendees.txt"
+    referenced.write_text("Jane Doe, Bob (Acme).\n")
+
+    result = _capture(kb_path, transcript, "--context", "See @file:attendees.txt for detail.")
+    assert result.exit_code == 0, result.output
+    assert "Jane Doe, Bob (Acme)." in result.output
+    # The inline @file: token is stripped from its original position and the
+    # referenced content is appended in an "Attached Context" block instead --
+    # the raw "@file:attendees.txt" text does resurface there as that block's
+    # label, it just no longer sits inline in the sentence that referenced it.
+    assert "See @file:attendees.txt for detail." not in result.output.replace("\n", " ")
+
+
+def test_capture_context_reference_outside_workspace_fails(tmp_path: Path, kb_path: Path):
+    transcript = _init(kb_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside content\n")
+
+    result = _capture(kb_path, transcript, "--context", f"See @file:{outside} for detail.")
+    assert result.exit_code == 1
+    assert "outside the workspace" in result.output
+    assert [p.name for p in (kb_path / "sources" / "transcripts").iterdir()] == ["notitle.md"]
+
+
+def test_capture_context_reference_missing_file_fails(kb_path: Path):
+    transcript = _init(kb_path)
+    result = _capture(kb_path, transcript, "--context", "See @file:nope.txt for detail.")
+    assert result.exit_code == 1
+    assert "File not found" in result.output
+    assert [p.name for p in (kb_path / "sources" / "transcripts").iterdir()] == ["notitle.md"]
+
+
+def test_capture_context_file_path_missing_fails(kb_path: Path):
+    transcript = _init(kb_path)
+    result = _capture(kb_path, transcript, "--context-file", str(kb_path / "nope-ctx.txt"))
+    assert result.exit_code == 1
+    assert "Could not read context file" in result.output
+    assert [p.name for p in (kb_path / "sources" / "transcripts").iterdir()] == ["notitle.md"]
+
+
+def test_capture_context_hard_budget_aborts(kb_path: Path, monkeypatch):
+    monkeypatch.setattr("wakil.app.context_references.MODEL_CONTEXT_WINDOW_TOKENS", 100)
+    transcript = _init(kb_path)
+
+    result = _capture(kb_path, transcript, "--context", "x" * 1000)
+    assert result.exit_code == 1
+    assert "hard budget" in result.output
+    assert [p.name for p in (kb_path / "sources" / "transcripts").iterdir()] == ["notitle.md"]
+
+
+def test_capture_context_soft_budget_warns_and_succeeds(kb_path: Path, monkeypatch):
+    monkeypatch.setattr("wakil.app.context_references.MODEL_CONTEXT_WINDOW_TOKENS", 100)
+    transcript = _init(kb_path)
+
+    result = _capture(kb_path, transcript, "--context", "x" * 120)
+    assert result.exit_code == 0, result.output
+    assert "soft budget" in result.output
+    assert list((kb_path / "sources" / "transcripts").glob("2*.md"))
+
+
+def test_enrich_context_shows_in_preview(kb_path: Path, monkeypatch):
+    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(
+        app,
+        [
+            "-w",
+            str(kb_path),
+            "enrich",
+            "1",
+            "--yes",
+            "--local",
+            "--context",
+            "Attendees: Jane Doe, Bob (Acme).",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Context: Attendees" in result.output.replace("\n", " ")
+
+
+def test_enrich_bad_context_aborts_before_branch_switch(kb_path: Path, monkeypatch):
+    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(
+        app,
+        [
+            "-w",
+            str(kb_path),
+            "enrich",
+            "1",
+            "--yes",
+            "--context",
+            "See @file:nope.txt for detail.",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Context resolution failed" in result.output
+    assert "On branch" not in result.output
+    assert "Enrichment preview" not in result.output

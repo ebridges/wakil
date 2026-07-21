@@ -11,6 +11,7 @@ import frontmatter
 SKIPPED_DIRS = {".git", ".wakil", ".obsidian", "node_modules", ".venv"}
 
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+_HEADING_LINE_RE = re.compile(r"^(#{1,3})\s+(.+?)\s*$", re.MULTILINE)
 
 
 @dataclass
@@ -57,6 +58,30 @@ def read_markdown_file(root: Path, relative_path: Path) -> MarkdownFile:
     return MarkdownFile(
         path=relative_path, title=title, content_hash=content_hash, metadata=metadata
     )
+
+
+def slice_heading_section(text: str, heading: str) -> str | None:
+    """Return the body under the first H1-H3 heading matching `heading`.
+
+    Matching is case-insensitive and trimmed. The section runs until the
+    next heading whose level is <= the matched heading's level, or end of
+    text. Returns None if no H1-H3 heading matches.
+    """
+    target = heading.strip().casefold()
+    headings = list(_HEADING_LINE_RE.finditer(text))
+    for index, match in enumerate(headings):
+        level = len(match.group(1))
+        title = match.group(2).strip()
+        if title.casefold() != target:
+            continue
+        start = match.end()
+        end = len(text)
+        for later in headings[index + 1 :]:
+            if len(later.group(1)) <= level:
+                end = later.start()
+                break
+        return text[start:end].strip("\n")
+    return None
 
 
 def _extract_title(metadata: dict, body: str, relative_path: Path) -> str:
