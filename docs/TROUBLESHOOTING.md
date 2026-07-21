@@ -164,3 +164,13 @@ After the two fixes above got `wakil enrich` writing again, the diff preview for
 
 Fixed by falling back to the existing top section (stripping its own trailing `---` divider) whenever `compiled_truth` is empty, instead of dropping it. If a future entity-update diff shows content vanishing rather than being added to, check whether the responsible field was actually empty in the model's response before assuming the prompt is at fault.
 
+---
+
+### CI-only test failures after a command starts requiring a model provider (a local API key masks the gap)
+
+**Date:** 2026-07-21 · **Source:** PR #24, `feat/capture-time-title-abstract` — `test_qmd_cli.py`
+
+`docs/adr/0010` made `wakil ingest` require a resolved `ModelClient` (capture now generates title/abstract). Two pre-existing tests in `tests/integration/test_qmd_cli.py` invoke `wakil ingest transcript` without mocking `wakil.llm.client.resolve_client`. They passed in the PR author's own environment — and were self-reported as "pytest clean" — because a real `ANTHROPIC_API_KEY` happened to be set there, so `resolve_client()` silently succeeded against the live API. CI has no such key, so both failed there with "Ingest needs a model provider," exit code 1.
+
+If a command starts requiring a model provider for the first time, grep the whole test suite for CLI invocations of that command (`runner.invoke(app, [..., "ingest"/"enrich", ...])`) — not just the test file for the change being made — since any of them can be silently relying on a real key rather than a mock. Don't trust a "pytest clean" self-report (agent or human) that wasn't run with API-key env vars explicitly unset; `env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY uv run pytest -q` is the way to actually reproduce CI's clean-environment behavior locally.
+
