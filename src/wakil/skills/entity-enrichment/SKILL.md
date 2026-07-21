@@ -134,6 +134,13 @@ to this one — an unlinked substantive mention is a broken connection — but
 apply the same judgment in both directions: link what matters, skip what's
 incidental.
 
+That "is it substantive enough" judgment call is for matches
+`entity-resolution` surfaced by search. A related note the user pointed at
+explicitly — reached through an `@file:` reference in the source's context,
+not just found by `search_workspace` — carries a different signal: the user
+picked that note deliberately, so treat it as high-confidence and back-link
+it rather than weighing the mention against the substantive bar above.
+
 ## Preserve ambiguity
 
 Don't resolve an ambiguous or no-match case by picking the closest-looking
