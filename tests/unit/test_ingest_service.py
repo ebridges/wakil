@@ -611,9 +611,76 @@ def test_merge_entity_note_replaces_top_section_preserves_h1_and_prepends_timeli
     assert "### 2026-06-01 — recruiter screen" in new_content
     assert "- Introductory call, discussed the VP Eng role." in new_content
     assert "- **2026-06-01** | Referenced in [some-meeting]" in new_content
-    # updated: bumped since the field already existed; created: left alone.
+    # updated: bumped to today; created: left alone.
     assert "updated: '2026-07-16'" in new_content or "updated: 2026-07-16" in new_content
     assert "created: 2026-06-01" in new_content
+
+
+def test_merge_entity_note_stamps_updated_even_when_missing_from_original(workspace):
+    # people/edward-bridges.md's real shape: no "updated" key at all, only
+    # "created". Required by schema on every merge target's entity type
+    # (person/company/concept/project all require it), so it must be added,
+    # not left permanently missing just because it wasn't there before.
+    no_updated_field = REAL_SHAPED_PERSON.replace("updated: 2026-06-01\n", "")
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### 2026-07-16 — note\n- detail",
+    )
+    new_content = _merge_entity_note(no_updated_field, revision, "2026-07-16")
+
+    assert new_content is not None
+    assert "updated: '2026-07-16'" in new_content or "updated: 2026-07-16" in new_content
+
+
+REAL_SHAPED_PERSON_WITH_COMPILED_TRUTH_HEADING = (
+    "---\n"
+    "type: company\n"
+    "name: Acme\n"
+    "created: 2026-06-01\n"
+    "updated: 2026-06-01\n"
+    "---\n\n"
+    "# acme\n\n"
+    "## Compiled Truth\n\n"
+    "AI-native widgets. Long-established prior analysis that must survive "
+    "any update where the model doesn't resend it.\n\n"
+    "Cross-references: [[people/priya-shah|Priya Shah]]\n\n"
+    "---\n\n"
+    "## Timeline / Log\n\n"
+    "### 2026-06-01 — recruiter screen\n"
+    "- Introductory call.\n\n"
+    "- **2026-06-01** | Referenced in [some-meeting](meetings/2026/2026-06-01-screen.md)\n"
+)
+
+
+def test_merge_entity_note_preserves_top_section_when_compiled_truth_omitted(workspace):
+    # has_update=True can legitimately mean "only the Timeline changed" — an
+    # empty/absent compiled_truth must never be treated as "delete the
+    # Compiled Truth section." Regression for the clobbering bug hit against
+    # the real companies/mosaic-private-markets.md, which has an explicit
+    # "## Compiled Truth" heading (unlike REAL_SHAPED_PERSON's headingless
+    # top section).
+    revision = EntityRevision(
+        target_note_path="companies/acme.md",
+        has_update=True,
+        compiled_truth=None,
+        timeline_entry="### 2026-07-16 — new development\n- Something happened.",
+    )
+    new_content = _merge_entity_note(
+        REAL_SHAPED_PERSON_WITH_COMPILED_TRUTH_HEADING, revision, "2026-07-16"
+    )
+
+    assert new_content is not None
+    assert "## Compiled Truth" in new_content
+    assert "Long-established prior analysis that must survive" in new_content
+    assert "Cross-references: [[people/priya-shah|Priya Shah]]" in new_content
+    # New timeline entry lands, old ones survive.
+    assert "### 2026-07-16 — new development" in new_content
+    assert "### 2026-06-01 — recruiter screen" in new_content
+    # No duplicated "---" divider from stitching old_top back in.
+    assert "---\n\n---" not in new_content
+    assert "updated: '2026-07-16'" in new_content or "updated: 2026-07-16" in new_content
 
 
 def test_merge_entity_note_only_changes_specified_frontmatter_fields(workspace):
@@ -629,6 +696,24 @@ def test_merge_entity_note_only_changes_specified_frontmatter_fields(workspace):
     assert "status: former" in new_content
     assert "name: Priya Shah" in new_content  # untouched field survives
     assert "- job-search" in new_content  # untouched list field survives
+
+
+def test_merge_entity_note_accepts_bare_timeline_heading_without_log_suffix(workspace):
+    # Predates the "## Timeline / Log" convention (e.g. real people/edward-bridges.md) —
+    # must still be recognized, not silently skipped.
+    legacy_shaped = REAL_SHAPED_PERSON.replace("## Timeline / Log", "## Timeline")
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### 2026-07-16 — note\n- detail",
+    )
+    new_content = _merge_entity_note(legacy_shaped, revision, "2026-07-16")
+
+    assert new_content is not None
+    assert "Updated truth." in new_content
+    assert "### 2026-07-16 — note" in new_content
+    assert "### 2026-06-01 — recruiter screen" in new_content
 
 
 def test_merge_entity_note_returns_none_for_unexpected_shape(workspace):

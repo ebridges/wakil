@@ -115,3 +115,43 @@ Fixed in `a14af48`:
 
 Note: as of 2026-07-20, PR #15 (which contains this fix along with the broader default-on git-landing work) has not been merged into `main`.
 
+---
+
+### `EOF while parsing a string` from a Pydantic validation error may mean the model response was truncated, not malformed
+
+**Date:** 2026-07-20 · **Source:** `fix/entity-revision-truncation-errors` branch — `ModelTruncatedError` in `src/wakil/llm/client.py`, retry handling in `complete_with_contract` (`src/wakil/llm/schemas.py`)
+
+`wakil enrich` failed with `ModelContractError: EntityRevisionOutput: model output failed validation twice: 1 validation error for EntityRevisionOutput\n  Invalid JSON: EOF while parsing a string ...`. This reads like the model produced garbage JSON, but the actual cause was `_run_entity_updates` (`src/wakil/app/ingest_service.py`) batching every `action=update` entity — 7 of them, several with long histories — into one call that asks the model to re-synthesize each note's full compiled-truth body, which exceeded the fixed `max_tokens=8192` and cut the response off mid-string. Neither `AnthropicClient` nor `OpenAICompatibleClient` (`src/wakil/llm/client.py`) checked `stop_reason`/`finish_reason` for this case, so a truncated response was indistinguishable from a genuinely malformed one until someone counted characters against the token budget.
+
+Fixed by raising a distinct `ModelTruncatedError` when the provider reports `stop_reason == "max_tokens"` / `finish_reason == "length"`, and having `complete_with_contract`'s retry (`src/wakil/llm/schemas.py`) double the token budget and resend the same prompt on truncation, instead of treating it like invalid JSON (appending the error and resending unchanged, which just truncates again at the same length). If a future model-contract call raises this same low-level symptom, check whether the call batches many items into one response before assuming the prompt or schema is wrong.
+
+---
+
+### "doesn't match the expected H1 / 'Timeline / Log' shape" warning on real, otherwise-normal entity notes
+
+**Date:** 2026-07-20 · **Source:** `fix/entity-revision-truncation-errors` branch — `_TIMELINE_HEADING_RE` in `src/wakil/app/ingest_service.py`
+
+`wakil enrich` warned that `people/edward-bridges.md` didn't match the expected shape and left it unchanged. `_merge_entity_note`'s shape check required the exact heading `## Timeline / Log` (per `SCHEMA.md`), but the file just has `## Timeline`. A repo-wide check found this isn't a one-off: 36 entity notes across `people/` and `companies/` use the bare heading, predating when `/ Log` became the documented convention — every one of them would silently fail to update on every future `enrich` run, with only a generic shape-mismatch warning to go on.
+
+Fixed by loosening `_TIMELINE_HEADING_RE` to accept `## Timeline` with an optional ` / Log` suffix, rather than editing the 36 KB notes to match — per this project's "never silently rewrite user knowledge" rule, a code-level tolerance fix is preferable to a bulk content migration nobody asked for. If a new heading-shape warning appears again, check for this kind of convention drift across the KB (`grep -rlE '^## Timeline\s*$'`) before assuming it's a one-off malformed note.
+
+---
+
+### "updated: required field is missing" after an otherwise-successful entity-note merge
+
+**Date:** 2026-07-20 · **Source:** `fix/entity-revision-truncation-errors` branch — `_merge_entity_note` in `src/wakil/app/ingest_service.py`
+
+After fixing the heading-shape warning above, re-running `wakil enrich` against `people/edward-bridges.md` got further but then failed proposal validation: `updated: required field is missing`, and nothing was written. `person`/`company`/`concept`/`project` all declare `updated` as a required frontmatter field, but `_merge_entity_note` only bumped it when the key was already present (`if "updated" in metadata: metadata["updated"] = today`) — it never added the key. `edward-bridges.md`'s frontmatter has `created` but no `updated` at all, so the merge left the required field permanently missing, no matter how many times you re-ran enrich. A repo-wide check found 48 more notes in the same state (11 people, 35 companies, 2 concepts).
+
+Fixed by stamping `metadata["updated"] = today` unconditionally on every merge — the function only runs when `has_update=True`, so "we just updated this note" is never a special case. If a future proposal-validation error names a required field that a merge *should* be setting, check whether the merge logic conditions on the field already existing rather than always writing it.
+
+---
+
+### `enrich` replaced an entire "## Compiled Truth" section with nothing (the clobbering bug, in wakil's own merge code)
+
+**Date:** 2026-07-20 · **Source:** `fix/entity-revision-truncation-errors` branch — `_merge_entity_note` in `src/wakil/app/ingest_service.py`
+
+After the two fixes above got `wakil enrich` writing again, the diff preview for `companies/mosaic-private-markets.md` showed its entire `## Compiled Truth` section — a long, carefully synthesized paragraph-and-bullet block — replaced by nothing, so the file went straight from the H1 to `## Timeline / Log`. Cause: the model returned `has_update=True` (a new Timeline entry was warranted) with an empty/absent `compiled_truth` (nothing about the State needed re-synthesis) — a legitimate combination — but `_merge_entity_note` read "no compiled_truth" as "the top section is now empty" rather than "no change to the top section," and wrote exactly that. This is the precise "clobbering bug" `note-revision/SKILL.md` warns about (full-file-style regeneration silently dropping prior content), except living in wakil's own merge code rather than in model behavior — a diff-preview review would have caught it (per that skill's "diff your draft, stop if it's shorter" step), but it's better to not produce the bad diff in the first place.
+
+Fixed by falling back to the existing top section (stripping its own trailing `---` divider) whenever `compiled_truth` is empty, instead of dropping it. If a future entity-update diff shows content vanishing rather than being added to, check whether the responsible field was actually empty in the model's response before assuming the prompt is at fault.
+

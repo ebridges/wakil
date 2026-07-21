@@ -748,7 +748,11 @@ def _reconcile_entity_links(config: WorkspaceConfig, proposal: EnrichmentProposa
 # them (correct links, no content change).
 
 _H1_RE = re.compile(r"(?m)^#\s+.*$")
-_TIMELINE_HEADING_RE = re.compile(r"(?m)^##\s+Timeline\s*/\s*Log\s*$")
+# SCHEMA.md's canonical heading is "## Timeline / Log", but a notable minority
+# of real entity notes predate that convention and just say "## Timeline" —
+# accept both rather than silently skipping updates to otherwise-well-formed
+# notes (docs/TROUBLESHOOTING.md).
+_TIMELINE_HEADING_RE = re.compile(r"(?m)^##\s+Timeline(?:\s*/\s*Log)?\s*$")
 
 
 def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
@@ -763,6 +767,9 @@ def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
     if not entry:
         return timeline_section
     return f"{heading_line}\n\n{entry}\n\n{rest}" if rest else f"{heading_line}\n\n{entry}\n"
+
+
+_TRAILING_HR_RE = re.compile(r"\n*-{3,}\s*$")
 
 
 def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -> str | None:
@@ -787,15 +794,23 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
         return None
 
     h1_line = body[h1_match.start() : h1_match.end()]
+    # Same convention the code below re-applies when writing a new top
+    # section: the "---" divider right before Timeline is not itself part
+    # of the top-section content.
+    old_top = _TRAILING_HR_RE.sub("", body[h1_match.end() : timeline_match.start()]).strip("\n")
     timeline_section = body[timeline_match.start() :]
 
     metadata = dict(post.metadata)
     if revision.frontmatter_updates:
         metadata.update(revision.frontmatter_updates)
-    if "updated" in metadata:
-        metadata["updated"] = today
+    metadata["updated"] = today
 
-    compiled_truth = (revision.compiled_truth or "").strip()
+    # An empty/absent compiled_truth means "no change to the top section",
+    # never "delete the top section" — has_update=True can legitimately mean
+    # only the Timeline changed. Wiping existing State prose whenever the
+    # model didn't re-send it is the exact clobbering bug this merge exists
+    # to prevent (docs/TROUBLESHOOTING.md).
+    compiled_truth = (revision.compiled_truth or "").strip() or old_top
     new_top = f"{h1_line}\n\n{compiled_truth}\n\n---" if compiled_truth else h1_line
     new_timeline = _insert_timeline_entry(timeline_section, revision.timeline_entry or "")
 
@@ -847,7 +862,13 @@ def _run_entity_updates(
     try:
         result = complete_with_contract(client, system, prompt, EntityRevisionOutput)
     except ModelContractError as exc:
-        proposal.warnings.append(f"Entity updates failed; existing notes left unchanged: {exc}")
+        count = len(candidates)
+        entity_word = "entity" if count == 1 else "entities"
+        proposal.warnings.append(
+            f"Entity updates failed while revising {count} {entity_word} in one call "
+            f"({', '.join(res.name for res, _, _ in candidates)}); "
+            f"existing notes left unchanged: {exc}"
+        )
         return
 
     today = datetime.now(UTC).date().isoformat()
