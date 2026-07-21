@@ -66,8 +66,9 @@ def expand_piece(raw_text: str, workspace_root: Path) -> str:
     stripped = _REF_RE.sub(_replace, raw_text)
     if not blocks:
         return raw_text
+    stripped = re.sub(r"[ \t]{2,}", " ", stripped).strip()
     attached = "\n\n--- Attached Context ---\n\n" + "\n\n".join(blocks)
-    return stripped.strip() + attached
+    return stripped + attached
 
 
 def resolve_context(

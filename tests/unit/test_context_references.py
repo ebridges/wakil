@@ -162,6 +162,17 @@ def test_expand_piece_strips_tokens_and_appends_section_only_when_resolved(tmp_p
     assert result.count("--- Attached Context ---") == 1
 
 
+def test_expand_piece_collapses_whitespace_left_by_stripped_tokens(tmp_path: Path):
+    (tmp_path / "a.md").write_text("A body.")
+    (tmp_path / "b.md").write_text("B body.")
+
+    result = expand_piece("see prep documents at @file:a.md and @file:b.md", tmp_path)
+    head, _, _ = result.partition("--- Attached Context ---")
+
+    assert head.strip() == "see prep documents at and"
+    assert "  " not in head
+
+
 def test_resolve_context_both_empty_returns_none_and_empty_list():
     result = resolve_context(context=[], context_files=[], workspace_root=Path("/tmp"))
     assert result == (None, [])
