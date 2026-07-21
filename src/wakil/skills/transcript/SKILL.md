@@ -33,6 +33,16 @@ changes.
   the existing related notes with [[wikilinks]] where they genuinely match;
   mention entities without a matching note in plain text and leave their
   page-creation decision to the entity-resolution step.
+- Resolve an attached companion document's open items, don't just note its
+  existence. When the context includes a prep note, agenda, or list of open
+  questions pulled in via `@file:`, walk each item it raises and check it
+  against what the transcript actually shows: state plainly whether it was
+  addressed — with the outcome, cited the same way as any other claim
+  (`(reported: <speaker>)`, `(self-reported)`) — or say explicitly that it's
+  still open when the transcript never touched it. Silence on an agenda item
+  is not the same as confirming it was addressed. When the document itself
+  has a page in the existing related notes, link to it with a [[wikilink]]
+  the same as any other entity match.
 - Follow the workspace's SCHEMA.md guidance for the proposed note's
   frontmatter, and RESOLVER.md for where it belongs. A routine meeting still
   merits a meeting note; set proposed_note to null only when the transcript
