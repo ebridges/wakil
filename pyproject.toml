@@ -17,7 +17,6 @@ dependencies = [
     "readability-lxml>=0.8.4.1",
     "beautifulsoup4>=4.15.0",
     "alembic>=1.18.5",
-    "stop-words>=2018.7.23",
 ]
 
 [project.scripts]
