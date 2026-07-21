@@ -339,6 +339,25 @@
       "justMyCode": false
     },
     {
+      "name": "wakil: enrich mosaic offer-sync (source 2, forced)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "wakil.cli.main",
+      "args": [
+        "enrich",
+        "--context",
+        "see prep documents at @meetings/2026/2026-07-20-mosaic-contract-negotiation-prep.md and @meetings/2026/2026-07-20-mosaic-ian-gutwinski-catchup-prep.md",
+        "--force",
+        "2"
+      ],
+      "env": {
+        "WAKIL_WORKSPACE": "/Users/ebridges/Projects/kb"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "wakil: version",
       "type": "debugpy",
       "request": "launch",
