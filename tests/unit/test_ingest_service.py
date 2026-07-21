@@ -14,11 +14,13 @@ from wakil.app.ingest_service import (
     _merge_entity_note,
     _require_workspace_ids,
     _title_terms,
+    apply_abstract_backfill,
     apply_capture,
     apply_enrichment,
     clean_transcript,
     infer_meeting_date,
     parse_whisper_transcript,
+    plan_abstract_backfill,
     prepare_capture,
     prepare_enrichment,
     slugify,
@@ -1124,6 +1126,77 @@ def test_enrichment_guides_reach_prompt(workspace, transcript):
     assert "meeting_date:" not in prompt
     # Routing guidance also reaches the resolution call.
     assert "Workspace guidance from RESOLVER.md" in client.calls[1][1]
+
+
+# --------------------------------------------------------------------------
+# Backfill: title/abstract for sources captured before docs/adr/0010
+
+
+def test_plan_abstract_backfill_finds_sources_missing_abstract(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    # Simulate a pre-ADR-0010 source: metadata_json has no `abstract` key.
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        source.metadata_json = json.dumps({"meeting_date": "2026-07-09"})
+        session.commit()
+
+    items = plan_abstract_backfill(workspace, _capture_client())
+    assert [item.source_id for item in items] == [source_id]
+    assert items[0].title == CAPTURE_METADATA_JSON["title"]
+    assert items[0].abstract == CAPTURE_METADATA_JSON["abstract"]
+
+
+def test_plan_abstract_backfill_skips_sources_that_already_have_one(workspace, transcript):
+    _capture(workspace, transcript)  # capture already writes an abstract
+    assert plan_abstract_backfill(workspace, _capture_client()) == []
+
+
+def test_apply_abstract_backfill_rewrites_frontmatter_and_source_row(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        raw_path = source.raw_text_path
+        source.metadata_json = json.dumps({"meeting_date": "2026-07-09"})
+        source.title = "old filename title"
+        session.commit()
+
+    payload = {
+        "title": "2026-07-20 Backfilled Title",
+        "abstract": "A freshly backfilled abstract.",
+    }
+    items = plan_abstract_backfill(workspace, _capture_client(payload))
+    updated = apply_abstract_backfill(workspace, items)
+
+    assert updated == [raw_path]
+    on_disk = (workspace.root_path / raw_path).read_text()
+    assert "title: 2026-07-20 Backfilled Title" in on_disk
+    assert "abstract: A freshly backfilled abstract." in on_disk
+    # The rest of the raw file survives untouched.
+    assert "meeting_date: '2026-07-09'" in on_disk
+    assert "# 2026-07-09-raw-meeting" in on_disk
+
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        assert source.title == "2026-07-20 Backfilled Title"
+        metadata = json.loads(source.metadata_json)
+        assert metadata["title"] == "2026-07-20 Backfilled Title"
+        assert metadata["abstract"] == "A freshly backfilled abstract."
+
+
+def test_apply_abstract_backfill_never_touches_memories_or_status(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        source.metadata_json = json.dumps({})
+        session.commit()
+
+    items = plan_abstract_backfill(workspace, _capture_client())
+    apply_abstract_backfill(workspace, items)
+
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        assert source.status == "raw"  # unchanged -- backfill never enriches
+        assert session.scalar(select(Memory)) is None
 
 
 # --------------------------------------------------------------------------

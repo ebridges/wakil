@@ -10,6 +10,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from wakil.app.ingest_service import (
+    AbstractBackfillItem,
     CaptureProposal,
     CaptureResult,
     EnrichmentProposal,
@@ -192,6 +193,21 @@ def print_capture_result(result: CaptureResult) -> None:
         f"[dim]Analyze and link it into the knowledge base with "
         f"`wakil enrich {result.source_id}`.[/dim]"
     )
+
+
+def print_abstract_backfill_plan(items: list[AbstractBackfillItem]) -> None:
+    if not items:
+        console.print("[green]Every source already has an abstract — nothing to backfill.[/green]")
+        return
+    table = Table(title="Abstract backfill plan")
+    table.add_column("Source", justify="right")
+    table.add_column("Path", overflow="fold")
+    table.add_column("Title", overflow="fold")
+    table.add_column("Abstract", overflow="fold")
+    for item in items:
+        abstract = item.abstract if len(item.abstract) <= 80 else item.abstract[:77] + "..."
+        table.add_row(f"#{item.source_id}", item.raw_text_path, item.title, abstract)
+    console.print(table)
 
 
 def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:

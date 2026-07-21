@@ -136,6 +136,18 @@ class CaptureResult:
 
 
 @dataclass
+class AbstractBackfillItem:
+    """One source captured before docs/adr/0010, plus the title/abstract a
+    fresh capture-metadata call generated for it."""
+
+    source_id: int
+    raw_text_path: str
+    old_title: str | None
+    title: str
+    abstract: str
+
+
+@dataclass
 class EntityUpdate:
     """A proposed, deterministic edit to an *existing* note — DAG node 3's
     output. `old_content` is what was read during prepare; apply_enrichment
@@ -354,6 +366,79 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
         return CaptureResult(
             source_id=source.id, ingest_run_id=run.id, raw_file_path=proposal.raw_file.path
         )
+
+
+# --------------------------------------------------------------------------
+# Backfill: title/abstract for sources captured before docs/adr/0010.
+# Metadata-only -- never re-runs extraction/entity-resolution, never touches
+# memories or relationships. Mirrors capture/enrichment's own prepare/apply
+# split: planning calls the model and touches nothing, apply is the only
+# step that writes.
+
+
+def plan_abstract_backfill(
+    config: WorkspaceConfig, client: ModelClient
+) -> list[AbstractBackfillItem]:
+    """Sources whose metadata_json has no `abstract` key yet -- one capture-
+    metadata model call per source, same contract as capture itself."""
+    items: list[AbstractBackfillItem] = []
+    with open_session(config) as session:
+        sources = session.scalars(select(Source).order_by(Source.id)).all()
+        for source in sources:
+            metadata = json.loads(source.metadata_json or "{}")
+            if metadata.get("abstract") or not source.raw_text_path:
+                continue
+            try:
+                text = _load_source_text(config, source)
+            except IngestError:
+                continue
+            generated = _generate_capture_metadata(
+                client, source.source_type, source.origin or "", text, metadata.get("context")
+            )
+            items.append(
+                AbstractBackfillItem(
+                    source_id=source.id,
+                    raw_text_path=source.raw_text_path,
+                    old_title=source.title,
+                    title=generated.title,
+                    abstract=generated.abstract,
+                )
+            )
+    return items
+
+
+def apply_abstract_backfill(
+    config: WorkspaceConfig, items: list[AbstractBackfillItem]
+) -> list[str]:
+    """Rewrite each item's raw file frontmatter (title/abstract keys only --
+    a python-frontmatter round-trip preserves everything else, including
+    field order, byte-for-byte) and the matching Source row."""
+    updated: list[str] = []
+    with open_session(config) as session:
+        for item in items:
+            source = session.get(Source, item.source_id)
+            if source is None:
+                continue
+            target = config.root_path / item.raw_text_path
+            try:
+                raw = target.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            post = frontmatter_lib.loads(raw)
+            post["title"] = item.title
+            post["abstract"] = item.abstract
+            target.write_text(
+                frontmatter_lib.dumps(post, sort_keys=False) + "\n", encoding="utf-8"
+            )
+
+            metadata = json.loads(source.metadata_json or "{}")
+            metadata["title"] = item.title
+            metadata["abstract"] = item.abstract
+            source.title = item.title
+            source.metadata_json = json.dumps(metadata)
+            updated.append(item.raw_text_path)
+        session.commit()
+    return updated
 
 
 # --------------------------------------------------------------------------

@@ -56,6 +56,8 @@ qmd_collection_app = typer.Typer(
     help="Manage QMD collections (indexed folders).", no_args_is_help=True
 )
 qmd_app.add_typer(qmd_collection_app, name="collection")
+sources_app = typer.Typer(help="Maintain captured sources.", no_args_is_help=True)
+app.add_typer(sources_app, name="sources")
 
 
 @app.callback()
@@ -576,6 +578,52 @@ def ingest_article(
         context=context,
         context_file=context_file,
     )
+
+
+@sources_app.command("backfill-abstract")
+def sources_backfill_abstract(
+    ctx: typer.Context,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Backfill title/abstract for sources captured before ADR 0010.
+
+    Metadata-only: rewrites each raw file's frontmatter (title/abstract
+    keys) and the matching Source row. Never re-runs enrichment.
+    """
+    from wakil.app.ingest_service import (
+        IngestError,
+        apply_abstract_backfill,
+        plan_abstract_backfill,
+    )
+    from wakil.llm.client import ModelError, resolve_client
+    from wakil.ui.console import print_abstract_backfill_plan
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    client = resolve_client()
+    if client is None:
+        console.print(
+            "[red]Backfill needs a model provider.[/red] Set [bold]ANTHROPIC_API_KEY[/bold] "
+            "(or OPENAI_API_KEY + WAKIL_MODEL for an OpenAI-compatible endpoint)."
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        with console.status("Scanning sources for a missing abstract..."):
+            items = plan_abstract_backfill(config, client)
+    except (IngestError, ModelError) as exc:
+        console.print(f"[red]Backfill failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    print_abstract_backfill_plan(items)
+    if not items:
+        return
+    if not yes and not typer.confirm(f"Rewrite title/abstract for {len(items)} source(s)?"):
+        console.print("Aborted; nothing was written.")
+        raise typer.Exit(code=0)
+
+    updated = apply_abstract_backfill(config, items)
+    console.print(f"[green]Updated {len(updated)} source(s).[/green]")
 
 
 def _memory_session(ctx: typer.Context):
