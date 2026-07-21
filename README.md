@@ -43,7 +43,8 @@ uv run wakil -w kb search "insurance claims routing"
 # Ask a grounded question (requires a model provider, see below)
 uv run wakil -w kb query "How do my notes on FNOL relate to graph memory?"
 
-# Step 1 — capture raw material (deterministic, no model)
+# Step 1 — capture raw material (deterministic aside from one small model
+# call that titles/abstracts it; requires a model provider, see below)
 uv run wakil -w kb ingest transcript ./raw/meeting.txt \
     --context "Attendees: Jane Doe, Bob (Acme Corp). Weekly claims sync."
 uv run wakil -w kb ingest article https://example.com/post
@@ -118,16 +119,18 @@ uv run wakil -w kb skills validate                    # check every root and ski
 
 Ingest is two explicit steps.
 
-**Step 1 — capture** (`wakil ingest transcript|text|article`) is fully
-deterministic; no model is involved. Text is extracted (transcripts get light
-cleanup: bracketed and line-leading timestamps removed, whitespace normalized
-— never model rewriting), deduped by content hash, and written under
-`sources/` as a raw capture. Transcript frontmatter follows the KB schema:
-if `SCHEMA.md` contains a yaml template in a transcript/source section, its
-fields are used (known fields like the meeting date and create date are
-filled in); otherwise exactly two fields are written — `created` and
-`meeting_date` (inferred from the filename or the transcript's opening
-lines). `--context`/`-C` accepts a few lines about the source (attendees,
+**Step 1 — capture** (`wakil ingest transcript|text|article`) is deterministic
+apart from one small model call that titles and abstracts the source (see
+ADR 0010) — the raw file's path/filename is never model-derived. Text is
+extracted (transcripts get light cleanup: bracketed and line-leading
+timestamps removed, whitespace normalized — never model rewriting), deduped
+by content hash, and written under `sources/` as a raw capture. Transcript
+frontmatter follows the KB schema: if `SCHEMA.md` contains a yaml template in
+a transcript/source section, its fields are used (known fields like the
+meeting date, title, and abstract are filled in); otherwise exactly two
+fields are written — `created` and `meeting_date` (inferred from the
+filename or the transcript's opening lines). `--context`/`-C` accepts a few
+lines about the source (attendees,
 company, purpose) and is stored on the source record for step 2.
 
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
@@ -161,6 +164,10 @@ Both steps preview before writing (`--yes` skips the prompt) and accept
 as `wakil ingest:`. Proposed notes fall back to `drafts/` when routing is
 unclear or the path collides; existing files are never overwritten. Extracted
 memories are stored as `candidate` state for review with `wakil memory`.
+
+`wakil sources backfill-abstract` retroactively adds a title/abstract to
+sources captured before this feature existed — metadata-only, it never
+re-runs enrichment.
 
 ## Git-native changes
 

@@ -49,6 +49,15 @@ Symptom: a live `enrich` run logged reconciliation "corrections" such as `[[peop
 
 Non-transcript raw captures written by `_build_raw_file` come out with frontmatter fields (`type: source`, `source_type:`, `origin:`, `title:`, `retrieved:`) that are hardcoded in the function rather than derived from the target vault's actual `source` schema. In at least one real vault, the schema uses `captured:` for the same concept, not `retrieved:`, so every non-transcript ingest silently writes non-conformant frontmatter into `sources/`. This isn't visible from reading `ingest_service.py` alone — it only surfaces by diffing the hardcoded keys against the vault's own `schema.md`. Fix by sourcing these field names from the vault's schema/skill definitions (as the transcript branch and `_KNOWN_FIELD_VALUES` mapping already do) instead of hardcoding them in `_build_raw_file`.
 
+### `frontmatter.dumps()` alphabetizes keys unless `sort_keys=False` is passed explicitly
+**Date:** 2026-07-21 · **Source:** `src/wakil/app/ingest_service.py` (`apply_abstract_backfill`)
+
+**Symptom:** A metadata-only rewrite (`frontmatter.loads(raw)` → mutate a couple of keys → `frontmatter.dumps(post)`) was meant to change only the touched keys, but the round trip silently reordered every other frontmatter field alphabetically, producing a large, misleading diff for what should have been a two-line change.
+
+**Root cause:** `python-frontmatter`'s `dumps()` forwards `**kwargs` to its YAML handler, which defaults to `yaml.dump`'s own default (`sort_keys=True`) when no override is given — there's no hint of this in `frontmatter`'s own API surface, only in the underlying PyYAML behavior. This is presumably why every other frontmatter-writing call site in this codebase (`_build_stub_entities`, `_stub_content`, `schema_migrate_service`) bypasses `frontmatter.dumps()` entirely and calls `yaml.safe_dump(metadata, sort_keys=False, ...)` directly.
+
+**Fix:** Pass `sort_keys=False` explicitly to `frontmatter.dumps(post, sort_keys=False)` for any future round-trip edit that needs to preserve existing key order (new keys still append at the end, in insertion order) — verified interactively before relying on it in `apply_abstract_backfill`.
+
 ### Workspace guide files (SCHEMA.md, RESOLVER.md) are silently truncated at 4,000 chars, with no warning
 
 **Date:** 2026-07-20 · **Source:** `src/wakil/app/ingest_service.py:70` (`GUIDE_MAX_CHARS = 4_000`), `src/wakil/app/ingest_service.py:1221-1231` (`load_workspace_guides`)
