@@ -115,6 +115,12 @@ class CaptureProposal:
     content_hash: str
     raw_file: ProposedFile
     context: str | None = None  # user-supplied context (attendees, company, ...)
+    # `context` with any `--- Attached Context ---` blocks excluded, and the
+    # KB-relative paths of the @file: references that produced them — see
+    # context_references.resolve_context. Persisted alongside `context` so a
+    # later `wakil enrich` without repeating --context still benefits.
+    context_digest: str | None = None
+    context_referenced_paths: list[str] = field(default_factory=list)
     meeting_date: str | None = None
     duplicate_of: int | None = None
 
@@ -196,6 +202,8 @@ def prepare_capture(
     file: Path | None = None,
     url: str | None = None,
     context: str | None = None,
+    context_digest: str | None = None,
+    context_referenced_paths: list[str] | None = None,
 ) -> CaptureProposal:
     meeting_date: str | None = None
     if kind in ("transcript", "text"):
@@ -237,6 +245,8 @@ def prepare_capture(
         text=text,
         content_hash=content_hash,
         context=context,
+        context_digest=context_digest,
+        context_referenced_paths=list(context_referenced_paths or []),
         meeting_date=meeting_date,
         raw_file=ProposedFile(path="", content=""),
     )
@@ -278,6 +288,8 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
                     for key, value in (
                         ("context", proposal.context),
                         ("meeting_date", proposal.meeting_date),
+                        ("context_digest", proposal.context_digest),
+                        ("context_referenced_paths", proposal.context_referenced_paths),
                     )
                     if value
                 }
@@ -331,6 +343,8 @@ def prepare_enrichment(
     source_id: int,
     client: ModelClient,
     context: str | None = None,
+    context_digest: str | None = None,
+    context_referenced_paths: list[str] | None = None,
     force: bool = False,
 ) -> EnrichmentProposal:
     with open_session(config) as session:
@@ -343,17 +357,47 @@ def prepare_enrichment(
             )
         metadata = json.loads(source.metadata_json or "{}")
         context = context or metadata.get("context")
+        context_digest = context_digest or metadata.get("context_digest")
+        context_referenced_paths = (
+            context_referenced_paths or metadata.get("context_referenced_paths") or []
+        )
+        # Sources captured before context_digest existed have none stored —
+        # fall back to the raw context so query-building still works.
+        search_context = context_digest or context
         text = _load_source_text(config, source)
         title = source.title or f"source {source_id}"
+        workspace_id, _ = _require_workspace_ids(session, config)
 
-        related_query = " ".join(filter(None, [title, context, text[:300]]))
-        related_notes = [
-            hit
-            for hit in search_workspace(
-                config=config, session=session, query=related_query, limit=RELATED_NOTE_LIMIT
+        # @file:-referenced notes are guaranteed related notes, ahead of and
+        # not subject to RELATED_NOTE_LIMIT: the user pointed at them
+        # explicitly, so relevance ranking shouldn't get a vote.
+        related_notes: list[SearchHit] = []
+        seen_paths: set[str] = set()
+        for path in context_referenced_paths:
+            if path == source.raw_text_path or path in seen_paths:
+                continue
+            seen_paths.add(path)
+            note = session.scalar(
+                select(Note).where(Note.workspace_id == workspace_id, Note.path == path)
             )
-            if hit.kind == "note" and hit.ref != source.raw_text_path
-        ]
+            related_notes.append(
+                SearchHit(
+                    kind="note",
+                    ref=path,
+                    title=note.title if note and note.title else _deslug(path),
+                    snippet="",
+                    engine="user-referenced",
+                )
+            )
+
+        related_query = " ".join(filter(None, [title, search_context, text[:300]]))
+        for hit in search_workspace(
+            config=config, session=session, query=related_query, limit=RELATED_NOTE_LIMIT
+        ):
+            if hit.kind != "note" or hit.ref == source.raw_text_path or hit.ref in seen_paths:
+                continue
+            seen_paths.add(hit.ref)
+            related_notes.append(hit)
 
         # Relevance search optimizes for "notes that talk about X" and reliably
         # buries a short entity stub (title literally "Mosaic") behind longer
@@ -361,12 +405,10 @@ def prepare_enrichment(
         # opposite question answered — "does a page named X already exist" —
         # so supplement with a direct title lookup against known entity
         # directories, independent of QMD/FTS ranking.
-        workspace_id, _ = _require_workspace_ids(session, config)
-        seen_paths = {hit.ref for hit in related_notes}
         for path, note_title in _candidate_entity_notes(
             session,
             workspace_id,
-            " ".join(filter(None, [context, text])),
+            " ".join(filter(None, [search_context, text])),
             load_entity_schemas(config.root_path),
             extra_terms=_title_terms(title),
         ):

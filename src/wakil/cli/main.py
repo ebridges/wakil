@@ -1,7 +1,7 @@
 """wakil CLI entry point."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
@@ -29,6 +29,9 @@ from wakil.ui.console import (
     print_skill_which,
     print_status,
 )
+
+if TYPE_CHECKING:
+    from wakil.app.context_references import ResolvedContext
 
 WORKSPACE_HELP = (
     "Workspace directory or registered workspace name "
@@ -287,7 +290,7 @@ def _refresh_qmd_index(config: WorkspaceConfig) -> None:
 
 def _resolve_context_or_exit(
     context: list[str] | None, context_file: list[Path] | None, workspace_root: Path
-) -> str | None:
+) -> "ResolvedContext | None":
     from wakil.app.context_references import ContextResolutionError, resolve_context
 
     try:
@@ -324,10 +327,20 @@ def _run_ingest(
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
-    context = _resolve_context_or_exit(context, context_file, config.root_path)
+    resolved_context = _resolve_context_or_exit(context, context_file, config.root_path)
     try:
         with console.status("Preparing capture..."):
-            proposal = prepare_capture(config, kind, file=file, url=url, context=context)
+            proposal = prepare_capture(
+                config,
+                kind,
+                file=file,
+                url=url,
+                context=resolved_context.text if resolved_context else None,
+                context_digest=resolved_context.digest if resolved_context else None,
+                context_referenced_paths=(
+                    resolved_context.referenced_paths if resolved_context else None
+                ),
+            )
     except IngestError as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -429,7 +442,7 @@ def enrich(
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
-    context = _resolve_context_or_exit(context, context_file, config.root_path)
+    resolved_context = _resolve_context_or_exit(context, context_file, config.root_path)
     client = resolve_client()
     if client is None:
         console.print(
@@ -453,7 +466,17 @@ def enrich(
 
     try:
         with console.status(f"Analyzing source #{source_id} with {client.model}..."):
-            proposal = prepare_enrichment(config, source_id, client, context=context, force=force)
+            proposal = prepare_enrichment(
+                config,
+                source_id,
+                client,
+                context=resolved_context.text if resolved_context else None,
+                context_digest=resolved_context.digest if resolved_context else None,
+                context_referenced_paths=(
+                    resolved_context.referenced_paths if resolved_context else None
+                ),
+                force=force,
+            )
     except (IngestError, ModelError) as exc:
         console.print(f"[red]Enrichment failed:[/red] {exc}")
         abandon_landing(config, landing)

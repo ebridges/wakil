@@ -987,6 +987,83 @@ def test_enrichment_related_notes_include_name_matched_entities(workspace, trans
     assert any(hit.ref == "companies/mosaic-private-markets.md" for hit in proposal.related_notes)
 
 
+def test_enrichment_prioritizes_context_referenced_notes(workspace, transcript, kb_path):
+    from wakil.app.context_references import resolve_context
+
+    people = kb_path / "people"
+    people.mkdir(exist_ok=True)
+    (people / "referenced-person.md").write_text(
+        "---\ntype: person\nname: Referenced Person\n---\n\n# Referenced Person\n\nBio.\n"
+    )
+    with open_session(workspace) as session:
+        workspace_id, _ = _require_workspace_ids(session, workspace)
+        index_notes(session, workspace_id, workspace.root_path)
+        session.commit()
+
+    resolved, _ = resolve_context(
+        context=["Prep doc: @file:people/referenced-person.md"],
+        context_files=[],
+        workspace_root=workspace.root_path,
+    )
+    capture_proposal = prepare_capture(
+        workspace,
+        "transcript",
+        file=transcript,
+        context=resolved.text,
+        context_digest=resolved.digest,
+        context_referenced_paths=resolved.referenced_paths,
+    )
+    source_id = apply_capture(workspace, capture_proposal).source_id
+
+    # No --context repeated on enrich: the digest/referenced paths persisted
+    # at capture time are read back from Source.metadata_json.
+    proposal = prepare_enrichment(workspace, source_id, FakeClient())
+
+    assert proposal.related_notes[0].ref == "people/referenced-person.md"
+    assert proposal.related_notes[0].engine == "user-referenced"
+
+
+def test_enrichment_related_search_uses_digest_not_raw_attachment_dump(
+    workspace, transcript, kb_path
+):
+    from wakil.app.context_references import resolve_context
+
+    # This company's name only appears inside the attached file's own
+    # content, never in the digest (which excludes attachment blocks) or the
+    # transcript -- it must not surface as a name-matched candidate.
+    companies = kb_path / "companies"
+    companies.mkdir()
+    (companies / "buried-co.md").write_text(
+        "---\ntype: company\nname: Buried Co\n---\n\n# Buried Co\n"
+    )
+    attachment = kb_path / "attachment.md"
+    attachment.write_text("Buried Co is mentioned only in here.")
+    with open_session(workspace) as session:
+        workspace_id, _ = _require_workspace_ids(session, workspace)
+        index_notes(session, workspace_id, workspace.root_path)
+        session.commit()
+
+    resolved, _ = resolve_context(
+        context=["Prep notes @file:attachment.md"],
+        context_files=[],
+        workspace_root=workspace.root_path,
+    )
+    capture_proposal = prepare_capture(
+        workspace,
+        "transcript",
+        file=transcript,
+        context=resolved.text,
+        context_digest=resolved.digest,
+        context_referenced_paths=resolved.referenced_paths,
+    )
+    source_id = apply_capture(workspace, capture_proposal).source_id
+
+    proposal = prepare_enrichment(workspace, source_id, FakeClient())
+
+    assert not any(hit.ref == "companies/buried-co.md" for hit in proposal.related_notes)
+    assert any(hit.ref == "attachment.md" for hit in proposal.related_notes)
+
+
 def test_enrichment_requires_existing_source(workspace):
     with pytest.raises(IngestError, match="No source with id"):
         prepare_enrichment(workspace, 999, FakeClient())
