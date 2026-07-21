@@ -314,21 +314,31 @@ def _run_ingest(
     context: list[str] | None = None,
     context_file: list[Path] | None = None,
 ) -> None:
-    """Step 1: capture the raw source. Deterministic — no model involved.
+    """Step 1: capture the raw source. Deterministic except for one small
+    model call that generates the frontmatter title/abstract (ADR 0010) —
+    the raw file's path/slug itself stays fully deterministic.
 
     Branches, commits, and opens a draft PR by default; --local writes the
     raw file only, with no git operations.
     """
     from wakil.app.git_service import GitServiceError, abandon_landing, prepare_landing
     from wakil.app.ingest_service import IngestError, apply_capture, prepare_capture
+    from wakil.llm.client import ModelError, resolve_client
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
     context = _resolve_context_or_exit(context, context_file, config.root_path)
+    client = resolve_client()
+    if client is None:
+        console.print(
+            "[red]Ingest needs a model provider.[/red] Set [bold]ANTHROPIC_API_KEY[/bold] "
+            "(or OPENAI_API_KEY + WAKIL_MODEL for an OpenAI-compatible endpoint)."
+        )
+        raise typer.Exit(code=1)
     try:
         with console.status("Preparing capture..."):
-            proposal = prepare_capture(config, kind, file=file, url=url, context=context)
-    except IngestError as exc:
+            proposal = prepare_capture(config, kind, client, file=file, url=url, context=context)
+    except (IngestError, ModelError) as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
