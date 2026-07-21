@@ -36,7 +36,7 @@ The abstract is persisted to `Source.metadata_json` (alongside the existing `con
 
 ## Implementation
 
-- **PR #<opened in this change>** — "Generate title/abstract at capture time; add source.yaml abstract field; backfill command."
+- **[PR #24](https://github.com/ebridges/wakil/pull/24)** — "Generate title/abstract at capture time; add source.yaml abstract field; backfill command."
 
 ## Sources
 
