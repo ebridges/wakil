@@ -141,6 +141,14 @@ not just found by `search_workspace` — carries a different signal: the user
 picked that note deliberately, so treat it as high-confidence and back-link
 it rather than weighing the mention against the substantive bar above.
 
+That confidence is about the link decision only — it says nothing about
+content-worthiness. Whether the mention also earns a Compiled Truth edit or
+a Timeline entry is still governed by the ordinary test in "Confident
+match" above: does it carry a new fact, development, or contradiction? An
+explicit `@file:` reference to a page that's mentioned only in passing —
+nothing new said about it — still gets just the link, exactly as any other
+passing reference would.
+
 ## Preserve ambiguity
 
 Don't resolve an ambiguous or no-match case by picking the closest-looking
