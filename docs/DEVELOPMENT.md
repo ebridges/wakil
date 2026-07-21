@@ -21,3 +21,8 @@ When a command lands on a branch (`prepare_landing`) before doing risked work (e
 
 Note: as of this writing PR #15 is still an open draft (unmerged into `main`); this pattern applies once/if that branch lands.
 
+### Run the live eval before treating new SKILL.md guidance as done
+**Source:** PR #20 (`docs/skill-guidance-for-linked-context` branch), `src/wakil/skills/entity-enrichment/SKILL.md`
+
+Adding a new rule to a skill's SKILL.md and a matching `eval.json` scenario for it isn't finished until `uv run pytest -m eval -k <scenario id>` (a real model call, per `docs/adr/0004`) actually passes — prose that reads correct to a human reviewer can still be misapplied by the model in a way only a live run surfaces. Here, a new rule said an explicit `@file:` reference should be treated as "high-confidence" for back-linking; the model read that confidence as also covering content-worthiness and appended a Timeline entry for a mention the source said had nothing new to report, failing the eval's rubric. The fix was one clarifying sentence separating the link decision from the content decision — but the gap was invisible without actually running the eval. When adding or editing skill guidance, write (or extend) its `eval.json` scenario and run it live before considering the change done, not just at merge/CI time.
+
