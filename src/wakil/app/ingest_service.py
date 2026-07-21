@@ -3,8 +3,9 @@
 Step 1, capture (`wakil ingest ...`): deterministic only, no model. The
 source text is extracted (transcripts get light cleanup), deduped by content
 hash, and written under sources/ as a raw capture with frontmatter shaped by
-the KB's SCHEMA.md when it defines a template for transcripts/sources —
-otherwise transcripts get exactly two fields: create date and meeting date.
+the `source` entity schema's base fields plus its `transcript` origin
+sub-schema (`schema/entities/source.yaml`) — the schema catalog, not a
+workspace-authored template, is the source of truth for this shape.
 
 Step 2, enrichment (`wakil enrich <source-id>`): a fixed, code-sequenced DAG
 (docs/ingestion-refactor-spec.md) — an extraction model call (judgment from
@@ -20,6 +21,7 @@ touches nothing, files are only ever created (never overwritten), and DB rows
 are only written in apply, so declining a preview leaves no trace.
 """
 
+import contextlib
 import hashlib
 import json
 import re
@@ -1259,58 +1261,47 @@ def _relative_origin(config: WorkspaceConfig, file: Path) -> str:
 
 
 def load_workspace_guides(config: WorkspaceConfig) -> dict[str, str]:
-    """SCHEMA.md (page shape) and RESOLVER.md (routing) excerpts, when present."""
+    """RESOLVER.md (routing) excerpt, when present.
+
+    Page shape and metadata guidance no longer comes from a workspace
+    document — `describe_entity_types_full`/`describe_entity_types`
+    (`wakil.llm.prompts`) already render that structurally from
+    `load_entity_schemas()`. Subject-matter routing has no code-owned
+    equivalent, so RESOLVER.md stays the sole authority for it.
+    """
     guides = {}
-    for name in ("SCHEMA.md", "RESOLVER.md"):
-        path = config.root_path / name
-        if path.is_file():
-            try:
-                guides[name] = path.read_text(encoding="utf-8", errors="replace")[:GUIDE_MAX_CHARS]
-            except OSError:
-                continue
+    path = config.root_path / "RESOLVER.md"
+    if path.is_file():
+        with contextlib.suppress(OSError):
+            guides["RESOLVER.md"] = path.read_text(encoding="utf-8", errors="replace")[
+                :GUIDE_MAX_CHARS
+            ]
     return guides
 
 
-_HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
-_YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n(.*?)```", re.DOTALL)
-
-
 def transcript_frontmatter_template(config: WorkspaceConfig) -> dict | None:
-    """A frontmatter template for transcripts from SCHEMA.md, if it defines one.
+    """A frontmatter field template for transcript raw captures.
 
-    Looks for a fenced yaml block inside a SCHEMA.md section whose heading
-    mentions transcripts (or, failing that, sources). Returns None when
-    SCHEMA.md is absent or defines nothing usable — the caller then falls
-    back to the minimal two-field frontmatter.
+    Derived from the `source` entity schema (`schema/entities/source.yaml`):
+    its base fields plus its `transcript` origin sub-schema — the same
+    effective-fields merge `wakil.schema.validate.validate_frontmatter` does
+    for an `origin: transcript` note. Field values are placeholders (`""`,
+    or the schema's own `type` for the `type` key); `_transcript_metadata`
+    fills in the ones it knows a real value for. Returns None only if the
+    resolved schema catalog (kb-local/user/built-in) defines no `source`
+    type at all.
     """
-    schema_path = config.root_path / "SCHEMA.md"
-    if not schema_path.is_file():
+    schema = load_entity_schemas(config.root_path).get("source")
+    if schema is None:
         return None
-    try:
-        text = schema_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-
-    headings = list(_HEADING_RE.finditer(text))
-    for keyword in ("transcript", "source"):
-        for i, heading in enumerate(headings):
-            if keyword not in heading.group(1).lower():
-                continue
-            section_end = headings[i + 1].start() if i + 1 < len(headings) else len(text)
-            block = _YAML_BLOCK_RE.search(text, heading.end(), section_end)
-            if block:
-                try:
-                    template = yaml.safe_load(block.group(1))
-                except yaml.YAMLError:
-                    continue
-                if isinstance(template, dict) and template:
-                    return template
-    return None
+    field_names = ["type", *schema.fields, *schema.origins.get("transcript", {})]
+    return {name: (schema.type if name == "type" else "") for name in field_names}
 
 
 # Template keys we know how to fill, in normalized form.
 _KNOWN_FIELD_VALUES = {
     "created": "created",
+    "captured": "created",  # source.yaml's own field name for this concept
     "create_date": "created",
     "date_created": "created",
     "meeting_date": "meeting_date",
@@ -1367,7 +1358,8 @@ def _transcript_metadata(config: WorkspaceConfig, proposal: CaptureProposal, cre
     }
     template = transcript_frontmatter_template(config)
     if template is None:
-        # SCHEMA.md defines nothing for transcripts: exactly two fields.
+        # No `source` schema resolved at all (a broken override): fall back
+        # to the two fields every transcript capture needs regardless.
         return {"created": created, "meeting_date": proposal.meeting_date}
     metadata = {}
     for key, template_value in template.items():

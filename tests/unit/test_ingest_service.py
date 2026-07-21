@@ -1,9 +1,10 @@
 import json
 import zipfile
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
+import yaml
 from sqlalchemy import select
 
 from wakil.app.ingest_service import (
@@ -146,10 +147,6 @@ def test_capture_is_model_free_and_minimal(workspace, transcript):
 
     assert proposal.raw_file.path.startswith("sources/transcripts/")
     assert proposal.meeting_date == "2026-07-09"
-    # Fixture SCHEMA.md has no transcript template: exactly two fields.
-    frontmatter = proposal.raw_file.content.split("---")[1]
-    fields = [line.split(":")[0] for line in frontmatter.strip().splitlines()]
-    assert fields == ["created", "meeting_date"]
     assert "meeting_date: '2026-07-09'" in proposal.raw_file.content
 
 
@@ -170,22 +167,51 @@ def test_capture_writes_source_and_run(workspace, transcript):
         assert session.scalar(select(Memory)) is None
 
 
-def test_capture_uses_schema_template_when_present(workspace, transcript):
-    (workspace.root_path / "SCHEMA.md").write_text(
-        "# Schema\n\n## Transcripts\n\nFiles in sources/transcripts use:\n\n"
-        "```yaml\ntype: source\norigin: transcript\nurl: \ntitle: \ndate: \ncreated: \n```\n"
-    )
-    proposal = prepare_capture(workspace, "transcript", file=transcript)
+def test_transcript_frontmatter_template_from_schema_catalog(workspace):
+    # Derived from schema/entities/source.yaml: base fields plus the
+    # `transcript` origin sub-schema, in that order -- no workspace SCHEMA.md
+    # involved.
+    template = transcript_frontmatter_template(workspace)
 
-    frontmatter = proposal.raw_file.content.split("---")[1]
-    fields = [line.split(":")[0] for line in frontmatter.strip().splitlines()]
-    assert fields == ["type", "origin", "url", "title", "date", "created"]
-    assert "type: source" in frontmatter  # template value kept
-    assert "date: '2026-07-09'" in frontmatter  # meeting date filled into `date`
+    assert list(template) == [
+        "type",
+        "title",
+        "origin",
+        "url",
+        "captured",
+        "tags",
+        "created",
+        "recording_url",
+        "company",
+        "meeting_date",
+    ]
+    assert template["type"] == "source"  # the schema's own type name, kept literal
+    assert template["title"] == ""  # blank placeholder for fields with no known value
+
+
+def test_capture_transcript_frontmatter_equivalent_to_old_schema_scrape(workspace, transcript):
+    """Same effect as the retired SCHEMA.md yaml-block scrape for a
+    representative transcript: type is kept, and every field the code
+    catalog can fill (title, origin, url, dates) is filled with a real
+    value rather than left as a placeholder."""
+    proposal = prepare_capture(workspace, "transcript", file=transcript)
+    today = datetime.now(UTC).date().isoformat()
+
+    frontmatter = yaml.safe_load(proposal.raw_file.content.split("---")[1])
+    assert frontmatter["type"] == "source"
+    assert frontmatter["title"] == "raw meeting"
     # "origin" is the enumerated kind, not a path; "url" is a KB-root-relative
     # file: reference, never the machine's absolute path.
-    assert "origin: transcript" in frontmatter
-    assert "url: file:2026-07-09-raw-meeting.txt" in frontmatter
+    assert frontmatter["origin"] == "transcript"
+    assert frontmatter["url"] == "file:2026-07-09-raw-meeting.txt"
+    assert frontmatter["meeting_date"] == "2026-07-09"
+    assert frontmatter["captured"] == today
+    assert frontmatter["created"] == today
+    # Fields the schema defines but this capture has no value for stay blank
+    # placeholders rather than being invented or omitted.
+    assert frontmatter["tags"] == ""
+    assert frontmatter["company"] == ""
+    assert frontmatter["recording_url"] == ""
 
 
 def test_capture_origin_is_relative_to_kb_root(workspace, kb_path):
@@ -195,11 +221,6 @@ def test_capture_origin_is_relative_to_kb_root(workspace, kb_path):
     file.write_text("Ed: hi\n")
     proposal = prepare_capture(workspace, "transcript", file=file)
     assert proposal.origin == "sources/audio/call.txt"
-
-
-def test_transcript_frontmatter_template_absent(workspace):
-    # Fixture SCHEMA.md exists but has no yaml template.
-    assert transcript_frontmatter_template(workspace) is None
 
 
 def test_capture_duplicate_detected(workspace, transcript):
@@ -357,10 +378,9 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
     assert "Works on claims automation" in revision_prompt  # jane-doe.md's own body
 
     # The full field catalog (required + optional) for every entity type is
-    # in the extraction prompt regardless of whether SCHEMA.md defines
-    # anything — this fixture's SCHEMA.md has no templates at all (see
-    # test_transcript_frontmatter_template_absent), so this is wakil's own
-    # built-in schema, not workspace prose.
+    # in the extraction prompt unconditionally — it's rendered structurally
+    # from wakil's own schema catalog (load_entity_schemas), not workspace
+    # prose.
     assert "meeting (directory: meetings" in extraction_prompt
     assert "decisions (optional, list)" in extraction_prompt
     assert "action-items (optional, list)" in extraction_prompt
@@ -1057,8 +1077,10 @@ def test_enrichment_guides_reach_prompt(workspace, transcript):
     prepare_enrichment(workspace, source_id, client)
 
     prompt = client.calls[0][1]
-    assert "Workspace guidance from SCHEMA.md" in prompt
     assert "Workspace guidance from RESOLVER.md" in prompt
+    # SCHEMA.md is no longer read at all — its page-shape/metadata role is
+    # covered structurally by the entity-schema catalog instead.
+    assert "SCHEMA.md" not in prompt
     # Frontmatter is stripped from the analyzed text.
     assert "meeting_date:" not in prompt
     # Routing guidance also reaches the resolution call.
