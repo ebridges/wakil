@@ -99,7 +99,7 @@ def _expand_piece(raw_text: str, workspace_root: Path) -> _ExpandedPiece:
     stripped = _REF_RE.sub(_replace, raw_text)
     if not blocks:
         return _ExpandedPiece(text=raw_text, digest=raw_text, referenced_paths=referenced_paths)
-    digest = stripped.strip()
+    digest = re.sub(r"[ \t]{2,}", " ", stripped).strip()
     attached = "\n\n--- Attached Context ---\n\n" + "\n\n".join(blocks)
     return _ExpandedPiece(text=digest + attached, digest=digest, referenced_paths=referenced_paths)
 

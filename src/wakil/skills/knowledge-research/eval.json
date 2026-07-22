@@ -16,7 +16,7 @@
         "Reaches and states exactly one of the skill's named verdicts (Verified / Partially verified / Unverifiable / Misattributed / Retracted or disputed) rather than a vague 'looks credible' judgment.",
         "Does NOT elevate the claim to an independently-verified fact about Acme Corp merely because Jane Doe stated it and it's now written down -- attributes it to Jane Doe as the person who made the claim, since this is a self-report about her own company's funding.",
         "Names the correct next-step skill by directory name: since no durable note for Acme Corp exists yet in the workspace, hands the drafted finding to note-routing (and note-conformance) for placement rather than to note-revision, and separately names entity-enrichment for linking Acme Corp/Meridian Ventures rather than deciding that linkage itself.",
-        "Uses the wikilink form [[people/jane-doe.md]] (full workspace-relative path) when referencing Jane Doe's existing page, not a bare 'Jane Doe' mention or a relative link."
+        "Uses the wikilink form [[people/jane-doe]] (full workspace-relative path, per note-conformance's documented slug-is-filename-minus-.md convention) when referencing Jane Doe's existing page, not a bare 'Jane Doe' mention or a relative link."
       ],
       "related_skills": ["knowledge-query", "note-routing", "note-conformance", "entity-enrichment"]
     },
@@ -35,7 +35,7 @@
         "Re-reads the saved source file (sources/articles/meridian-blog-fnol-post.md) rather than trusting the draft's paraphrase, and reports the actual figure as 35%, not the draft's 40%.",
         "Reaches a verdict of Misattributed or Partially verified rather than Verified -- explicitly flags that a single vendor's own blog post about a 3-customer pilot is not 'an industry study', and that the draft's framing oversells the source's authority and scope.",
         "Does NOT silently carry the draft's 40% figure or 'industry study' framing forward into any proposed note text without flagging the discrepancy.",
-        "Uses the wikilink form [[concepts/claims-routing.md]] (full workspace-relative path with the note's actual filename) when referring to the existing Claims Routing note, not the draft's bare '[[concepts/claims-routing]]' or a relative link.",
+        "Uses the wikilink form [[concepts/claims-routing]] (full workspace-relative path, matching the draft's own already-correct reference per note-conformance's slug-is-filename-minus-.md convention) when referring to the existing Claims Routing note, not a relative link or the note's title as plain text.",
         "Names note-revision as the correct next step for merging the corrected figure and caveat into concepts/claims-routing.md, since that note already exists, rather than proposing a brand-new page."
       ],
       "related_skills": ["knowledge-query", "note-revision"]
@@ -52,7 +52,7 @@
         "Names knowledge-query by directory name as the skill whose brain-first lookup this question actually belongs to, rather than launching straight into this skill's research or claim-verification workflow for a question the KB already answers.",
         "Does NOT reach for an external source (a web search, or `wakil ingest article`) for a question fully answered by material already in the workspace.",
         "Does NOT invoke the claim-verification verdict framework (Verified / Partially verified / Unverifiable / Misattributed / Retracted or disputed) here -- there is no specific claim to trace, only a lookup.",
-        "If it states what the KB says about Jane Doe, uses the wikilink form [[people/jane-doe.md]] rather than a bare 'Jane Doe' reference or a relative link."
+        "If it states what the KB says about Jane Doe, uses the wikilink form [[people/jane-doe]] rather than a bare 'Jane Doe' reference or a relative link."
       ],
       "related_skills": ["knowledge-query"]
     },
