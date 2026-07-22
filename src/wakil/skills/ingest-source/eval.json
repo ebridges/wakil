@@ -12,7 +12,7 @@
       },
       "expected_behavior": [
         "Names the two-command backbone correctly: `wakil ingest transcript inbox/acme-q3-call.txt` (with a --context string) for capture, then `wakil enrich <source-id>` for the analysis/linking step -- not a single invented command that does both.",
-        "Refers to the existing person page using wikilink form (e.g. [[jane-doe]]) rather than a relative Markdown link like ../people/jane-doe.md.",
+        "Refers to the existing person page using wikilink form (e.g. [[people/jane-doe]], the full workspace-relative path per note-conformance's slug-is-filename-minus-.md convention) rather than a relative Markdown link like ../people/jane-doe.md.",
         "States that the DAG's proposal (primary note plus any entity stubs) gets one preview and requires one explicit confirmation before anything is written to the workspace.",
         "Does NOT perform entity resolution or content-synthesis judgment by hand itself -- defers that judgment to the automatic DAG steps `wakil enrich` already runs, rather than deciding itself what the note should say or whether Jane Doe/Tom Reyes match existing pages.",
         "Notes that if Tom Reyes or the pilot detail warrants more texture, back-links, or Timeline entries than the DAG's automatic output provides, the next step is `entity-enrichment` -- named as the actual sibling skill, not an invented step."
