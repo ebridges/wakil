@@ -597,35 +597,61 @@ def prepare_enrichment(
 
 # A run of 1-4 capitalized words: "Mosaic", "Ian Gutwinski", "Riviera Partners".
 _PROPER_NOUN_RE = re.compile(r"\b[A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3}\b")
-# Single capitalized words that are only candidates because they happened to
-# start a sentence — common enough in free-text context strings that they'd
-# otherwise pollute every lookup with irrelevant title matches.
-_PROPER_NOUN_STOPWORDS = {
-    "I",
-    "The",
-    "A",
-    "An",
-    "Meeting",
-    "Call",
-    "Phone",
-    "Yeah",
-    "Well",
-    "So",
-    "But",
-    "And",
-    "This",
-    "That",
-    "We",
-    "She",
-    "He",
-    "They",
-}
+
+# The ~5000 most frequent English words (data/common_words.zip, ranked by
+# frequency in conversational/subtitle text — see data/common_words.SOURCE.md
+# for provenance/license), used below to drop single-token candidates that
+# are ordinary function words, backchannel markers ("well", "so", "right",
+# "okay", "mm-hmm"), or nouns/adjectives swept up during tangential small
+# talk ("Indian", "Steak") rather than genuine proper nouns. Only ever
+# applied to single-token candidates: a 2-4 word run like "Ian Gutwinski" or
+# "Riviera Partners" is a much stronger name signal, and short legitimate
+# company/person names ("Mosaic") must still survive. Zipped rather than
+# stored as plain text to keep this vendored file small in the repo;
+# decompressed once at import time, not re-read per call.
+with zipfile.ZipFile(Path(__file__).parent / "data" / "common_words.zip") as _archive:
+    _COMMON_SINGLE_WORDS = frozenset(_archive.read("common_words.txt").decode().split())
+
+# Exact phrases that regex-match as capitalized word runs but are structural
+# artifacts, not names — the context-expansion delimiter (see
+# wakil.app.context_references) is the only known case.
+_PHRASE_STOPWORDS = {"attached context"}
+
+
+def _is_noise_candidate(phrase: str) -> bool:
+    lowered = phrase.lower()
+    if lowered in _PHRASE_STOPWORDS:
+        return True
+    if " " in phrase:
+        return False
+    return lowered in _COMMON_SINGLE_WORDS
 
 
 # Generic words in a humanized filename/title ("offer", "sync", "call") that
 # would otherwise substring-match unrelated entity notes once casing is no
-# longer a filter (see _title_terms).
-_TITLE_TERM_STOPWORDS = {w.lower() for w in _PROPER_NOUN_STOPWORDS} | {
+# longer a filter (see _title_terms). A separate, smaller mechanism from
+# _is_noise_candidate above: filename-derived terms carry no capitalization
+# signal, so the frequency-based common-word filter (tuned for prose, where
+# "kyle" or "carnes" are common enough to be noise) is too aggressive here.
+_TITLE_TERM_STOPWORDS = {
+    "i",
+    "the",
+    "a",
+    "an",
+    "meeting",
+    "call",
+    "phone",
+    "yeah",
+    "well",
+    "so",
+    "but",
+    "and",
+    "this",
+    "that",
+    "we",
+    "she",
+    "he",
+    "they",
     "sync",
     "offer",
     "prep",
@@ -677,7 +703,7 @@ def _candidate_entity_notes(
     candidates = {
         phrase
         for phrase in _PROPER_NOUN_RE.findall(text)
-        if len(phrase) > 2 and phrase not in _PROPER_NOUN_STOPWORDS
+        if len(phrase) > 2 and not _is_noise_candidate(phrase)
     }
     candidates |= extra_terms
     if not candidates:

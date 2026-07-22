@@ -12,6 +12,7 @@ from wakil.app.ingest_service import (
     EntityUpdate,
     IngestError,
     _candidate_entity_notes,
+    _is_noise_candidate,
     _merge_entity_note,
     _require_workspace_ids,
     _title_terms,
@@ -1055,6 +1056,41 @@ def test_title_terms_drops_generic_filename_words():
     assert "carnes" in terms
     assert "offer" not in terms
     assert "sync" not in terms
+
+
+def test_is_noise_candidate_drops_backchannel_words():
+    # Discourse markers only look like proper nouns because they open a
+    # sentence or a spoken backchannel — a standard stopword list catches
+    # these more completely than a hand-grown set ever could.
+    assert _is_noise_candidate("Mm-hmm")
+    assert _is_noise_candidate("Right")
+    assert _is_noise_candidate("Okay")
+
+
+def test_is_noise_candidate_drops_common_single_token_words():
+    # Tangential small talk ("we grabbed Indian food", "he ordered Steak")
+    # picks up capitalized common nouns/adjectives that aren't discourse
+    # markers and aren't in any stopword list — only a common-word
+    # frequency filter catches these.
+    assert _is_noise_candidate("Indian")
+    assert _is_noise_candidate("Steak")
+    # A short legitimate company name must survive the same filter.
+    assert not _is_noise_candidate("Mosaic")
+
+
+def test_is_noise_candidate_keeps_multiword_names():
+    # The common-word filter only ever applies to single-token candidates —
+    # a 2-4 word capitalized run is too strong a proper-noun signal to
+    # second-guess by word frequency.
+    assert not _is_noise_candidate("Ian Gutwinski")
+    assert not _is_noise_candidate("Riviera Partners")
+
+
+def test_is_noise_candidate_drops_attached_context_delimiter():
+    # Defense-in-depth: if raw text ever contains the context-expansion
+    # delimiter (wakil.app.context_references), "Attached Context" alone
+    # regex-matches as a 2-word candidate.
+    assert _is_noise_candidate("Attached Context")
 
 
 def test_enrichment_related_notes_include_name_matched_entities(workspace, transcript, kb_path):
