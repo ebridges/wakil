@@ -30,7 +30,7 @@ DATABASE_FILENAME = "wakil.db"
 QMD_DIRNAME = "qmd"
 
 # Top-level files treated as high-priority workspace context when present.
-SPECIAL_FILES = ("README.md", "AGENTS.md", "SCHEMA.md", "RESOLVER.md")
+SPECIAL_FILES = ("README.md", "AGENTS.md", "RESOLVER.md")
 
 
 def resolve_state_root(root: Path) -> Path:

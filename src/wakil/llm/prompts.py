@@ -123,8 +123,7 @@ def build_extraction_prompt(
         "",
     ]
     for name, content in (guides or {}).items():
-        purpose = "page shape and metadata" if name == "SCHEMA.md" else "where notes belong"
-        parts += [f"Workspace guidance from {name} ({purpose}):", content, ""]
+        parts += [f"Workspace guidance from {name} (where notes belong):", content, ""]
     parts += [
         f"Existing related notes:\n{_render_related(related_notes)}",
         "",
@@ -157,8 +156,7 @@ def build_resolution_prompt(
     if context:
         parts += ["User-provided context about this source:", context, ""]
     for name, content in (guides or {}).items():
-        purpose = "page shape and metadata" if name == "SCHEMA.md" else "where notes belong"
-        parts += [f"Workspace guidance from {name} ({purpose}):", content, ""]
+        parts += [f"Workspace guidance from {name} (where notes belong):", content, ""]
     parts += ["Existing notes that may already cover these entities:"]
     parts += [_render_related(related_notes), ""]
     if extraction_summary:
