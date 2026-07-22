@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import yaml
@@ -6,6 +7,23 @@ from typer.testing import CliRunner
 from wakil.cli.main import app
 
 runner = CliRunner()
+
+CAPTURE_METADATA_JSON = json.dumps(
+    {
+        "title": "2026-07-09 Fake Capture Title",
+        "abstract": "A fake abstract for CLI capture tests, roughly the length a real one "
+        "would be, useful for retrieval without being a full summary.",
+    }
+)
+
+
+class _FakeCaptureClient:
+    """The capture-time title/abstract call (docs/adr/0010): one scripted payload."""
+
+    model = "fake-model"
+
+    def complete(self, system, prompt, max_tokens=8192):
+        return CAPTURE_METADATA_JSON
 
 
 def _fake_qmd_run(qmd_dir: Path):
@@ -199,6 +217,7 @@ def test_init_creates_collection_and_ingest_refreshes_index(kb_path: Path, monke
         return real_fake_run(cmd, **kwargs)
 
     monkeypatch.setattr("wakil.integrations.qmd.subprocess.run", tracking_run)
+    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: _FakeCaptureClient())
 
     transcript = kb_path / "meeting.txt"
     transcript.write_text("Q: hi\nA: hi\n")
@@ -222,6 +241,7 @@ def test_ingest_skips_refresh_when_no_collection_registered(kb_path: Path, monke
         return real_fake_run(cmd, **kwargs)
 
     monkeypatch.setattr("wakil.integrations.qmd.subprocess.run", tracking_run)
+    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: _FakeCaptureClient())
 
     transcript = kb_path / "meeting.txt"
     transcript.write_text("Q: hi\nA: hi\n")
