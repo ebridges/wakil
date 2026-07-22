@@ -9,6 +9,33 @@ from wakil.cli.main import app
 
 runner = CliRunner()
 
+CAPTURE_METADATA_JSON = json.dumps(
+    {
+        "title": "2026-07-09 Fake Capture Title",
+        "abstract": "A fake abstract for git-landing tests, roughly the length a real one "
+        "would be.",
+    }
+)
+
+
+class FakeCaptureClient:
+    """The capture-time title/abstract call: one scripted CaptureMetadata payload."""
+
+    model = "fake-model"
+
+    def __init__(self):
+        self.queue = [CAPTURE_METADATA_JSON]
+
+    def complete(self, system, prompt, max_tokens=8192):
+        return self.queue.pop(0)
+
+
+def _client_queue(monkeypatch, *clients):
+    """Patch resolve_client to hand back each client in order, one per call --
+    capture and enrich each resolve a client independently."""
+    it = iter(clients)
+    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: next(it))
+
 
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(
@@ -29,7 +56,7 @@ def git_kb(kb_path: Path) -> Path:
 
 
 def test_ingest_lands_on_a_branch_and_returns_to_main_by_default(git_kb, monkeypatch):
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
+    _client_queue(monkeypatch, FakeCaptureClient())
     monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: False)
     transcript = git_kb / "meeting.txt"
     transcript.write_text("We approved the routing prototype.\n")
@@ -56,7 +83,7 @@ def test_ingest_lands_on_a_branch_and_returns_to_main_by_default(git_kb, monkeyp
 
 
 def test_ingest_branch_refuses_dirty_tree(git_kb, monkeypatch):
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
+    _client_queue(monkeypatch, FakeCaptureClient())
     (git_kb / "README.md").write_text("# dirty edit\n")
     transcript = git_kb / "meeting.txt"
     transcript.write_text("Some notes.\n")
@@ -71,7 +98,7 @@ def test_ingest_branch_refuses_dirty_tree(git_kb, monkeypatch):
 
 
 def test_ingest_local_skips_git_entirely(git_kb, monkeypatch):
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = git_kb / "meeting.txt"
     transcript.write_text("Notes for local flow.\n")
     (git_kb / ".gitignore").write_text("meeting.txt\n")
@@ -94,7 +121,7 @@ def test_ingest_returns_to_original_branch_when_apply_fails(git_kb, monkeypatch)
     its original branch rather than being left stranded."""
     from wakil.app.ingest_service import IngestError
 
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = git_kb / "meeting.txt"
     transcript.write_text("Some notes.\n")
     (git_kb / ".gitignore").write_text("meeting.txt\n")
@@ -145,7 +172,7 @@ def test_enrich_lands_on_the_same_branch_capture_started(git_kb, monkeypatch):
         def complete(self, system, prompt, max_tokens=8192):
             return self.queue.pop(0)
 
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeClient())
     monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: False)
     transcript = git_kb / "meeting.txt"
     transcript.write_text("We approved the routing prototype.\n")

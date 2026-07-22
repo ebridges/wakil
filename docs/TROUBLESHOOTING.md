@@ -49,15 +49,24 @@ Symptom: a live `enrich` run logged reconciliation "corrections" such as `[[peop
 
 Non-transcript raw captures written by `_build_raw_file` come out with frontmatter fields (`type: source`, `source_type:`, `origin:`, `title:`, `retrieved:`) that are hardcoded in the function rather than derived from the target vault's actual `source` schema. In at least one real vault, the schema uses `captured:` for the same concept, not `retrieved:`, so every non-transcript ingest silently writes non-conformant frontmatter into `sources/`. This isn't visible from reading `ingest_service.py` alone — it only surfaces by diffing the hardcoded keys against the vault's own `schema.md`. Fix by sourcing these field names from the vault's schema/skill definitions (as the transcript branch and `_KNOWN_FIELD_VALUES` mapping already do) instead of hardcoding them in `_build_raw_file`.
 
-### Workspace guide files (SCHEMA.md, RESOLVER.md) are silently truncated at 4,000 chars, with no warning
+### `frontmatter.dumps()` alphabetizes keys unless `sort_keys=False` is passed explicitly
+**Date:** 2026-07-21 · **Source:** `src/wakil/app/ingest_service.py` (`apply_abstract_backfill`)
 
-**Date:** 2026-07-20 · **Source:** `src/wakil/app/ingest_service.py:70` (`GUIDE_MAX_CHARS = 4_000`), `src/wakil/app/ingest_service.py:1221-1231` (`load_workspace_guides`)
+**Symptom:** A metadata-only rewrite (`frontmatter.loads(raw)` → mutate a couple of keys → `frontmatter.dumps(post)`) was meant to change only the touched keys, but the round trip silently reordered every other frontmatter field alphabetically, producing a large, misleading diff for what should have been a two-line change.
 
-**Mechanism:** `load_workspace_guides()` reads each of `SCHEMA.md` and `RESOLVER.md` (if present under the workspace root) and slices it with `[:GUIDE_MAX_CHARS]`, where `GUIDE_MAX_CHARS = 4_000`. This is a blind character-count cutoff: anything past char 4,000 is dropped before the guide content ever reaches the model, with no truncation warning, log message, or CLI-visible indication that it happened. There is no test coverage for this path (`tests/fixtures/kb/SCHEMA.md` is only 96 chars, well under the cutoff, so the truncation branch is never exercised).
+**Root cause:** `python-frontmatter`'s `dumps()` forwards `**kwargs` to its YAML handler, which defaults to `yaml.dump`'s own default (`sort_keys=True`) when no override is given — there's no hint of this in `frontmatter`'s own API surface, only in the underlying PyYAML behavior. This is presumably why every other frontmatter-writing call site in this codebase (`_build_stub_entities`, `_stub_content`, `schema_migrate_service`) bypasses `frontmatter.dumps()` entirely and calls `yaml.safe_dump(metadata, sort_keys=False, ...)` directly.
 
-**Implication:** If a workspace's `SCHEMA.md` or `RESOLVER.md` grows past 4,000 characters, any frontmatter fields or routing rules declared after that point are silently dropped from what the model sees during ingest — with nothing in the output to indicate the guide was cut off. This is easy to miss because the file looks complete when opened in an editor.
+**Fix:** Pass `sort_keys=False` explicitly to `frontmatter.dumps(post, sort_keys=False)` for any future round-trip edit that needs to preserve existing key order (new keys still append at the end, in insertion order) — verified interactively before relying on it in `apply_abstract_backfill`.
 
-**Fix / workaround:** If ingest behavior seems to ignore rules or fields defined later in `SCHEMA.md`/`RESOLVER.md`, check the file's character count against the 4,000-char `GUIDE_MAX_CHARS` limit first. Until a truncation warning is added, keep guide files under ~4,000 chars (front-load the most important rules), or raise `GUIDE_MAX_CHARS` in `ingest_service.py`.
+### Workspace guide file (RESOLVER.md) is silently truncated at 4,000 chars, with no warning
+
+**Date:** 2026-07-20 · **Updated:** 2026-07-21 (`docs/adr/0011-retire-schema-md-dependency.md` removed `SCHEMA.md` from `load_workspace_guides` entirely — this note now applies to `RESOLVER.md` only) · **Source:** `src/wakil/app/ingest_service.py:70` (`GUIDE_MAX_CHARS = 4_000`), `load_workspace_guides`
+
+**Mechanism:** `load_workspace_guides()` reads `RESOLVER.md` (if present under the workspace root) and slices it with `[:GUIDE_MAX_CHARS]`, where `GUIDE_MAX_CHARS = 4_000`. This is a blind character-count cutoff: anything past char 4,000 is dropped before the guide content ever reaches the model, with no truncation warning, log message, or CLI-visible indication that it happened. There is no test coverage for this path.
+
+**Implication:** If a workspace's `RESOLVER.md` grows past 4,000 characters, any routing rules declared after that point are silently dropped from what the model sees during ingest — with nothing in the output to indicate the guide was cut off. This is easy to miss because the file looks complete when opened in an editor.
+
+**Fix / workaround:** If ingest behavior seems to ignore rules defined later in `RESOLVER.md`, check the file's character count against the 4,000-char `GUIDE_MAX_CHARS` limit first. Until a truncation warning is added, keep the guide file under ~4,000 chars (front-load the most important rules), or raise `GUIDE_MAX_CHARS` in `ingest_service.py`.
 
 ### Entity resolution misses names that only appear in the filename, not the transcript body
 
@@ -154,4 +163,22 @@ Fixed by stamping `metadata["updated"] = today` unconditionally on every merge �
 After the two fixes above got `wakil enrich` writing again, the diff preview for `companies/mosaic-private-markets.md` showed its entire `## Compiled Truth` section — a long, carefully synthesized paragraph-and-bullet block — replaced by nothing, so the file went straight from the H1 to `## Timeline / Log`. Cause: the model returned `has_update=True` (a new Timeline entry was warranted) with an empty/absent `compiled_truth` (nothing about the State needed re-synthesis) — a legitimate combination — but `_merge_entity_note` read "no compiled_truth" as "the top section is now empty" rather than "no change to the top section," and wrote exactly that. This is the precise "clobbering bug" `note-revision/SKILL.md` warns about (full-file-style regeneration silently dropping prior content), except living in wakil's own merge code rather than in model behavior — a diff-preview review would have caught it (per that skill's "diff your draft, stop if it's shorter" step), but it's better to not produce the bad diff in the first place.
 
 Fixed by falling back to the existing top section (stripping its own trailing `---` divider) whenever `compiled_truth` is empty, instead of dropping it. If a future entity-update diff shows content vanishing rather than being added to, check whether the responsible field was actually empty in the model's response before assuming the prompt is at fault.
+
+---
+
+### CI-only test failures after a command starts requiring a model provider (a local API key masks the gap)
+
+**Date:** 2026-07-21 · **Source:** PR #24, `feat/capture-time-title-abstract` — `test_qmd_cli.py`
+
+`docs/adr/0010` made `wakil ingest` require a resolved `ModelClient` (capture now generates title/abstract). Two pre-existing tests in `tests/integration/test_qmd_cli.py` invoke `wakil ingest transcript` without mocking `wakil.llm.client.resolve_client`. They passed in the PR author's own environment — and were self-reported as "pytest clean" — because a real `ANTHROPIC_API_KEY` happened to be set there, so `resolve_client()` silently succeeded against the live API. CI has no such key, so both failed there with "Ingest needs a model provider," exit code 1.
+
+If a command starts requiring a model provider for the first time, grep the whole test suite for CLI invocations of that command (`runner.invoke(app, [..., "ingest"/"enrich", ...])`) — not just the test file for the change being made — since any of them can be silently relying on a real key rather than a mock. Don't trust a "pytest clean" self-report (agent or human) that wasn't run with API-key env vars explicitly unset; `env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY uv run pytest -q` is the way to actually reproduce CI's clean-environment behavior locally.
+
+### A `git commit` after manual conflict-resolution edits can silently omit the last fix (passes locally, fails in CI)
+
+**Date:** 2026-07-22 · **Source:** PR #24, `feat/capture-time-title-abstract` — merge-conflict resolution with `main`
+
+After resolving a merge conflict by hand and fixing two resulting test failures with further edits, `git status` showed `MM tests/unit/test_ingest_service.py` (staged *and* unstaged changes to the same file) immediately before running `git commit -m "..."` — a signal that got missed. Plain `git commit` (no `-a`, no prior `git add`) only commits the staged half; the unstaged edits — the actual fix for both failures — never made it into the commit. `pytest` run locally right after still passed, because it reads the working tree on disk, not what's actually in the commit, so the gap was invisible until CI (which checks out the real commit) failed with the exact same two pre-fix errors.
+
+After any manual multi-file edit immediately followed by `git commit`, check `git status` for a lingering `M` in the *unstaged* column on a file just edited — `MM` (or a bare unstaged `M` right after an edit) means `git add` didn't pick up the latest change. `git commit -a` (for tracked files) or an explicit `git add <file>` right before `git commit` removes the ambiguity. More generally: a local "tests pass" result is a claim about the working tree, not about the commit that was just made — if something depends on the commit specifically (CI, a fresh clone, a teammate's pull), diff `HEAD` against the working tree (`git diff HEAD -- <file>`) before trusting that the commit is complete.
 

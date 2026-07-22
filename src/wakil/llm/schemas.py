@@ -68,6 +68,16 @@ class ExtractionOutput(BaseModel):
     )
 
 
+class CaptureMetadata(BaseModel):
+    """Capture-time model call (docs/adr/0010): a short title and a dense
+    abstract for a freshly captured source, generated once so the raw
+    file's frontmatter carries durable, content-derived context beyond
+    the filename."""
+
+    title: str = Field(description="yyyy-mm-dd prefixed, descriptive, under 60 characters.")
+    abstract: str = Field(description="~300 characters, dense enough for retrieval/search.")
+
+
 class EntityResolution(BaseModel):
     """Second model call, one decision per mentioned entity."""
 

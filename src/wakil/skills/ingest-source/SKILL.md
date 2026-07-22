@@ -20,7 +20,7 @@ For the three shapes `wakil` ingests natively, the whole pipeline is two
 commands:
 
 ```text
-wakil ingest {transcript,text,article}     step 1: capture (deterministic, no model)
+wakil ingest {transcript,text,article}     step 1: capture (deterministic + one title/abstract call)
 wakil enrich <source-id>                   step 2: analyze and link (model-driven DAG)
 ```
 

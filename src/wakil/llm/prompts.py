@@ -24,6 +24,16 @@ Rules:
 """
 
 
+CAPTURE_METADATA_SYSTEM_PROMPT = """\
+You are wakil, a careful assistant for a personal Markdown knowledge base.
+
+A source has just been captured. Write a short title and a brief abstract \
+for it, grounded only in the source document given. Respond with a single \
+JSON object matching the schema given in the request — no code fences, no \
+prose outside the JSON.
+"""
+
+
 @dataclass
 class ContextBlock:
     """One numbered piece of grounding context shown to the model."""
@@ -32,6 +42,43 @@ class ContextBlock:
     kind: str  # note | memory | source
     title: str
     text: str
+
+
+def build_capture_metadata_prompt(
+    source_type: str,
+    origin: str,
+    text: str,
+    today: str,
+    context: str | None = None,
+) -> str:
+    """User content for the capture-time title/abstract call (docs/adr/0010).
+
+    A single, cheap model call made once at capture time — everything else
+    about the raw capture stays deterministic; only these two frontmatter
+    fields come from the model.
+    """
+    parts = [
+        f"Source type: {source_type}",
+        f"Origin: {origin}",
+        "",
+        "Write a title and an abstract for this captured source.",
+        "",
+        "Title rules:",
+        f"- Prefixed with the date of the ingest: {today}",
+        "- Descriptive enough to identify the page from a search result",
+        "- Short enough to scan in a list (under 60 characters)",
+        '- NOT a sentence ("Meeting with Pedro" not "Meeting with Pedro about '
+        'the new deal structure")',
+        '- NOT generic ("Pedro Franceschi" not "Person Page")',
+        "",
+        "Abstract: roughly 300 characters, dense enough to be useful for "
+        "retrieval and search — not a full summary.",
+        "",
+    ]
+    if context:
+        parts += ["User-provided context about this source:", context, ""]
+    parts += [f"Source document:\n\n{text}"]
+    return "\n".join(parts)
 
 
 def build_extraction_prompt(
@@ -76,8 +123,7 @@ def build_extraction_prompt(
         "",
     ]
     for name, content in (guides or {}).items():
-        purpose = "page shape and metadata" if name == "SCHEMA.md" else "where notes belong"
-        parts += [f"Workspace guidance from {name} ({purpose}):", content, ""]
+        parts += [f"Workspace guidance from {name} (where notes belong):", content, ""]
     parts += [
         f"Existing related notes:\n{_render_related(related_notes)}",
         "",
@@ -110,8 +156,7 @@ def build_resolution_prompt(
     if context:
         parts += ["User-provided context about this source:", context, ""]
     for name, content in (guides or {}).items():
-        purpose = "page shape and metadata" if name == "SCHEMA.md" else "where notes belong"
-        parts += [f"Workspace guidance from {name} ({purpose}):", content, ""]
+        parts += [f"Workspace guidance from {name} (where notes belong):", content, ""]
     parts += ["Existing notes that may already cover these entities:"]
     parts += [_render_related(related_notes), ""]
     if extraction_summary:

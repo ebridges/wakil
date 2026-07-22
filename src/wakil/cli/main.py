@@ -1,7 +1,7 @@
 """wakil CLI entry point."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
@@ -30,6 +30,9 @@ from wakil.ui.console import (
     print_status,
 )
 
+if TYPE_CHECKING:
+    from wakil.app.context_references import ResolvedContext
+
 WORKSPACE_HELP = (
     "Workspace directory or registered workspace name "
     "(defaults to the current directory, searching upward)."
@@ -56,6 +59,8 @@ qmd_collection_app = typer.Typer(
     help="Manage QMD collections (indexed folders).", no_args_is_help=True
 )
 qmd_app.add_typer(qmd_collection_app, name="collection")
+sources_app = typer.Typer(help="Maintain captured sources.", no_args_is_help=True)
+app.add_typer(sources_app, name="sources")
 
 
 @app.callback()
@@ -287,7 +292,7 @@ def _refresh_qmd_index(config: WorkspaceConfig) -> None:
 
 def _resolve_context_or_exit(
     context: list[str] | None, context_file: list[Path] | None, workspace_root: Path
-) -> str | None:
+) -> "ResolvedContext | None":
     from wakil.app.context_references import ContextResolutionError, resolve_context
 
     try:
@@ -314,21 +319,42 @@ def _run_ingest(
     context: list[str] | None = None,
     context_file: list[Path] | None = None,
 ) -> None:
-    """Step 1: capture the raw source. Deterministic — no model involved.
+    """Step 1: capture the raw source. Deterministic except for one small
+    model call that generates the frontmatter title/abstract (ADR 0010) —
+    the raw file's path/slug itself stays fully deterministic.
 
     Branches, commits, and opens a draft PR by default; --local writes the
     raw file only, with no git operations.
     """
     from wakil.app.git_service import GitServiceError, abandon_landing, prepare_landing
     from wakil.app.ingest_service import IngestError, apply_capture, prepare_capture
+    from wakil.llm.client import ModelError, resolve_client
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
-    context = _resolve_context_or_exit(context, context_file, config.root_path)
+    resolved_context = _resolve_context_or_exit(context, context_file, config.root_path)
+    client = resolve_client()
+    if client is None:
+        console.print(
+            "[red]Ingest needs a model provider.[/red] Set [bold]ANTHROPIC_API_KEY[/bold] "
+            "(or OPENAI_API_KEY + WAKIL_MODEL for an OpenAI-compatible endpoint)."
+        )
+        raise typer.Exit(code=1)
     try:
         with console.status("Preparing capture..."):
-            proposal = prepare_capture(config, kind, file=file, url=url, context=context)
-    except IngestError as exc:
+            proposal = prepare_capture(
+                config,
+                kind,
+                client,
+                file=file,
+                url=url,
+                context=resolved_context.text if resolved_context else None,
+                context_digest=resolved_context.digest if resolved_context else None,
+                context_referenced_paths=(
+                    resolved_context.referenced_paths if resolved_context else None
+                ),
+            )
+    except (IngestError, ModelError) as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
@@ -429,7 +455,7 @@ def enrich(
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
-    context = _resolve_context_or_exit(context, context_file, config.root_path)
+    resolved_context = _resolve_context_or_exit(context, context_file, config.root_path)
     client = resolve_client()
     if client is None:
         console.print(
@@ -453,7 +479,17 @@ def enrich(
 
     try:
         with console.status(f"Analyzing source #{source_id} with {client.model}..."):
-            proposal = prepare_enrichment(config, source_id, client, context=context, force=force)
+            proposal = prepare_enrichment(
+                config,
+                source_id,
+                client,
+                context=resolved_context.text if resolved_context else None,
+                context_digest=resolved_context.digest if resolved_context else None,
+                context_referenced_paths=(
+                    resolved_context.referenced_paths if resolved_context else None
+                ),
+                force=force,
+            )
     except (IngestError, ModelError) as exc:
         console.print(f"[red]Enrichment failed:[/red] {exc}")
         abandon_landing(config, landing)
@@ -566,6 +602,52 @@ def ingest_article(
         context=context,
         context_file=context_file,
     )
+
+
+@sources_app.command("backfill-abstract")
+def sources_backfill_abstract(
+    ctx: typer.Context,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Backfill title/abstract for sources captured before ADR 0010.
+
+    Metadata-only: rewrites each raw file's frontmatter (title/abstract
+    keys) and the matching Source row. Never re-runs enrichment.
+    """
+    from wakil.app.ingest_service import (
+        IngestError,
+        apply_abstract_backfill,
+        plan_abstract_backfill,
+    )
+    from wakil.llm.client import ModelError, resolve_client
+    from wakil.ui.console import print_abstract_backfill_plan
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    client = resolve_client()
+    if client is None:
+        console.print(
+            "[red]Backfill needs a model provider.[/red] Set [bold]ANTHROPIC_API_KEY[/bold] "
+            "(or OPENAI_API_KEY + WAKIL_MODEL for an OpenAI-compatible endpoint)."
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        with console.status("Scanning sources for a missing abstract..."):
+            items = plan_abstract_backfill(config, client)
+    except (IngestError, ModelError) as exc:
+        console.print(f"[red]Backfill failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    print_abstract_backfill_plan(items)
+    if not items:
+        return
+    if not yes and not typer.confirm(f"Rewrite title/abstract for {len(items)} source(s)?"):
+        console.print("Aborted; nothing was written.")
+        raise typer.Exit(code=0)
+
+    updated = apply_abstract_backfill(config, items)
+    console.print(f"[green]Updated {len(updated)} source(s).[/green]")
 
 
 def _memory_session(ctx: typer.Context):

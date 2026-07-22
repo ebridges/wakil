@@ -26,7 +26,7 @@ raw material (any shape)
         │
         │  source-ingestion — THIS skill: normalize to transcript/text/article
         ▼
-wakil ingest transcript|text|article    (capture: deterministic, no model)
+wakil ingest transcript|text|article    (capture: deterministic + one title/abstract call)
         │
         ▼
 wakil enrich <source-id>                (DAG: extraction → entity resolution → apply)
