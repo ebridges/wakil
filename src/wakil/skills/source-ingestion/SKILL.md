@@ -89,6 +89,16 @@ string before invoking `wakil ingest`. See `references/source-types.md` for
 the per-source-type judgment — what to extract, how to classify it, and
 where each legacy format's genuine hard-won judgment carries over.
 
+If the material genuinely can't be extracted — a video with no captions and
+no other transcript source, a corrupted file, an unreadable scan — say so
+plainly and stop; that's a dead end for this skill, not something to paper
+over. Don't invent a workaround pipeline (a third-party transcription tool,
+a speech-to-text service wakil doesn't actually integrate) and don't guess
+at a `wakil ingest` invocation for material that was never actually
+extracted — a fabricated command is worse than no command, since it looks
+legitimate. Say what's missing and suggest only alternatives grounded in
+what's actually available (another caption source, checking back later).
+
 ## Exact-phrasing preservation
 
 When normalizing captures someone's original words — a transcript, a voice
@@ -152,9 +162,12 @@ Once material is normalized, hand off in order:
       not) pre-decide what the material means or which entities it
       touches.
 - [ ] Step 4: Hand off further judgment as needed. If you're deciding
-      whether normalization was even the right call, or orchestrating the
-      ingest/enrich sequence itself (branches, commits, PRs), that's
-      `ingest-source`'s territory. If the resulting note needs a home
+      whether normalization was even the right call, which of several items
+      are even worth capturing, or orchestrating the ingest/enrich sequence
+      itself (branches, PRs), that's `ingest-source`'s territory — and the
+      actual commit is `kb-commit`'s job specifically, not something to
+      attribute to `ingest-source` as a bundled catch-all. If the resulting
+      note needs a home
       beyond what `wakil enrich` proposes, or needs merging into a note
       that already exists, that's `note-routing` and `note-revision`,
       respectively — not this skill.
