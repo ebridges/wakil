@@ -169,12 +169,16 @@ Absent a workspace-specific naming convention in `RESOLVER.md`, use:
       exception only if `RESOLVER.md` itself defines a home for that case.
       For a hard call `RESOLVER.md` doesn't resolve directly, check "Default
       judgment patterns" above before asking.
-- [ ] Step 5: Generate the filename using the workspace's own slug/naming
-      convention as stated in `RESOLVER.md`, or the "Naming defaults" above
-      when it doesn't specify one.
-- [ ] Step 6: When the routing decision isn't obvious — genuinely fits two
-      destinations, or the workspace's rules underdetermine it — surface
-      the ambiguity and your reasoning rather than silently picking one.
+- [ ] Step 5: Before generating a filename, confirm Step 4 actually landed on
+      one destination directory. When it didn't — the content genuinely fits
+      two destinations, or the workspace's rules underdetermine it — stop
+      here: surface the ambiguity and your reasoning rather than silently
+      picking one, and do not generate a filename/slug at all, since it
+      depends on a directory that isn't settled yet.
+- [ ] Step 6: Once the directory is actually settled, generate the filename
+      using the workspace's own slug/naming convention as stated in
+      `RESOLVER.md`, or the "Naming defaults" above when it doesn't specify
+      one.
 
 ## Hard rule
 
