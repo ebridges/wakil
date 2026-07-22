@@ -49,15 +49,15 @@ Symptom: a live `enrich` run logged reconciliation "corrections" such as `[[peop
 
 Non-transcript raw captures written by `_build_raw_file` come out with frontmatter fields (`type: source`, `source_type:`, `origin:`, `title:`, `retrieved:`) that are hardcoded in the function rather than derived from the target vault's actual `source` schema. In at least one real vault, the schema uses `captured:` for the same concept, not `retrieved:`, so every non-transcript ingest silently writes non-conformant frontmatter into `sources/`. This isn't visible from reading `ingest_service.py` alone — it only surfaces by diffing the hardcoded keys against the vault's own `schema.md`. Fix by sourcing these field names from the vault's schema/skill definitions (as the transcript branch and `_KNOWN_FIELD_VALUES` mapping already do) instead of hardcoding them in `_build_raw_file`.
 
-### Workspace guide files (SCHEMA.md, RESOLVER.md) are silently truncated at 4,000 chars, with no warning
+### Workspace guide file (RESOLVER.md) is silently truncated at 4,000 chars, with no warning
 
-**Date:** 2026-07-20 · **Source:** `src/wakil/app/ingest_service.py:70` (`GUIDE_MAX_CHARS = 4_000`), `src/wakil/app/ingest_service.py:1221-1231` (`load_workspace_guides`)
+**Date:** 2026-07-20 · **Updated:** 2026-07-21 (`docs/adr/0011-retire-schema-md-dependency.md` removed `SCHEMA.md` from `load_workspace_guides` entirely — this note now applies to `RESOLVER.md` only) · **Source:** `src/wakil/app/ingest_service.py:70` (`GUIDE_MAX_CHARS = 4_000`), `load_workspace_guides`
 
-**Mechanism:** `load_workspace_guides()` reads each of `SCHEMA.md` and `RESOLVER.md` (if present under the workspace root) and slices it with `[:GUIDE_MAX_CHARS]`, where `GUIDE_MAX_CHARS = 4_000`. This is a blind character-count cutoff: anything past char 4,000 is dropped before the guide content ever reaches the model, with no truncation warning, log message, or CLI-visible indication that it happened. There is no test coverage for this path (`tests/fixtures/kb/SCHEMA.md` is only 96 chars, well under the cutoff, so the truncation branch is never exercised).
+**Mechanism:** `load_workspace_guides()` reads `RESOLVER.md` (if present under the workspace root) and slices it with `[:GUIDE_MAX_CHARS]`, where `GUIDE_MAX_CHARS = 4_000`. This is a blind character-count cutoff: anything past char 4,000 is dropped before the guide content ever reaches the model, with no truncation warning, log message, or CLI-visible indication that it happened. There is no test coverage for this path.
 
-**Implication:** If a workspace's `SCHEMA.md` or `RESOLVER.md` grows past 4,000 characters, any frontmatter fields or routing rules declared after that point are silently dropped from what the model sees during ingest — with nothing in the output to indicate the guide was cut off. This is easy to miss because the file looks complete when opened in an editor.
+**Implication:** If a workspace's `RESOLVER.md` grows past 4,000 characters, any routing rules declared after that point are silently dropped from what the model sees during ingest — with nothing in the output to indicate the guide was cut off. This is easy to miss because the file looks complete when opened in an editor.
 
-**Fix / workaround:** If ingest behavior seems to ignore rules or fields defined later in `SCHEMA.md`/`RESOLVER.md`, check the file's character count against the 4,000-char `GUIDE_MAX_CHARS` limit first. Until a truncation warning is added, keep guide files under ~4,000 chars (front-load the most important rules), or raise `GUIDE_MAX_CHARS` in `ingest_service.py`.
+**Fix / workaround:** If ingest behavior seems to ignore rules defined later in `RESOLVER.md`, check the file's character count against the 4,000-char `GUIDE_MAX_CHARS` limit first. Until a truncation warning is added, keep the guide file under ~4,000 chars (front-load the most important rules), or raise `GUIDE_MAX_CHARS` in `ingest_service.py`.
 
 ### Entity resolution misses names that only appear in the filename, not the transcript body
 
