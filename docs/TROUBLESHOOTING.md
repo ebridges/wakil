@@ -174,3 +174,11 @@ Fixed by falling back to the existing top section (stripping its own trailing `-
 
 If a command starts requiring a model provider for the first time, grep the whole test suite for CLI invocations of that command (`runner.invoke(app, [..., "ingest"/"enrich", ...])`) — not just the test file for the change being made — since any of them can be silently relying on a real key rather than a mock. Don't trust a "pytest clean" self-report (agent or human) that wasn't run with API-key env vars explicitly unset; `env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY uv run pytest -q` is the way to actually reproduce CI's clean-environment behavior locally.
 
+### A `git commit` after manual conflict-resolution edits can silently omit the last fix (passes locally, fails in CI)
+
+**Date:** 2026-07-22 · **Source:** PR #24, `feat/capture-time-title-abstract` — merge-conflict resolution with `main`
+
+After resolving a merge conflict by hand and fixing two resulting test failures with further edits, `git status` showed `MM tests/unit/test_ingest_service.py` (staged *and* unstaged changes to the same file) immediately before running `git commit -m "..."` — a signal that got missed. Plain `git commit` (no `-a`, no prior `git add`) only commits the staged half; the unstaged edits — the actual fix for both failures — never made it into the commit. `pytest` run locally right after still passed, because it reads the working tree on disk, not what's actually in the commit, so the gap was invisible until CI (which checks out the real commit) failed with the exact same two pre-fix errors.
+
+After any manual multi-file edit immediately followed by `git commit`, check `git status` for a lingering `M` in the *unstaged* column on a file just edited — `MM` (or a bare unstaged `M` right after an edit) means `git add` didn't pick up the latest change. `git commit -a` (for tracked files) or an explicit `git add <file>` right before `git commit` removes the ambiguity. More generally: a local "tests pass" result is a claim about the working tree, not about the commit that was just made — if something depends on the commit specifically (CI, a fresh clone, a teammate's pull), diff `HEAD` against the working tree (`git diff HEAD -- <file>`) before trusting that the commit is complete.
+
