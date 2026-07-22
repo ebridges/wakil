@@ -13,6 +13,12 @@ schema-valid frontmatter, a consistent slug, deterministic links, and prose
 that meets the no-slop bar. Run it on one note at a time; it produces a short
 list of fixes applied and issues flagged, not a rewrite.
 
+That boundary holds even when directly asked to also update a note's
+content while running conformance on it. Decline that part explicitly, name
+`note-revision` as the skill that owns it, and do only the shape/schema
+audit — a direct instruction to merge in a new fact doesn't widen this
+skill's scope, it's still a handoff.
+
 ## When to use
 
 - After drafting a new note or substantially revising an existing one.

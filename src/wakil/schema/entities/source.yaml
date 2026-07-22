@@ -18,6 +18,7 @@ fields:
   captured: {required: true, kind: date}
   tags: {required: false, kind: list}
   created: {required: false, kind: date}
+  abstract: {required: false, kind: string}
 origins:
   article:
     author: {required: false, kind: string}

@@ -1,10 +1,16 @@
 """Ingest raw sources into the knowledge base — in two separate steps.
 
-Step 1, capture (`wakil ingest ...`): deterministic only, no model. The
-source text is extracted (transcripts get light cleanup), deduped by content
-hash, and written under sources/ as a raw capture with frontmatter shaped by
-the KB's SCHEMA.md when it defines a template for transcripts/sources —
-otherwise transcripts get exactly two fields: create date and meeting date.
+Step 1, capture (`wakil ingest ...`): deterministic except for one small
+model call (docs/adr/0010-capture-time-title-and-abstract-generation.md).
+The source text is extracted (transcripts get light cleanup), deduped by
+content hash, and written under sources/ as a raw capture with frontmatter
+shaped by the `source` entity schema's base fields plus its `transcript`
+origin sub-schema (`schema/entities/source.yaml`) — the schema catalog, not
+a workspace-authored template, is the source of truth for this shape. The
+raw file's path/slug stays fully deterministic (derived from the
+filename/article scrape, never the model); only the frontmatter
+`title:`/`abstract:` content comes from the model, via a single cheap call
+against the `CaptureMetadata` contract.
 
 Step 2, enrichment (`wakil enrich <source-id>`): a fixed, code-sequenced DAG
 (docs/ingestion-refactor-spec.md) — an extraction model call (judgment from
@@ -20,6 +26,7 @@ touches nothing, files are only ever created (never overwritten), and DB rows
 are only written in apply, so declining a preview leaves no trace.
 """
 
+import contextlib
 import hashlib
 import json
 import re
@@ -39,11 +46,14 @@ from wakil.config.settings import WorkspaceConfig
 from wakil.integrations.web import fetch_article
 from wakil.llm.client import ModelClient
 from wakil.llm.prompts import (
+    CAPTURE_METADATA_SYSTEM_PROMPT,
+    build_capture_metadata_prompt,
     build_extraction_prompt,
     build_resolution_prompt,
     build_revision_prompt,
 )
 from wakil.llm.schemas import (
+    CaptureMetadata,
     EntityResolution,
     EntityResolutionOutput,
     EntityRevision,
@@ -115,8 +125,15 @@ class CaptureProposal:
     content_hash: str
     raw_file: ProposedFile
     context: str | None = None  # user-supplied context (attendees, company, ...)
+    # `context` with any `--- Attached Context ---` blocks excluded, and the
+    # KB-relative paths of the @file: references that produced them — see
+    # context_references.resolve_context. Persisted alongside `context` so a
+    # later `wakil enrich` without repeating --context still benefits.
+    context_digest: str | None = None
+    context_referenced_paths: list[str] = field(default_factory=list)
     meeting_date: str | None = None
     duplicate_of: int | None = None
+    abstract: str | None = None  # model-generated, docs/adr/0010
 
 
 @dataclass
@@ -124,6 +141,18 @@ class CaptureResult:
     source_id: int
     ingest_run_id: int
     raw_file_path: str
+
+
+@dataclass
+class AbstractBackfillItem:
+    """One source captured before docs/adr/0010, plus the title/abstract a
+    fresh capture-metadata call generated for it."""
+
+    source_id: int
+    raw_text_path: str
+    old_title: str | None
+    title: str
+    abstract: str
 
 
 @dataclass
@@ -192,10 +221,13 @@ class EnrichmentResult:
 def prepare_capture(
     config: WorkspaceConfig,
     kind: str,
+    client: ModelClient,
     *,
     file: Path | None = None,
     url: str | None = None,
     context: str | None = None,
+    context_digest: str | None = None,
+    context_referenced_paths: list[str] | None = None,
 ) -> CaptureProposal:
     meeting_date: str | None = None
     if kind in ("transcript", "text"):
@@ -215,14 +247,16 @@ def prepare_capture(
                 meeting_date = infer_meeting_date(file, text)
         origin = _relative_origin(config, file)
         stem = _LEADING_DATE_RE.sub("", file.stem) or file.stem
-        title = stem.replace("-", " ").replace("_", " ").strip() or file.name
+        # Deterministic basis for the raw file's slug only -- see below,
+        # this is intentionally never overwritten by the model's title.
+        slug_source = stem.replace("-", " ").replace("_", " ").strip() or file.name
     elif kind == "article":
         if url is None:
             raise IngestError("article ingest needs a URL")
         article = fetch_article(url)
         text = article.text
         origin = url
-        title = article.title
+        slug_source = article.title
     else:
         raise IngestError(f"unknown ingest kind: {kind}")
 
@@ -233,10 +267,12 @@ def prepare_capture(
     proposal = CaptureProposal(
         source_type=kind,
         origin=origin,
-        title=title,
+        title=slug_source,
         text=text,
         content_hash=content_hash,
         context=context,
+        context_digest=context_digest,
+        context_referenced_paths=list(context_referenced_paths or []),
         meeting_date=meeting_date,
         raw_file=ProposedFile(path="", content=""),
     )
@@ -247,8 +283,28 @@ def prepare_capture(
             proposal.duplicate_of = existing
             return proposal
 
-    proposal.raw_file = _build_raw_file(config, proposal)
+    metadata = _generate_capture_metadata(client, kind, origin, text, context)
+    proposal.title = metadata.title
+    proposal.abstract = metadata.abstract
+    proposal.raw_file = _build_raw_file(config, proposal, slug_source)
     return proposal
+
+
+def _generate_capture_metadata(
+    client: ModelClient, source_type: str, origin: str, text: str, context: str | None
+) -> CaptureMetadata:
+    """The one model call capture makes (docs/adr/0010): title + abstract,
+    grounded in the captured text itself rather than just the filename."""
+    today = datetime.now(UTC).date().isoformat()
+    prompt = build_capture_metadata_prompt(
+        source_type, origin, text[:MAX_SOURCE_CHARS], today, context=context
+    )
+    try:
+        return complete_with_contract(
+            client, CAPTURE_METADATA_SYSTEM_PROMPT, prompt, CaptureMetadata
+        )
+    except ModelContractError as exc:
+        raise IngestError(f"Capture metadata generation failed: {exc}") from exc
 
 
 def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> CaptureResult:
@@ -278,6 +334,10 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
                     for key, value in (
                         ("context", proposal.context),
                         ("meeting_date", proposal.meeting_date),
+                        ("context_digest", proposal.context_digest),
+                        ("context_referenced_paths", proposal.context_referenced_paths),
+                        ("title", proposal.title),
+                        ("abstract", proposal.abstract),
                     )
                     if value
                 }
@@ -323,6 +383,79 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
 
 
 # --------------------------------------------------------------------------
+# Backfill: title/abstract for sources captured before docs/adr/0010.
+# Metadata-only -- never re-runs extraction/entity-resolution, never touches
+# memories or relationships. Mirrors capture/enrichment's own prepare/apply
+# split: planning calls the model and touches nothing, apply is the only
+# step that writes.
+
+
+def plan_abstract_backfill(
+    config: WorkspaceConfig, client: ModelClient
+) -> list[AbstractBackfillItem]:
+    """Sources whose metadata_json has no `abstract` key yet -- one capture-
+    metadata model call per source, same contract as capture itself."""
+    items: list[AbstractBackfillItem] = []
+    with open_session(config) as session:
+        sources = session.scalars(select(Source).order_by(Source.id)).all()
+        for source in sources:
+            metadata = json.loads(source.metadata_json or "{}")
+            if metadata.get("abstract") or not source.raw_text_path:
+                continue
+            try:
+                text = _load_source_text(config, source)
+            except IngestError:
+                continue
+            generated = _generate_capture_metadata(
+                client, source.source_type, source.origin or "", text, metadata.get("context")
+            )
+            items.append(
+                AbstractBackfillItem(
+                    source_id=source.id,
+                    raw_text_path=source.raw_text_path,
+                    old_title=source.title,
+                    title=generated.title,
+                    abstract=generated.abstract,
+                )
+            )
+    return items
+
+
+def apply_abstract_backfill(
+    config: WorkspaceConfig, items: list[AbstractBackfillItem]
+) -> list[str]:
+    """Rewrite each item's raw file frontmatter (title/abstract keys only --
+    a python-frontmatter round-trip preserves everything else, including
+    field order, byte-for-byte) and the matching Source row."""
+    updated: list[str] = []
+    with open_session(config) as session:
+        for item in items:
+            source = session.get(Source, item.source_id)
+            if source is None:
+                continue
+            target = config.root_path / item.raw_text_path
+            try:
+                raw = target.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            post = frontmatter_lib.loads(raw)
+            post["title"] = item.title
+            post["abstract"] = item.abstract
+            target.write_text(
+                frontmatter_lib.dumps(post, sort_keys=False) + "\n", encoding="utf-8"
+            )
+
+            metadata = json.loads(source.metadata_json or "{}")
+            metadata["title"] = item.title
+            metadata["abstract"] = item.abstract
+            source.title = item.title
+            source.metadata_json = json.dumps(metadata)
+            updated.append(item.raw_text_path)
+        session.commit()
+    return updated
+
+
+# --------------------------------------------------------------------------
 # Step 2: enrichment
 
 
@@ -331,6 +464,8 @@ def prepare_enrichment(
     source_id: int,
     client: ModelClient,
     context: str | None = None,
+    context_digest: str | None = None,
+    context_referenced_paths: list[str] | None = None,
     force: bool = False,
 ) -> EnrichmentProposal:
     with open_session(config) as session:
@@ -343,17 +478,47 @@ def prepare_enrichment(
             )
         metadata = json.loads(source.metadata_json or "{}")
         context = context or metadata.get("context")
+        context_digest = context_digest or metadata.get("context_digest")
+        context_referenced_paths = (
+            context_referenced_paths or metadata.get("context_referenced_paths") or []
+        )
+        # Sources captured before context_digest existed have none stored —
+        # fall back to the raw context so query-building still works.
+        search_context = context_digest or context
         text = _load_source_text(config, source)
         title = source.title or f"source {source_id}"
+        workspace_id, _ = _require_workspace_ids(session, config)
 
-        related_query = " ".join(filter(None, [title, context, text[:300]]))
-        related_notes = [
-            hit
-            for hit in search_workspace(
-                config=config, session=session, query=related_query, limit=RELATED_NOTE_LIMIT
+        # @file:-referenced notes are guaranteed related notes, ahead of and
+        # not subject to RELATED_NOTE_LIMIT: the user pointed at them
+        # explicitly, so relevance ranking shouldn't get a vote.
+        related_notes: list[SearchHit] = []
+        seen_paths: set[str] = set()
+        for path in context_referenced_paths:
+            if path == source.raw_text_path or path in seen_paths:
+                continue
+            seen_paths.add(path)
+            note = session.scalar(
+                select(Note).where(Note.workspace_id == workspace_id, Note.path == path)
             )
-            if hit.kind == "note" and hit.ref != source.raw_text_path
-        ]
+            related_notes.append(
+                SearchHit(
+                    kind="note",
+                    ref=path,
+                    title=note.title if note and note.title else _deslug(path),
+                    snippet="",
+                    engine="user-referenced",
+                )
+            )
+
+        related_query = " ".join(filter(None, [title, search_context, text[:300]]))
+        for hit in search_workspace(
+            config=config, session=session, query=related_query, limit=RELATED_NOTE_LIMIT
+        ):
+            if hit.kind != "note" or hit.ref == source.raw_text_path or hit.ref in seen_paths:
+                continue
+            seen_paths.add(hit.ref)
+            related_notes.append(hit)
 
         # Relevance search optimizes for "notes that talk about X" and reliably
         # buries a short entity stub (title literally "Mosaic") behind longer
@@ -361,12 +526,10 @@ def prepare_enrichment(
         # opposite question answered — "does a page named X already exist" —
         # so supplement with a direct title lookup against known entity
         # directories, independent of QMD/FTS ranking.
-        workspace_id, _ = _require_workspace_ids(session, config)
-        seen_paths = {hit.ref for hit in related_notes}
         for path, note_title in _candidate_entity_notes(
             session,
             workspace_id,
-            " ".join(filter(None, [context, text])),
+            " ".join(filter(None, [search_context, text])),
             load_entity_schemas(config.root_path),
             extra_terms=_title_terms(title),
         ):
@@ -434,35 +597,61 @@ def prepare_enrichment(
 
 # A run of 1-4 capitalized words: "Mosaic", "Ian Gutwinski", "Riviera Partners".
 _PROPER_NOUN_RE = re.compile(r"\b[A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3}\b")
-# Single capitalized words that are only candidates because they happened to
-# start a sentence — common enough in free-text context strings that they'd
-# otherwise pollute every lookup with irrelevant title matches.
-_PROPER_NOUN_STOPWORDS = {
-    "I",
-    "The",
-    "A",
-    "An",
-    "Meeting",
-    "Call",
-    "Phone",
-    "Yeah",
-    "Well",
-    "So",
-    "But",
-    "And",
-    "This",
-    "That",
-    "We",
-    "She",
-    "He",
-    "They",
-}
+
+# The ~5000 most frequent English words (data/common_words.zip, ranked by
+# frequency in conversational/subtitle text — see data/common_words.SOURCE.md
+# for provenance/license), used below to drop single-token candidates that
+# are ordinary function words, backchannel markers ("well", "so", "right",
+# "okay", "mm-hmm"), or nouns/adjectives swept up during tangential small
+# talk ("Indian", "Steak") rather than genuine proper nouns. Only ever
+# applied to single-token candidates: a 2-4 word run like "Ian Gutwinski" or
+# "Riviera Partners" is a much stronger name signal, and short legitimate
+# company/person names ("Mosaic") must still survive. Zipped rather than
+# stored as plain text to keep this vendored file small in the repo;
+# decompressed once at import time, not re-read per call.
+with zipfile.ZipFile(Path(__file__).parent / "data" / "common_words.zip") as _archive:
+    _COMMON_SINGLE_WORDS = frozenset(_archive.read("common_words.txt").decode().split())
+
+# Exact phrases that regex-match as capitalized word runs but are structural
+# artifacts, not names — the context-expansion delimiter (see
+# wakil.app.context_references) is the only known case.
+_PHRASE_STOPWORDS = {"attached context"}
+
+
+def _is_noise_candidate(phrase: str) -> bool:
+    lowered = phrase.lower()
+    if lowered in _PHRASE_STOPWORDS:
+        return True
+    if " " in phrase:
+        return False
+    return lowered in _COMMON_SINGLE_WORDS
 
 
 # Generic words in a humanized filename/title ("offer", "sync", "call") that
 # would otherwise substring-match unrelated entity notes once casing is no
-# longer a filter (see _title_terms).
-_TITLE_TERM_STOPWORDS = {w.lower() for w in _PROPER_NOUN_STOPWORDS} | {
+# longer a filter (see _title_terms). A separate, smaller mechanism from
+# _is_noise_candidate above: filename-derived terms carry no capitalization
+# signal, so the frequency-based common-word filter (tuned for prose, where
+# "kyle" or "carnes" are common enough to be noise) is too aggressive here.
+_TITLE_TERM_STOPWORDS = {
+    "i",
+    "the",
+    "a",
+    "an",
+    "meeting",
+    "call",
+    "phone",
+    "yeah",
+    "well",
+    "so",
+    "but",
+    "and",
+    "this",
+    "that",
+    "we",
+    "she",
+    "he",
+    "they",
     "sync",
     "offer",
     "prep",
@@ -514,7 +703,7 @@ def _candidate_entity_notes(
     candidates = {
         phrase
         for phrase in _PROPER_NOUN_RE.findall(text)
-        if len(phrase) > 2 and phrase not in _PROPER_NOUN_STOPWORDS
+        if len(phrase) > 2 and not _is_noise_candidate(phrase)
     }
     candidates |= extra_terms
     if not candidates:
@@ -1259,64 +1448,54 @@ def _relative_origin(config: WorkspaceConfig, file: Path) -> str:
 
 
 def load_workspace_guides(config: WorkspaceConfig) -> dict[str, str]:
-    """SCHEMA.md (page shape) and RESOLVER.md (routing) excerpts, when present."""
+    """RESOLVER.md (routing) excerpt, when present.
+
+    Page shape and metadata guidance no longer comes from a workspace
+    document — `describe_entity_types_full`/`describe_entity_types`
+    (`wakil.llm.prompts`) already render that structurally from
+    `load_entity_schemas()`. Subject-matter routing has no code-owned
+    equivalent, so RESOLVER.md stays the sole authority for it.
+    """
     guides = {}
-    for name in ("SCHEMA.md", "RESOLVER.md"):
-        path = config.root_path / name
-        if path.is_file():
-            try:
-                guides[name] = path.read_text(encoding="utf-8", errors="replace")[:GUIDE_MAX_CHARS]
-            except OSError:
-                continue
+    path = config.root_path / "RESOLVER.md"
+    if path.is_file():
+        with contextlib.suppress(OSError):
+            guides["RESOLVER.md"] = path.read_text(encoding="utf-8", errors="replace")[
+                :GUIDE_MAX_CHARS
+            ]
     return guides
 
 
-_HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
-_YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n(.*?)```", re.DOTALL)
-
-
 def transcript_frontmatter_template(config: WorkspaceConfig) -> dict | None:
-    """A frontmatter template for transcripts from SCHEMA.md, if it defines one.
+    """A frontmatter field template for transcript raw captures.
 
-    Looks for a fenced yaml block inside a SCHEMA.md section whose heading
-    mentions transcripts (or, failing that, sources). Returns None when
-    SCHEMA.md is absent or defines nothing usable — the caller then falls
-    back to the minimal two-field frontmatter.
+    Derived from the `source` entity schema (`schema/entities/source.yaml`):
+    its base fields plus its `transcript` origin sub-schema — the same
+    effective-fields merge `wakil.schema.validate.validate_frontmatter` does
+    for an `origin: transcript` note. Field values are placeholders (`""`,
+    or the schema's own `type` for the `type` key); `_transcript_metadata`
+    fills in the ones it knows a real value for. Returns None only if the
+    resolved schema catalog (kb-local/user/built-in) defines no `source`
+    type at all.
     """
-    schema_path = config.root_path / "SCHEMA.md"
-    if not schema_path.is_file():
+    schema = load_entity_schemas(config.root_path).get("source")
+    if schema is None:
         return None
-    try:
-        text = schema_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-
-    headings = list(_HEADING_RE.finditer(text))
-    for keyword in ("transcript", "source"):
-        for i, heading in enumerate(headings):
-            if keyword not in heading.group(1).lower():
-                continue
-            section_end = headings[i + 1].start() if i + 1 < len(headings) else len(text)
-            block = _YAML_BLOCK_RE.search(text, heading.end(), section_end)
-            if block:
-                try:
-                    template = yaml.safe_load(block.group(1))
-                except yaml.YAMLError:
-                    continue
-                if isinstance(template, dict) and template:
-                    return template
-    return None
+    field_names = ["type", *schema.fields, *schema.origins.get("transcript", {})]
+    return {name: (schema.type if name == "type" else "") for name in field_names}
 
 
 # Template keys we know how to fill, in normalized form.
 _KNOWN_FIELD_VALUES = {
     "created": "created",
+    "captured": "created",  # source.yaml's own field name for this concept
     "create_date": "created",
     "date_created": "created",
     "meeting_date": "meeting_date",
     "date": "meeting_date",
     "title": "title",
     "name": "title",
+    "abstract": "abstract",
     # "origin" is conventionally an enumerated kind (transcript/article/...),
     # not a path — the path/URL goes in "url"/"source_file" as a `file:` ref.
     "origin": "origin_kind",
@@ -1326,10 +1505,18 @@ _KNOWN_FIELD_VALUES = {
 }
 
 
-def _build_raw_file(config: WorkspaceConfig, proposal: CaptureProposal) -> ProposedFile:
+def _build_raw_file(
+    config: WorkspaceConfig, proposal: CaptureProposal, slug_source: str
+) -> ProposedFile:
+    """slug_source is the deterministic filename/article-scrape basis for the
+    raw file's path (docs/adr/0010) -- kept independent of proposal.title,
+    which is model-generated and would otherwise make the raw file's path
+    non-deterministic and break capture's idempotent-by-content-hash dedup
+    across identical re-ingests.
+    """
     created = datetime.now(UTC).date().isoformat()
     directory = Path(config.ingest_directory) / RAW_DIRS.get(proposal.source_type, "clippings")
-    slug = slugify(proposal.title)
+    slug = slugify(slug_source)
     # Avoid a doubled date when the source filename already carried one.
     slug = _LEADING_DATE_RE.sub("", slug) or "untitled"
     base = f"{proposal.meeting_date or created}-{slug}"
@@ -1346,6 +1533,8 @@ def _build_raw_file(config: WorkspaceConfig, proposal: CaptureProposal) -> Propo
             "retrieved": created,
             "status": "raw",
         }
+        if proposal.abstract:
+            metadata["abstract"] = proposal.abstract
         if proposal.context:
             metadata["context"] = proposal.context
 
@@ -1361,13 +1550,15 @@ def _transcript_metadata(config: WorkspaceConfig, proposal: CaptureProposal, cre
         "created": created,
         "meeting_date": proposal.meeting_date,
         "title": proposal.title,
+        "abstract": proposal.abstract,
         "origin_kind": proposal.source_type,
         "file_url": f"file:{proposal.origin}",
         "context": proposal.context,
     }
     template = transcript_frontmatter_template(config)
     if template is None:
-        # SCHEMA.md defines nothing for transcripts: exactly two fields.
+        # No `source` schema resolved at all (a broken override): fall back
+        # to the two fields every transcript capture needs regardless.
         return {"created": created, "meeting_date": proposal.meeting_date}
     metadata = {}
     for key, template_value in template.items():

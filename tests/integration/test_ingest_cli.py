@@ -42,6 +42,14 @@ BAD_RESOLUTION_JSON = json.dumps(
     {"entities": [{"name": "The Guild", "entity_type": "guild", "action": "create"}]}
 )
 
+CAPTURE_METADATA_JSON = json.dumps(
+    {
+        "title": "2026-07-09 Fake Capture Title",
+        "abstract": "A fake abstract for CLI capture tests, roughly the length a real one "
+        "would be, useful for retrieval without being a full summary.",
+    }
+)
+
 
 class FakeClient:
     """Extraction then resolution, one scripted payload per call."""
@@ -54,6 +62,21 @@ class FakeClient:
     def complete(self, system, prompt, max_tokens=8192):
         assert self.queue, "FakeClient ran out of scripted responses"
         return self.queue.pop(0)
+
+
+class FakeCaptureClient(FakeClient):
+    """The capture-time title/abstract call: one scripted CaptureMetadata payload."""
+
+    def __init__(self, payloads=(CAPTURE_METADATA_JSON,)):
+        super().__init__(payloads)
+
+
+def _client_queue(monkeypatch, *clients):
+    """Patch resolve_client to hand back each client in order, one per call —
+    capture and enrich each resolve a client independently, so a test doing
+    both needs a distinct scripted client for each."""
+    it = iter(clients)
+    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: next(it))
 
 
 def _init(kb_path: Path) -> Path:
@@ -73,9 +96,20 @@ def _capture(kb_path: Path, transcript: Path, *extra: str):
     )
 
 
-def test_capture_needs_no_model(kb_path: Path, monkeypatch):
-    # Even with no provider configured, capture works silently.
+def test_capture_requires_a_model_provider(kb_path: Path, monkeypatch):
+    # Capture-time title/abstract generation (docs/adr/0010) means capture
+    # now needs a model provider, same as enrich.
     monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
+    transcript = _init(kb_path)
+
+    result = _capture(kb_path, transcript)
+    assert result.exit_code == 1
+    assert "needs a model provider" in result.output
+    assert [p.name for p in (kb_path / "sources" / "transcripts").iterdir()] == ["notitle.md"]
+
+
+def test_capture_writes_raw_file_and_reports_source(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
 
     result = _capture(kb_path, transcript)
@@ -83,11 +117,11 @@ def test_capture_needs_no_model(kb_path: Path, monkeypatch):
     assert "Capture preview" in result.output
     assert "Captured source #1" in result.output
     assert "wakil enrich 1" in result.output
-    assert "No model provider" not in result.output
     assert list((kb_path / "sources" / "transcripts").glob("2*.md"))
 
 
-def test_capture_declining_writes_nothing(kb_path: Path):
+def test_capture_declining_writes_nothing(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
     result = runner.invoke(
         app, ["-w", str(kb_path), "ingest", "transcript", str(transcript)], input="n\n"
@@ -97,7 +131,8 @@ def test_capture_declining_writes_nothing(kb_path: Path):
     assert [p.name for p in (kb_path / "sources" / "transcripts").iterdir()] == ["notitle.md"]
 
 
-def test_capture_duplicate_reports(kb_path: Path):
+def test_capture_duplicate_reports(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
     result = _capture(kb_path, transcript)
@@ -105,7 +140,8 @@ def test_capture_duplicate_reports(kb_path: Path):
     assert "Already ingested" in result.output
 
 
-def test_capture_with_context_shows_in_preview(kb_path: Path):
+def test_capture_with_context_shows_in_preview(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
     result = _capture(kb_path, transcript, "--context", "Attendees: Jane Doe, Bob (Acme).")
     assert result.exit_code == 0
@@ -113,7 +149,7 @@ def test_capture_with_context_shows_in_preview(kb_path: Path):
 
 
 def test_enrich_flow(kb_path: Path, monkeypatch):
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeClient(), FakeClient())
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
 
@@ -135,10 +171,8 @@ def test_enrich_flow(kb_path: Path, monkeypatch):
 def test_enrich_blocked_on_schema_gap(kb_path: Path, monkeypatch):
     # An entity type with no schema is a hard stop: preview shows the gap,
     # nothing is written, even with --yes.
-    monkeypatch.setattr(
-        "wakil.llm.client.resolve_client",
-        lambda: FakeClient((EXTRACTION_JSON, BAD_RESOLUTION_JSON)),
-    )
+    bad_client = FakeClient((EXTRACTION_JSON, BAD_RESOLUTION_JSON))
+    _client_queue(monkeypatch, FakeCaptureClient(), bad_client)
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
 
@@ -150,7 +184,7 @@ def test_enrich_blocked_on_schema_gap(kb_path: Path, monkeypatch):
 
 
 def test_enrich_requires_provider(kb_path: Path, monkeypatch):
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: None)
+    _client_queue(monkeypatch, FakeCaptureClient(), None)
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
 
@@ -167,7 +201,8 @@ def test_enrich_unknown_source(kb_path: Path, monkeypatch):
     assert "No source with id" in result.output
 
 
-def test_capture_missing_file_fails(kb_path: Path):
+def test_capture_missing_file_fails(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     runner.invoke(app, ["init", str(kb_path)])
     result = runner.invoke(
         app, ["-w", str(kb_path), "ingest", "transcript", str(kb_path / "nope.txt"), "--yes"]
@@ -176,7 +211,8 @@ def test_capture_missing_file_fails(kb_path: Path):
     assert "Ingest failed" in result.output
 
 
-def test_capture_context_file_shows_in_preview(kb_path: Path):
+def test_capture_context_file_shows_in_preview(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
     context_file = kb_path / "context.txt"
     context_file.write_text("Extra context from a file.\n")
@@ -186,7 +222,8 @@ def test_capture_context_file_shows_in_preview(kb_path: Path):
     assert "Extra context from a file." in result.output
 
 
-def test_capture_repeated_context_joined_in_order(kb_path: Path):
+def test_capture_repeated_context_joined_in_order(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
     result = _capture(kb_path, transcript, "--context", "FirstBit", "--context", "SecondBit")
     assert result.exit_code == 0, result.output
@@ -196,7 +233,8 @@ def test_capture_repeated_context_joined_in_order(kb_path: Path):
     assert flat.index("FirstBit") < flat.index("SecondBit")
 
 
-def test_capture_context_file_reference_expands(kb_path: Path):
+def test_capture_context_file_reference_expands(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
     referenced = kb_path / "attendees.txt"
     referenced.write_text("Jane Doe, Bob (Acme).\n")
@@ -212,6 +250,8 @@ def test_capture_context_file_reference_expands(kb_path: Path):
 
 
 def test_capture_context_reference_outside_workspace_fails(tmp_path: Path, kb_path: Path):
+    # Context resolution happens before the model-provider check, so no
+    # client needs to be scripted here -- this fails before any model call.
     transcript = _init(kb_path)
     outside = tmp_path / "outside.txt"
     outside.write_text("outside content\n")
@@ -249,6 +289,7 @@ def test_capture_context_hard_budget_aborts(kb_path: Path, monkeypatch):
 
 
 def test_capture_context_soft_budget_warns_and_succeeds(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     monkeypatch.setattr("wakil.app.context_references.MODEL_CONTEXT_WINDOW_TOKENS", 100)
     transcript = _init(kb_path)
 
@@ -259,7 +300,7 @@ def test_capture_context_soft_budget_warns_and_succeeds(kb_path: Path, monkeypat
 
 
 def test_enrich_context_shows_in_preview(kb_path: Path, monkeypatch):
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeClient())
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
 
@@ -281,7 +322,7 @@ def test_enrich_context_shows_in_preview(kb_path: Path, monkeypatch):
 
 
 def test_enrich_bad_context_aborts_before_branch_switch(kb_path: Path, monkeypatch):
-    monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeClient())
     transcript = _init(kb_path)
     _capture(kb_path, transcript)
 

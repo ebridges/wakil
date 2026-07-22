@@ -162,6 +162,17 @@ def test_expand_piece_strips_tokens_and_appends_section_only_when_resolved(tmp_p
     assert result.count("--- Attached Context ---") == 1
 
 
+def test_expand_piece_collapses_whitespace_left_by_stripped_tokens(tmp_path: Path):
+    (tmp_path / "a.md").write_text("A body.")
+    (tmp_path / "b.md").write_text("B body.")
+
+    result = expand_piece("see prep documents at @file:a.md and @file:b.md", tmp_path)
+    head, _, _ = result.partition("--- Attached Context ---")
+
+    assert head.strip() == "see prep documents at and"
+    assert "  " not in head
+
+
 def test_resolve_context_both_empty_returns_none_and_empty_list():
     result = resolve_context(context=[], context_files=[], workspace_root=Path("/tmp"))
     assert result == (None, [])
@@ -174,15 +185,18 @@ def test_resolve_context_joins_context_then_context_files_in_order(tmp_path: Pat
     file2 = tmp_path / "two.md"
     file2.write_text("file two content")
 
-    text, warnings = resolve_context(
+    resolved, warnings = resolve_context(
         context=["piece one", "piece two"],
         context_files=[file1, file2],
         workspace_root=tmp_path,
     )
 
-    assert text == "\n\n---\n\n".join(
+    assert resolved.text == "\n\n---\n\n".join(
         ["piece one", "piece two", "file one content", "file two content"]
     )
+    # No @file:/@url: references were expanded, so the digest matches the text.
+    assert resolved.digest == resolved.text
+    assert resolved.referenced_paths == []
     assert warnings == []
 
 
@@ -192,23 +206,61 @@ def test_context_file_body_references_are_expanded(tmp_path: Path):
     context_file = tmp_path / "context.md"
     context_file.write_text("Background: @file:other.md")
 
-    text, _ = resolve_context(context=[], context_files=[context_file], workspace_root=tmp_path)
+    resolved, _ = resolve_context(context=[], context_files=[context_file], workspace_root=tmp_path)
 
-    assert text is not None
-    head, _, _ = text.partition("--- Attached Context ---")
+    assert resolved is not None
+    head, _, _ = resolved.text.partition("--- Attached Context ---")
     assert "@file:other.md" not in head
-    assert "Other note content." in text
-    assert "--- Attached Context ---" in text
+    assert "Other note content." in resolved.text
+    assert "--- Attached Context ---" in resolved.text
+
+
+def test_resolve_context_digest_excludes_attached_context_block(tmp_path: Path):
+    other = tmp_path / "other.md"
+    other.write_text("Other note content.")
+    context_file = tmp_path / "context.md"
+    context_file.write_text("Background: @file:other.md")
+
+    resolved, _ = resolve_context(context=[], context_files=[context_file], workspace_root=tmp_path)
+
+    assert resolved.digest == "Background:"
+    assert "Other note content." not in resolved.digest
+    assert "--- Attached Context ---" not in resolved.digest
+
+
+def test_resolve_context_returns_referenced_file_paths(tmp_path: Path):
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "other.md").write_text("Other note content.")
+
+    resolved, _ = resolve_context(
+        context=["see @file:notes/other.md for background"],
+        context_files=[],
+        workspace_root=tmp_path,
+    )
+
+    assert resolved.referenced_paths == ["notes/other.md"]
+
+
+def test_resolve_context_referenced_paths_deduped_across_pieces(tmp_path: Path):
+    (tmp_path / "shared.md").write_text("Shared content.")
+
+    resolved, _ = resolve_context(
+        context=["@file:shared.md", "@file:shared.md"],
+        context_files=[],
+        workspace_root=tmp_path,
+    )
+
+    assert resolved.referenced_paths == ["shared.md"]
 
 
 def test_resolve_context_warns_between_25_and_50_percent_budget(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(context_references, "MODEL_CONTEXT_WINDOW_TOKENS", 100)
 
-    text, warnings = resolve_context(
+    resolved, warnings = resolve_context(
         context=["x" * 140], context_files=[], workspace_root=tmp_path
     )
 
-    assert text is not None
+    assert resolved is not None
     assert len(warnings) == 1
     assert "35 tokens" in warnings[0]
     assert "25-token soft budget" in warnings[0]

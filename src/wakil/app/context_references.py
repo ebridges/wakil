@@ -2,6 +2,7 @@
 
 import mimetypes
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from wakil.integrations.web import FetchError, fetch_article
@@ -33,12 +34,40 @@ class ContextResolutionError(RuntimeError):
     pass
 
 
+@dataclass
+class ResolvedContext:
+    """The result of resolving one or more --context/--context-file values.
+
+    `digest` is `text` with any `--- Attached Context ---` blocks excluded —
+    the tokens that actually name what the context is about, without the
+    (often large) attached file dumps that would otherwise dilute a search
+    query built from it. `referenced_paths` are the KB-relative paths of
+    every `@file:` reference that resolved successfully.
+    """
+
+    text: str
+    digest: str
+    referenced_paths: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _ExpandedPiece:
+    text: str
+    digest: str
+    referenced_paths: list[str] = field(default_factory=list)
+
+
 def estimate_tokens(text: str) -> int:
     return len(text) // CHARS_PER_TOKEN
 
 
 def expand_piece(raw_text: str, workspace_root: Path) -> str:
+    return _expand_piece(raw_text, workspace_root).text
+
+
+def _expand_piece(raw_text: str, workspace_root: Path) -> _ExpandedPiece:
     blocks: list[str] = []
+    referenced_paths: list[str] = []
 
     def _replace(match: re.Match) -> str:
         label = match.group(0)
@@ -46,9 +75,11 @@ def expand_piece(raw_text: str, workspace_root: Path) -> str:
         if kind == "file":
             value = match.group("qval") or match.group("val")
             path_str, line_start, line_end, heading = _parse_ref_value(value)
-            blocks.append(
-                _resolve_file(path_str, line_start, line_end, heading, workspace_root, label)
+            relative_path, block = _resolve_file(
+                path_str, line_start, line_end, heading, workspace_root, label
             )
+            referenced_paths.append(relative_path)
+            blocks.append(block)
             return ""
         if kind == "url":
             value = match.group("qval") or match.group("val")
@@ -58,35 +89,40 @@ def expand_piece(raw_text: str, workspace_root: Path) -> str:
         path_str, line_start, line_end, heading = _parse_ref_value(bare)
         if not _looks_like_file_reference(path_str):
             return label
-        blocks.append(
-            _resolve_file(path_str, line_start, line_end, heading, workspace_root, label)
+        relative_path, block = _resolve_file(
+            path_str, line_start, line_end, heading, workspace_root, label
         )
+        referenced_paths.append(relative_path)
+        blocks.append(block)
         return ""
 
     stripped = _REF_RE.sub(_replace, raw_text)
     if not blocks:
-        return raw_text
+        return _ExpandedPiece(text=raw_text, digest=raw_text, referenced_paths=referenced_paths)
+    digest = re.sub(r"[ \t]{2,}", " ", stripped).strip()
     attached = "\n\n--- Attached Context ---\n\n" + "\n\n".join(blocks)
-    return stripped.strip() + attached
+    return _ExpandedPiece(text=digest + attached, digest=digest, referenced_paths=referenced_paths)
 
 
 def resolve_context(
     *, context: list[str], context_files: list[Path], workspace_root: Path
-) -> tuple[str | None, list[str]]:
+) -> tuple[ResolvedContext | None, list[str]]:
     if not context and not context_files:
         return None, []
 
-    pieces: list[str] = []
+    pieces: list[_ExpandedPiece] = []
     for value in context:
-        pieces.append(expand_piece(value, workspace_root))
+        pieces.append(_expand_piece(value, workspace_root))
     for file_path in context_files:
         try:
             raw = file_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise ContextResolutionError(f"Could not read context file {file_path}: {exc}") from exc
-        pieces.append(expand_piece(raw, workspace_root))
+        pieces.append(_expand_piece(raw, workspace_root))
 
-    text = "\n\n---\n\n".join(pieces)
+    text = "\n\n---\n\n".join(p.text for p in pieces)
+    digest = "\n\n---\n\n".join(p.digest for p in pieces)
+    referenced_paths = list(dict.fromkeys(path for p in pieces for path in p.referenced_paths))
     tokens = estimate_tokens(text)
     hard_budget = int(MODEL_CONTEXT_WINDOW_TOKENS * HARD_BUDGET_FRACTION)
     warn_budget = int(MODEL_CONTEXT_WINDOW_TOKENS * WARN_BUDGET_FRACTION)
@@ -95,10 +131,11 @@ def resolve_context(
         raise ContextResolutionError(
             f"Context is too large ({tokens} tokens, over the {hard_budget}-token hard budget)"
         )
+    result = ResolvedContext(text=text, digest=digest, referenced_paths=referenced_paths)
     if tokens > warn_budget:
         warning = f"Context is large ({tokens} tokens, over the {warn_budget}-token soft budget)"
-        return text, [warning]
-    return text, []
+        return result, [warning]
+    return result, []
 
 
 def _looks_like_file_reference(value: str) -> bool:
@@ -146,7 +183,7 @@ def _resolve_file(
     heading: str | None,
     workspace_root: Path,
     label: str,
-) -> str:
+) -> tuple[str, str]:
     resolved = _resolve_workspace_path(path_str, workspace_root)
     if not resolved.is_file():
         raise ContextResolutionError(f"File not found: {path_str}")
@@ -169,7 +206,9 @@ def _resolve_file(
 
     lang = _LANGUAGE_BY_SUFFIX.get(resolved.suffix.lower(), "")
     tokens = estimate_tokens(sliced)
-    return f"📄 {label} ({tokens} tokens)\n```{lang}\n{sliced}\n```"
+    relative_path = resolved.relative_to(workspace_root.resolve()).as_posix()
+    block = f"📄 {label} ({tokens} tokens)\n```{lang}\n{sliced}\n```"
+    return relative_path, block
 
 
 def _resolve_url(url: str, label: str) -> str:

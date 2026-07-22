@@ -30,7 +30,10 @@ is the single worst failure mode this skill exists to prevent.
   new information to merge — that's `note-conformance`. If a revision also
   needs a fresh routing decision (the subject moved directories, a new
   entity was split out), hand that off to `note-routing`; don't decide it
-  here.
+  here. And don't assume a newly-mentioned entity (a spun-out company, a
+  person who wasn't tracked before) clears the notability gate just because
+  it's related to the note you're revising — that judgment belongs to
+  `entity-resolution`; name it rather than deciding notability yourself.
 
 ## Procedure
 

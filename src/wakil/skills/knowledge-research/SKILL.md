@@ -56,6 +56,10 @@ Even though you're this pipeline's "go external" step, don't skip the KB
 half. Use `wakil search` / `wakil query` (see `knowledge-query` for mode
 selection) to pull whatever the knowledge base already has — prior research
 notes, entity pages, source material — before touching anything external.
+Say so explicitly in your response — name `wakil search`/`wakil query` as
+the command you used (or would use) for that check, not just a description
+of having looked; a reader should be able to see exactly what to re-run,
+not just that "the KB was checked."
 
 When you do reach for an external source, send what the KB already knows as
 part of the query, dense and untruncated, not a summary of it. The point of

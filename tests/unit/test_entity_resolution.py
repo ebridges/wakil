@@ -41,6 +41,17 @@ class FakeClient:
         return self.queue.pop(0)
 
 
+CAPTURE_METADATA = {
+    "title": "2026-07-09 Fake Capture Title",
+    "abstract": "A fake abstract used across entity-resolution tests, roughly the length a "
+    "real one would be.",
+}
+
+
+def _capture_client() -> FakeClient:
+    return FakeClient([CAPTURE_METADATA])
+
+
 @pytest.fixture
 def workspace(kb_path: Path) -> WorkspaceConfig:
     init_workspace(kb_path)
@@ -51,7 +62,7 @@ def _enrich(workspace, kb_path, entities, extraction=None, revisions=None):
     transcript = kb_path / "sync.txt"
     transcript.write_text("We reviewed the routing plan.\n")
     source_id = apply_capture(
-        workspace, prepare_capture(workspace, "transcript", file=transcript)
+        workspace, prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
     ).source_id
     client = FakeClient(
         [extraction or EXTRACTION, {"entities": entities}, revisions or {"revisions": []}]

@@ -21,13 +21,18 @@ Search the knowledge base before reaching for any external tool. `wakil
 search` and `wakil query` are fast and already indexed — the knowledge base
 almost always has something relevant, even if it's partial. Only escalate to
 external sources (web search, API enrichment) once a KB search has actually
-come up thin, not as a first move because it feels quicker.
+come up thin, not as a first move because it feels quicker. Name the actual
+command you ran (or would run) in your response — `wakil search <query>
+--mode ...` or `wakil query <question> --mode ...` — not just a description
+of having checked; a reader should see exactly what to re-run.
 
 That escalation is a handoff, not something to improvise inline: if brain-
 first lookup comes up genuinely empty and the question calls for outside
 research, that's `knowledge-research`'s job, not a web search bolted onto
-this skill. Finish the KB-grounded answer (even a partial or "nothing found"
-one) before deciding whether to hand off.
+this skill. Name `knowledge-research` explicitly as the next step — don't
+just gesture at "further research" or "an external check." Finish the
+KB-grounded answer (even a partial or "nothing found" one) before deciding
+whether to hand off.
 
 ## Choosing a mode
 
