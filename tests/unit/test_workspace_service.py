@@ -69,7 +69,7 @@ def test_status_reports_special_files(kb_path: Path):
     status = get_status(kb_path)
 
     assert "README.md" in status.special_files
-    assert "SCHEMA.md" in status.special_files
+    assert "RESOLVER.md" not in status.special_files
     assert "AGENTS.md" not in status.special_files
 
 

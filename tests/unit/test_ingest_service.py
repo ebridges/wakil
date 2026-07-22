@@ -1,9 +1,10 @@
 import json
 import zipfile
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
+import yaml
 from sqlalchemy import select
 
 from wakil.app.ingest_service import (
@@ -14,11 +15,13 @@ from wakil.app.ingest_service import (
     _merge_entity_note,
     _require_workspace_ids,
     _title_terms,
+    apply_abstract_backfill,
     apply_capture,
     apply_enrichment,
     clean_transcript,
     infer_meeting_date,
     parse_whisper_transcript,
+    plan_abstract_backfill,
     prepare_capture,
     prepare_enrichment,
     slugify,
@@ -82,6 +85,12 @@ RESOLUTION_JSON = {
 
 REVISION_JSON = {"revisions": []}  # no-op: no entity update warrants a content change
 
+CAPTURE_METADATA_JSON = {
+    "title": "2026-07-09 Fake Capture Title",
+    "abstract": "A fake, dense abstract used across capture tests -- roughly the length a real "
+    "one would be, useful for retrieval without being a full summary of the source text.",
+}
+
 
 class FakeClient:
     """Scripted responses, one per model call (extraction, resolution, then
@@ -132,8 +141,15 @@ def _segment(speaker: str, text: str, start: int) -> dict:
     return {"start": start, "end": start + 1000, "speaker": {"name": speaker}, "text": text}
 
 
-def _capture(workspace, transcript, context=None) -> int:
-    proposal = prepare_capture(workspace, "transcript", file=transcript, context=context)
+def _capture_client(payload=None) -> FakeClient:
+    """A capture-metadata-only fake: one scripted CaptureMetadata response."""
+    return FakeClient([payload or CAPTURE_METADATA_JSON])
+
+
+def _capture(workspace, transcript, context=None, client=None) -> int:
+    proposal = prepare_capture(
+        workspace, "transcript", client or _capture_client(), file=transcript, context=context
+    )
     return apply_capture(workspace, proposal).source_id
 
 
@@ -141,15 +157,17 @@ def _capture(workspace, transcript, context=None) -> int:
 # Capture
 
 
-def test_capture_is_model_free_and_minimal(workspace, transcript):
-    proposal = prepare_capture(workspace, "transcript", file=transcript)
+def test_capture_fills_title_and_abstract_from_model(workspace, transcript):
+    # A capture-metadata model call happens (docs/adr/0010); the schema
+    # catalog (not a workspace SCHEMA.md) supplies the frontmatter shape,
+    # and the model-provided title/abstract land in the known fields it
+    # defines (docs/adr/0011).
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
 
     assert proposal.raw_file.path.startswith("sources/transcripts/")
     assert proposal.meeting_date == "2026-07-09"
-    # Fixture SCHEMA.md has no transcript template: exactly two fields.
-    frontmatter = proposal.raw_file.content.split("---")[1]
-    fields = [line.split(":")[0] for line in frontmatter.strip().splitlines()]
-    assert fields == ["created", "meeting_date"]
+    assert proposal.title == CAPTURE_METADATA_JSON["title"]
+    assert proposal.abstract == CAPTURE_METADATA_JSON["abstract"]
     assert "meeting_date: '2026-07-09'" in proposal.raw_file.content
 
 
@@ -170,22 +188,54 @@ def test_capture_writes_source_and_run(workspace, transcript):
         assert session.scalar(select(Memory)) is None
 
 
-def test_capture_uses_schema_template_when_present(workspace, transcript):
-    (workspace.root_path / "SCHEMA.md").write_text(
-        "# Schema\n\n## Transcripts\n\nFiles in sources/transcripts use:\n\n"
-        "```yaml\ntype: source\norigin: transcript\nurl: \ntitle: \ndate: \ncreated: \n```\n"
-    )
-    proposal = prepare_capture(workspace, "transcript", file=transcript)
+def test_transcript_frontmatter_template_from_schema_catalog(workspace):
+    # Derived from schema/entities/source.yaml: base fields plus the
+    # `transcript` origin sub-schema, in that order -- no workspace SCHEMA.md
+    # involved.
+    template = transcript_frontmatter_template(workspace)
 
-    frontmatter = proposal.raw_file.content.split("---")[1]
-    fields = [line.split(":")[0] for line in frontmatter.strip().splitlines()]
-    assert fields == ["type", "origin", "url", "title", "date", "created"]
-    assert "type: source" in frontmatter  # template value kept
-    assert "date: '2026-07-09'" in frontmatter  # meeting date filled into `date`
+    assert list(template) == [
+        "type",
+        "title",
+        "origin",
+        "url",
+        "captured",
+        "tags",
+        "created",
+        "abstract",
+        "recording_url",
+        "company",
+        "meeting_date",
+    ]
+    assert template["type"] == "source"  # the schema's own type name, kept literal
+    assert template["title"] == ""  # blank placeholder for fields with no known value
+
+
+def test_capture_transcript_frontmatter_equivalent_to_old_schema_scrape(workspace, transcript):
+    """Same effect as the retired SCHEMA.md yaml-block scrape for a
+    representative transcript: type is kept, and every field the code
+    catalog can fill (title, abstract, origin, url, dates) is filled with a
+    real value rather than left as a placeholder. Title/abstract now come
+    from the capture-time model call (docs/adr/0010), not the filename."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    today = datetime.now(UTC).date().isoformat()
+
+    frontmatter = yaml.safe_load(proposal.raw_file.content.split("---")[1])
+    assert frontmatter["type"] == "source"
+    assert frontmatter["title"] == CAPTURE_METADATA_JSON["title"]
+    assert frontmatter["abstract"] == CAPTURE_METADATA_JSON["abstract"]
     # "origin" is the enumerated kind, not a path; "url" is a KB-root-relative
     # file: reference, never the machine's absolute path.
-    assert "origin: transcript" in frontmatter
-    assert "url: file:2026-07-09-raw-meeting.txt" in frontmatter
+    assert frontmatter["origin"] == "transcript"
+    assert frontmatter["url"] == "file:2026-07-09-raw-meeting.txt"
+    assert frontmatter["meeting_date"] == "2026-07-09"
+    assert frontmatter["captured"] == today
+    assert frontmatter["created"] == today
+    # Fields the schema defines but this capture has no value for stay blank
+    # placeholders rather than being invented or omitted.
+    assert frontmatter["tags"] == ""
+    assert frontmatter["company"] == ""
+    assert frontmatter["recording_url"] == ""
 
 
 def test_capture_origin_is_relative_to_kb_root(workspace, kb_path):
@@ -193,18 +243,13 @@ def test_capture_origin_is_relative_to_kb_root(workspace, kb_path):
     nested.mkdir(parents=True)
     file = nested / "call.txt"
     file.write_text("Ed: hi\n")
-    proposal = prepare_capture(workspace, "transcript", file=file)
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=file)
     assert proposal.origin == "sources/audio/call.txt"
-
-
-def test_transcript_frontmatter_template_absent(workspace):
-    # Fixture SCHEMA.md exists but has no yaml template.
-    assert transcript_frontmatter_template(workspace) is None
 
 
 def test_capture_duplicate_detected(workspace, transcript):
     _capture(workspace, transcript)
-    second = prepare_capture(workspace, "transcript", file=transcript)
+    second = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
     assert second.duplicate_of is not None
     with pytest.raises(IngestError, match="already ingested"):
         apply_capture(workspace, second)
@@ -222,8 +267,8 @@ def test_capture_race_closes_via_unique_constraint(workspace, kb_path):
     second_file = kb_path / "meeting-two.txt"
     second_file.write_text(content)
 
-    first_proposal = prepare_capture(workspace, "transcript", file=first_file)
-    second_proposal = prepare_capture(workspace, "transcript", file=second_file)
+    first_proposal = prepare_capture(workspace, "transcript", _capture_client(), file=first_file)
+    second_proposal = prepare_capture(workspace, "transcript", _capture_client(), file=second_file)
     assert first_proposal.duplicate_of is None
     assert second_proposal.duplicate_of is None  # race window: neither committed yet
     assert first_proposal.raw_file.path != second_proposal.raw_file.path
@@ -250,20 +295,24 @@ def test_capture_race_closes_via_unique_constraint(workspace, kb_path):
 def test_capture_cleans_transcript(workspace, kb_path):
     noisy = kb_path / "noisy.txt"
     noisy.write_text("[00:00:01] Jane: hello\n00:00:05 Bob: hi\n")
-    proposal = prepare_capture(workspace, "transcript", file=noisy)
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=noisy)
     assert "Jane: hello\nBob: hi" in proposal.raw_file.content
     assert "[00:00:01]" not in proposal.raw_file.content
 
 
-def test_capture_title_strips_leading_date_from_filename(workspace, kb_path):
+def test_capture_slug_strips_leading_date_from_filename(workspace, kb_path):
+    # The raw file's path/slug is derived from the filename and must stay
+    # fully deterministic (docs/adr/0010) -- unaffected by whatever title
+    # the model returns, which is asserted separately below.
     dated = kb_path / "2026-07-16-mosaic-eleni-karahalios.txt"
     dated.write_text("Ed: hi\n")
-    proposal = prepare_capture(workspace, "transcript", file=dated)
-    assert proposal.title == "mosaic eleni karahalios"
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=dated)
+    assert proposal.raw_file.path == "sources/transcripts/2026-07-16-mosaic-eleni-karahalios.md"
+    assert proposal.title == CAPTURE_METADATA_JSON["title"]
 
 
 def test_capture_adds_h1_matching_the_destination_filename(workspace, transcript):
-    proposal = prepare_capture(workspace, "transcript", file=transcript)
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
     body = proposal.raw_file.content.split("---", 2)[2].lstrip("\n")
     assert body.startswith("# 2026-07-09-raw-meeting\n\n")
 
@@ -278,7 +327,7 @@ def test_capture_transcript_whisper(workspace, kb_path):
             _segment("Edward Bridges", "I'm glad we managed to uh work through it.", 3000),
         ],
     )
-    proposal = prepare_capture(workspace, "transcript", file=whisper)
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=whisper)
 
     assert proposal.meeting_date == "2026-07-16"  # from the filename, not dateCreated
     assert (
@@ -298,7 +347,7 @@ def test_capture_transcript_whisper_falls_back_to_recorded_at(workspace, kb_path
         [_segment("Ed", "hello", 0)],
         date_created=805926332.753,  # 2026-07-16
     )
-    proposal = prepare_capture(workspace, "transcript", file=whisper)
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=whisper)
     assert proposal.meeting_date == "2026-07-16"
 
 
@@ -306,7 +355,7 @@ def test_capture_transcript_whisper_rejects_non_zip(workspace, kb_path):
     bad = kb_path / "broken.whisper"
     bad.write_bytes(b"not a zip file")
     with pytest.raises(IngestError, match="not a valid whisper archive"):
-        prepare_capture(workspace, "transcript", file=bad)
+        prepare_capture(workspace, "transcript", _capture_client(), file=bad)
 
 
 def test_capture_transcript_whisper_rejects_missing_metadata(workspace, kb_path):
@@ -314,7 +363,46 @@ def test_capture_transcript_whisper_rejects_missing_metadata(workspace, kb_path)
     with zipfile.ZipFile(empty, "w") as archive:
         archive.writestr("originalAudio", b"")
     with pytest.raises(IngestError, match="no metadata.json"):
-        prepare_capture(workspace, "transcript", file=empty)
+        prepare_capture(workspace, "transcript", _capture_client(), file=empty)
+
+
+def test_capture_uses_model_generated_title_and_abstract(workspace, transcript):
+    # Frontmatter title/abstract come from the model (docs/adr/0010); the
+    # raw file's slug does not, and is checked separately elsewhere.
+    client = _capture_client()
+    proposal = prepare_capture(workspace, "transcript", client, file=transcript)
+
+    assert len(client.calls) == 1
+    _, prompt = client.calls[0]
+    assert "Prefixed with the date of the ingest" in prompt
+    assert "under 60 characters" in prompt
+    assert "NOT a sentence" in prompt
+    assert "NOT generic" in prompt
+    assert "roughly 300 characters" in prompt
+    assert proposal.title == CAPTURE_METADATA_JSON["title"]
+    assert proposal.abstract == CAPTURE_METADATA_JSON["abstract"]
+
+
+def test_capture_writes_title_and_abstract_when_schema_template_has_them(workspace, transcript):
+    (workspace.root_path / "SCHEMA.md").write_text(
+        "# Schema\n\n## Transcripts\n\nFiles in sources/transcripts use:\n\n"
+        "```yaml\ntype: source\ntitle: \nabstract: \ndate: \ncreated: \n```\n"
+    )
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+
+    frontmatter = proposal.raw_file.content.split("---")[1]
+    assert f"title: {CAPTURE_METADATA_JSON['title']}" in frontmatter
+    assert "abstract:" in frontmatter
+
+
+def test_capture_persists_title_and_abstract_to_source_metadata(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        metadata = json.loads(source.metadata_json)
+        assert metadata["title"] == CAPTURE_METADATA_JSON["title"]
+        assert metadata["abstract"] == CAPTURE_METADATA_JSON["abstract"]
+        assert source.title == CAPTURE_METADATA_JSON["title"]
 
 
 def test_parse_whisper_transcript_strips_filler_words_only(kb_path):
@@ -357,10 +445,9 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
     assert "Works on claims automation" in revision_prompt  # jane-doe.md's own body
 
     # The full field catalog (required + optional) for every entity type is
-    # in the extraction prompt regardless of whether SCHEMA.md defines
-    # anything — this fixture's SCHEMA.md has no templates at all (see
-    # test_transcript_frontmatter_template_absent), so this is wakil's own
-    # built-in schema, not workspace prose.
+    # in the extraction prompt unconditionally — it's rendered structurally
+    # from wakil's own schema catalog (load_entity_schemas), not workspace
+    # prose.
     assert "meeting (directory: meetings" in extraction_prompt
     assert "decisions (optional, list)" in extraction_prompt
     assert "action-items (optional, list)" in extraction_prompt
@@ -1008,6 +1095,7 @@ def test_enrichment_prioritizes_context_referenced_notes(workspace, transcript, 
     capture_proposal = prepare_capture(
         workspace,
         "transcript",
+        _capture_client(),
         file=transcript,
         context=resolved.text,
         context_digest=resolved.digest,
@@ -1051,6 +1139,7 @@ def test_enrichment_related_search_uses_digest_not_raw_attachment_dump(
     capture_proposal = prepare_capture(
         workspace,
         "transcript",
+        _capture_client(),
         file=transcript,
         context=resolved.text,
         context_digest=resolved.digest,
@@ -1134,12 +1223,85 @@ def test_enrichment_guides_reach_prompt(workspace, transcript):
     prepare_enrichment(workspace, source_id, client)
 
     prompt = client.calls[0][1]
-    assert "Workspace guidance from SCHEMA.md" in prompt
     assert "Workspace guidance from RESOLVER.md" in prompt
+    # SCHEMA.md is no longer read at all — its page-shape/metadata role is
+    # covered structurally by the entity-schema catalog instead.
+    assert "SCHEMA.md" not in prompt
     # Frontmatter is stripped from the analyzed text.
     assert "meeting_date:" not in prompt
     # Routing guidance also reaches the resolution call.
     assert "Workspace guidance from RESOLVER.md" in client.calls[1][1]
+
+
+# --------------------------------------------------------------------------
+# Backfill: title/abstract for sources captured before docs/adr/0010
+
+
+def test_plan_abstract_backfill_finds_sources_missing_abstract(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    # Simulate a pre-ADR-0010 source: metadata_json has no `abstract` key.
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        source.metadata_json = json.dumps({"meeting_date": "2026-07-09"})
+        session.commit()
+
+    items = plan_abstract_backfill(workspace, _capture_client())
+    assert [item.source_id for item in items] == [source_id]
+    assert items[0].title == CAPTURE_METADATA_JSON["title"]
+    assert items[0].abstract == CAPTURE_METADATA_JSON["abstract"]
+
+
+def test_plan_abstract_backfill_skips_sources_that_already_have_one(workspace, transcript):
+    _capture(workspace, transcript)  # capture already writes an abstract
+    assert plan_abstract_backfill(workspace, _capture_client()) == []
+
+
+def test_apply_abstract_backfill_rewrites_frontmatter_and_source_row(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        raw_path = source.raw_text_path
+        source.metadata_json = json.dumps({"meeting_date": "2026-07-09"})
+        source.title = "old filename title"
+        session.commit()
+
+    payload = {
+        "title": "2026-07-20 Backfilled Title",
+        "abstract": "A freshly backfilled abstract.",
+    }
+    items = plan_abstract_backfill(workspace, _capture_client(payload))
+    updated = apply_abstract_backfill(workspace, items)
+
+    assert updated == [raw_path]
+    on_disk = (workspace.root_path / raw_path).read_text()
+    assert "title: 2026-07-20 Backfilled Title" in on_disk
+    assert "abstract: A freshly backfilled abstract." in on_disk
+    # The rest of the raw file survives untouched.
+    assert "meeting_date: '2026-07-09'" in on_disk
+    assert "# 2026-07-09-raw-meeting" in on_disk
+
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        assert source.title == "2026-07-20 Backfilled Title"
+        metadata = json.loads(source.metadata_json)
+        assert metadata["title"] == "2026-07-20 Backfilled Title"
+        assert metadata["abstract"] == "A freshly backfilled abstract."
+
+
+def test_apply_abstract_backfill_never_touches_memories_or_status(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        source.metadata_json = json.dumps({})
+        session.commit()
+
+    items = plan_abstract_backfill(workspace, _capture_client())
+    apply_abstract_backfill(workspace, items)
+
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        assert source.status == "raw"  # unchanged -- backfill never enriches
+        assert session.scalar(select(Memory)) is None
 
 
 # --------------------------------------------------------------------------
