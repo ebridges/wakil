@@ -25,7 +25,13 @@ from pydantic import BaseModel
 from wakil.skills.errors import SkillResolutionError
 from wakil.skills.resolver import default_context, resolve_skill
 
-BASE_SYSTEM = "You are wakil, a careful assistant for a personal Markdown knowledge base."
+BASE_SYSTEM = (
+    "You are wakil, a careful assistant for a personal Markdown knowledge base. "
+    "When referencing an existing note anywhere in your response, cite it as a "
+    "[[wikilink]] using its workspace-relative path (directory plus the note's "
+    "slug, without a .md extension) — not a backticked path, a bare title, or a "
+    "relative Markdown link."
+)
 
 
 class SkillLoadError(RuntimeError):
