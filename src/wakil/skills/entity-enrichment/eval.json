@@ -74,6 +74,23 @@
         "Describes checking Jane Doe's existing page and related notes before writing, so the new source contributes only the delta rather than the whole page being re-derived from this one source alone."
       ],
       "related_skills": ["entity-resolution", "note-conformance"]
+    },
+    {
+      "id": "explicit-file-reference-forces-back-link",
+      "query": "The source below (sources/transcripts/2026-07-18-standup.md) went through wakil's ingest pipeline with an explicit `@file:concepts/graph-memory.md` reference in its --context, which the pipeline resolved and guaranteed a spot in the 'Existing related notes' list. Entity-resolution ran and returned a confident match for 'graph memory' -> concepts/graph-memory.md, noting the match came from that explicit @file: reference rather than from workspace search. Decide how this note should connect to the knowledge base for this mention.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-07-18-standup.md": "Quick standup. Someone mentioned graph memory in passing while listing out old ideas from last quarter -- nothing new to report on it, the conversation moved on immediately.\n"
+        }
+      },
+      "expected_behavior": [
+        "Creates the back-link (a [[wikilink]] to concepts/graph-memory.md) for the graph memory mention despite it being a light, passing reference that wouldn't clear the substantive-mention bar a search-found match would need to.",
+        "States explicitly that the link is warranted because the match came from an explicit @file: reference in the source's context, not from search -- treating it as a deliberate, high-confidence signal from the user rather than weighing it against 'avoid superficial linking'.",
+        "Does NOT invent new page content or a new dated entry for concepts/graph-memory.md just because it's being linked -- the mention itself carries no new signal beyond the reference.",
+        "Does NOT re-litigate entity-resolution's identity call (e.g. does not second-guess whether 'graph memory' really matches concepts/graph-memory.md) -- treats that match as already settled and builds on it."
+      ],
+      "related_skills": ["entity-resolution"]
     }
   ]
 }

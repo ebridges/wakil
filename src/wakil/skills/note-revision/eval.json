@@ -79,6 +79,26 @@
         "Does NOT lose track of Jane Doe as the source of the claim -- if mentioning her, attributes the vendor-selection statement to Jane Doe rather than treating it as an unattributed fact."
       ],
       "related_skills": ["content-synthesis", "note-routing"]
+    },
+    {
+      "id": "attached-companion-document-resolved-in-place",
+      "query": "meetings/2026/2026-07-20-vendor-prep.md was attached as context (via --context '@file:meetings/2026/2026-07-20-vendor-prep.md') when sources/transcripts/2026-07-20-vendor-call.md was enriched. The transcript skill already used that attachment to write a brand-new meeting note resolving both of the prep document's open questions. Now go back and update the prep document itself -- check off both open questions in place to reflect that they were resolved on the call.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "meetings/2026/2026-07-20-vendor-prep.md": "---\ntype: meeting\ntitle: Vendor Evaluation Prep\ndate: 2026-07-20\nattendees:\n  - Jane Doe\n---\n\n# Vendor Evaluation Prep\n\n## Open Questions\n\n- Does Acme Corp's claims graph model support real-time updates?\n- What's the expected pilot timeline?\n",
+          "sources/transcripts/2026-07-20-vendor-call.md": "Call with Jane Doe, 2026-07-20. She confirmed Acme Corp's claims graph model supports real-time updates, and the team agreed on a 6-week pilot starting August 1.\n"
+        }
+      },
+      "expected_behavior": [
+        "Reads meetings/2026/2026-07-20-vendor-prep.md in full -- including both Open Questions -- before drafting any change, rather than working only from the query's summary.",
+        "Re-reads sources/transcripts/2026-07-20-vendor-call.md itself for the exact resolution rather than relying on the query's paraphrase of what Jane said.",
+        "Treats this as note-revision's job -- merging the call's resolution into the existing prep document -- rather than deferring it to the transcript skill, since transcript extraction only wrote the resolution into the new meeting note and doesn't rewrite the attached prep document itself.",
+        "Resolves both open questions in place with their outcomes (real-time updates confirmed; a 6-week pilot starting August 1) rather than deleting the Open Questions section outright or leaving it unresolved.",
+        "Attributes the resolution to Jane Doe, or the call itself, rather than presenting it as an unattributed fact.",
+        "Surfaces the draft diff for confirmation before writing, rather than claiming the prep document is already updated."
+      ],
+      "related_skills": ["transcript", "note-conformance"]
     }
   ]
 }

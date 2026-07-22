@@ -20,6 +20,11 @@ is the single worst failure mode this skill exists to prevent.
   for that subject already exists.
 - Explicitly asked to update, revise, or merge new information into an
   existing note.
+- An attached companion document (a prep note, an agenda) itself needs
+  updating after the fact — e.g. checking off its own open questions in
+  place once a meeting resolved them. `transcript` only writes that
+  resolution into the *new* meeting note; updating the companion document
+  itself is a merge into an existing note, which is this skill's job.
 - **Not** for creating a note that doesn't exist yet — that's
   `content-synthesis`. Not for fixing frontmatter/slug/link shape with no
   new information to merge — that's `note-conformance`. If a revision also
