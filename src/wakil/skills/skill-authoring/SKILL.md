@@ -144,13 +144,23 @@ haven't personally confirmed.
 Placing a workspace- or user-level override correctly, without ever editing
 the shipped built-in copy, is a whole-directory operation with its own
 precedence rules and pre-flight checks — see
-`references/overriding-a-builtin.md` for the full mechanics.
+`references/overriding-a-builtin.md` for the full mechanics. Before relying
+on an override, run both: `wakil skills which <name> --verbose` to confirm
+your copy is the one actually winning resolution rather than silently
+shadowed by an even-higher-precedence root, and `wakil skills validate
+<name>` to check the override's frontmatter and directory are well-formed
+before relying on it.
 
 ## Promoting or porting a skill
 
 Lifting a kb-local or user-level skill into the shipped built-in catalog (or
 narrowing a built-in into a kb-local override) is an editorial pass, not a
-plain copy — see `references/promoting-or-porting.md` for the checklist.
+plain copy — see `references/promoting-or-porting.md` for the full
+checklist. One step worth stating here directly: if the promoted (or
+narrowed) version intentionally does less than the original, say so
+explicitly in the skill's own body, not only in a commit message — a future
+reader of the skill file should never have to guess why a capability is
+missing.
 
 ## When something's wrong
 
@@ -171,6 +181,17 @@ plain copy — see `references/promoting-or-porting.md` for the checklist.
    task backlog — it is not a substitute for raising the gap in conversation.
    State plainly what's missing and let the user decide whether it's a new
    skill, a rescoped existing one, or out of scope for now.
+
+   Watch for a specific trap here: finding that the individual *judgment
+   calls* involved resemble what an existing skill already does elsewhere
+   (e.g. "deciding which fields survive" sounds like conflict resolution
+   `note-revision` already handles) is not the same as that skill actually
+   owning the operation as a whole — especially when the operation includes
+   something no skill's stated scope covers at all (deleting or consolidating
+   an existing page, for instance). Resembling a skill's toolkit isn't the
+   same as being in scope; if no skill's own description actually claims the
+   operation, that's still a genuine gap to escalate, not a composition to
+   assemble unilaterally.
 
 ## Dangling-reference discipline
 
