@@ -202,6 +202,7 @@ def test_transcript_frontmatter_template_from_schema_catalog(workspace):
         "captured",
         "tags",
         "created",
+        "abstract",
         "recording_url",
         "company",
         "meeting_date",
@@ -213,14 +214,16 @@ def test_transcript_frontmatter_template_from_schema_catalog(workspace):
 def test_capture_transcript_frontmatter_equivalent_to_old_schema_scrape(workspace, transcript):
     """Same effect as the retired SCHEMA.md yaml-block scrape for a
     representative transcript: type is kept, and every field the code
-    catalog can fill (title, origin, url, dates) is filled with a real
-    value rather than left as a placeholder."""
-    proposal = prepare_capture(workspace, "transcript", file=transcript)
+    catalog can fill (title, abstract, origin, url, dates) is filled with a
+    real value rather than left as a placeholder. Title/abstract now come
+    from the capture-time model call (docs/adr/0010), not the filename."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
     today = datetime.now(UTC).date().isoformat()
 
     frontmatter = yaml.safe_load(proposal.raw_file.content.split("---")[1])
     assert frontmatter["type"] == "source"
-    assert frontmatter["title"] == "raw meeting"
+    assert frontmatter["title"] == CAPTURE_METADATA_JSON["title"]
+    assert frontmatter["abstract"] == CAPTURE_METADATA_JSON["abstract"]
     # "origin" is the enumerated kind, not a path; "url" is a KB-root-relative
     # file: reference, never the machine's absolute path.
     assert frontmatter["origin"] == "transcript"
