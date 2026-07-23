@@ -78,6 +78,7 @@ def test_fresh_database_is_stamped_at_head(tmp_path: Path):
 
     assert _revision(engine) == _head_revision()
     assert "event_date" in _columns(engine, "memories")
+    assert "stance" in _columns(engine, "memories")
     assert {"subject_note_id", "object_note_id"} <= _columns(engine, "relationships")
 
 
@@ -95,6 +96,7 @@ def test_legacy_database_is_stamped_and_upgraded(tmp_path: Path):
 
     assert _revision(engine) == _head_revision()
     assert "event_date" in _columns(engine, "memories")
+    assert "stance" in _columns(engine, "memories")
     assert {"subject_note_id", "object_note_id"} <= _columns(engine, "relationships")
     assert {"git_branch", "git_pr_url"} <= _columns(engine, "sources")
 
@@ -147,14 +149,17 @@ def test_migration_dedupes_existing_content_hash_collisions(kb_path: Path):
         session.add(duplicate)
         session.flush()
         duplicate_id = duplicate.id
-        session.add(
-            Memory(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                memory_type="fact",
-                content="x",
-                source_id=duplicate_id,
-            )
+        # Raw insert, not the Memory ORM class: the ORM model always reflects
+        # the head schema, but this table is deliberately still at revision
+        # 0003 here (pre-0005's `stance` column) -- using the ORM class would
+        # break every time a later migration adds a new memories column.
+        session.execute(
+            text(
+                "INSERT INTO memories "
+                "(workspace_id, user_id, memory_type, content, source_id, state) "
+                "VALUES (:workspace_id, :user_id, 'fact', 'x', :source_id, 'working')"
+            ),
+            {"workspace_id": workspace_id, "user_id": user_id, "source_id": duplicate_id},
         )
         session.commit()
 
@@ -251,6 +256,26 @@ def test_event_date_roundtrip(kb_path: Path):
         session.commit()
         stored = session.scalar(select(Memory).where(Memory.memory_type == "event"))
         assert stored.event_date == dt.date(2026, 7, 1)
+
+
+def test_stance_roundtrip(kb_path: Path):
+    init_workspace(kb_path)
+    config = WorkspaceConfig.load(kb_path)
+    with open_session(config) as session:
+        ws = session.scalar(select(Workspace.id))
+        user = session.scalar(select(User.id))
+        session.add(
+            Memory(
+                workspace_id=ws,
+                user_id=user,
+                memory_type="fact",
+                content="AI pushed our PR volume way up, I dunno, maybe 80?",
+                stance="casual",
+            )
+        )
+        session.commit()
+        stored = session.scalar(select(Memory).where(Memory.stance == "casual"))
+        assert stored.stance == "casual"
 
 
 def test_note_to_note_relationship_roundtrip(kb_path: Path):

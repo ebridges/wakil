@@ -105,6 +105,8 @@ class CandidateMemory:
     memory_type: str
     content: str
     confidence: float | None = None
+    # Commitment/register axis, orthogonal to memory_type (docs/adr/0014).
+    stance: str | None = None
     # The dated event's own date (memory_type="event"), for Timeline ordering.
     event_date: date | None = None
 
@@ -571,6 +573,7 @@ def prepare_enrichment(
             memory_type=m.type or "fact",
             content=m.content,
             confidence=_clamp01(m.confidence),
+            stance=m.stance,
             event_date=m.event_date,
         )
         for m in extraction.memories
@@ -1231,6 +1234,7 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
                 memory_type=candidate.memory_type,
                 content=candidate.content,
                 confidence=candidate.confidence,
+                stance=candidate.stance,
                 event_date=candidate.event_date,
                 state="candidate",
                 source_id=source.id,

@@ -91,6 +91,15 @@ class Memory(Base):
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"), default=None)
     note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id"), default=None)
     confidence: Mapped[float | None] = mapped_column(default=None)
+    # Commitment/register axis, orthogonal to memory_type (docs/adr/0014):
+    # "casual" marks a low-commitment claim (e.g. a 1:1 hot take); None/
+    # "formal" is the default. Distinct from confidence, which is about
+    # certainty rather than the register a claim was uttered in. Named
+    # `stance` rather than `register` because the latter collides with
+    # ABCMeta.register on Pydantic's ModelMetaclass (see
+    # CandidateMemoryModel.stance) -- kept consistent here rather than
+    # translating names at the ORM boundary.
+    stance: Mapped[str | None] = mapped_column(String(10), default=None)
     state: Mapped[str] = mapped_column(String(20), default="working")
     importance: Mapped[float | None] = mapped_column(default=None)
     freshness: Mapped[float | None] = mapped_column(default=None)

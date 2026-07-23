@@ -37,6 +37,14 @@ class CandidateMemoryModel(BaseModel):
     )
     content: str = Field(description="One self-contained claim, observation, or question.")
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    stance: Literal["formal", "casual"] | None = Field(
+        default=None,
+        description="casual = asserted in a low-commitment register (an off-the-cuff "
+        "1:1 remark the speaker would not stand behind formally); formal or omitted "
+        "otherwise. Orthogonal to `type` — a casual opinion and a casual fact are both "
+        "valid. Distinct from confidence: this is about the register a claim was "
+        "uttered in, not how certain it is.",
+    )
     event_date: dt.date | None = Field(
         default=None,
         description="ISO date of the event itself, only for type=event.",

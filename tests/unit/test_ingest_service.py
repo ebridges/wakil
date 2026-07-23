@@ -42,7 +42,12 @@ MODEL_JSON = {
     "key_points": ["Prototype approved", "Jane owns the routing design"],
     "memories": [
         {"type": "decision", "content": "Team will prototype FNOL routing.", "confidence": 0.9},
-        {"type": "fact", "content": "Jane Doe owns the routing design.", "confidence": 0.8},
+        {
+            "type": "fact",
+            "content": "Jane Doe owns the routing design.",
+            "confidence": 0.8,
+            "stance": "casual",
+        },
         {
             "type": "event",
             "content": "Kickoff meeting for the FNOL routing prototype.",
@@ -497,6 +502,12 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
         # The dated event carries its own date for Timeline ordering.
         event = next(m for m in memories if m.memory_type == "event")
         assert event.event_date == date(2026, 7, 9)
+        # stance flows from the extraction JSON through to the Memory row,
+        # independent of memory_type (docs/adr/0014).
+        fact = next(m for m in memories if m.memory_type == "fact")
+        assert fact.stance == "casual"
+        decision = next(m for m in memories if m.memory_type == "decision")
+        assert decision.stance is None
         assert session.scalar(select(Relationship)) is not None
 
 
