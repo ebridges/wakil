@@ -94,6 +94,14 @@ no automatic promotion or demotion based on type or confidence — a
 low-confidence `opinion` still starts in `candidate` like everything else
 and stays there until you act on it.
 
+Memories also carry a `register` (`wakil memory list --register
+formal|casual`) — a commitment axis orthogonal to `type`: `casual` marks a
+low-commitment 1:1 "hot take" (a casual opinion and a casual fact are both
+valid). `wakil query` excludes `casual` memories from the answer's grounding
+context by default (`--include-casual` opts back in); `wakil search` is
+unaffected — hot takes still surface there. See ADR 0014 for why the
+underlying column/field is named `stance` rather than `register`.
+
 ## Selecting a workspace
 
 Every command accepts a global `-w`/`--workspace` option (before the
@@ -210,6 +218,8 @@ precedence; FTS fills in workspace records QMD doesn't cover.
 model as numbered context blocks, and prints a cited answer. Answers are
 grounded: if the knowledge base doesn't support an answer, wakil says so.
 Each query is recorded in the workspace database (`query_runs`).
+Casual-register memories are excluded from grounding by default; pass
+`--include-casual` to let a hot take answer a question anyway.
 
 Configure a provider via environment variables (see `.env.example`):
 
