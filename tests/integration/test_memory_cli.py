@@ -99,6 +99,11 @@ def test_memory_show(kb_with_memories):
     assert result.exit_code == 1
     assert "No memory with id" in result.output
 
+    result = runner.invoke(app, ["-w", str(kb_with_memories), "memory", "show", "4"])
+    assert result.exit_code == 0
+    assert "Register:" in result.output
+    assert "casual" in result.output
+
 
 def test_memory_promote_and_archive(kb_with_memories):
     result = runner.invoke(app, ["-w", str(kb_with_memories), "memory", "promote", "1", "2"])
