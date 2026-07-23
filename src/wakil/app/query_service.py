@@ -33,10 +33,11 @@ def run_query(
     client: ModelClient,
     limit: int = 10,
     mode: str = "search",
+    include_casual: bool = False,
 ) -> QueryResult:
     with open_session(config) as session:
         hits = search_workspace(session, config, question, limit=limit, mode=mode)
-        contexts = _build_contexts(session, config, hits)
+        contexts = _build_contexts(session, config, hits, include_casual=include_casual)
 
         run = QueryRun(
             workspace_id=session.scalar(
@@ -77,16 +78,20 @@ def run_query(
         )
 
 
-def _build_contexts(session, config: WorkspaceConfig, hits: list[SearchHit]) -> list[ContextBlock]:
+def _build_contexts(
+    session, config: WorkspaceConfig, hits: list[SearchHit], include_casual: bool = False
+) -> list[ContextBlock]:
     contexts: list[ContextBlock] = []
     for hit in hits[:MAX_CONTEXT_BLOCKS]:
-        text = _load_text(session, config, hit)
+        text = _load_text(session, config, hit, include_casual=include_casual)
         if text:
             contexts.append(ContextBlock(ref=hit.ref, kind=hit.kind, title=hit.title, text=text))
     return contexts
 
 
-def _load_text(session, config: WorkspaceConfig, hit: SearchHit) -> str | None:
+def _load_text(
+    session, config: WorkspaceConfig, hit: SearchHit, include_casual: bool = False
+) -> str | None:
     if hit.kind == "note":
         path = config.root_path / hit.ref
         try:
@@ -95,7 +100,13 @@ def _load_text(session, config: WorkspaceConfig, hit: SearchHit) -> str | None:
             return hit.snippet or None
     if hit.kind == "memory":
         memory = session.get(Memory, int(hit.ref.split(":", 1)[1]))
-        return memory.content if memory else None
+        if memory is None:
+            return None
+        # Casual-stance memories (hot takes) don't ground a query answer
+        # unless explicitly requested — they still surface via `wakil search`.
+        if memory.stance == "casual" and not include_casual:
+            return None
+        return memory.content
     if hit.kind == "source":
         source = session.get(Source, int(hit.ref.split(":", 1)[1]))
         if source is None:

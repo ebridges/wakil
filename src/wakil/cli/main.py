@@ -200,6 +200,14 @@ def query(
         str,
         typer.Option("--mode", help="QMD mode: search (BM25), vsearch (vector), query (hybrid)."),
     ] = "search",
+    include_casual: Annotated[
+        bool,
+        typer.Option(
+            "--include-casual",
+            help="Ground the answer in casual-register memories (hot takes) too; "
+            "excluded by default.",
+        ),
+    ] = False,
 ) -> None:
     """Answer a question with grounded citations from the knowledge base."""
     from wakil.app.query_service import run_query
@@ -216,7 +224,9 @@ def query(
         raise typer.Exit(code=1)
     try:
         with console.status(f"Querying with {client.model}..."):
-            result = run_query(config, question, client, limit=limit, mode=mode)
+            result = run_query(
+                config, question, client, limit=limit, mode=mode, include_casual=include_casual
+            )
     except ModelError as exc:
         console.print(f"[red]Model error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
