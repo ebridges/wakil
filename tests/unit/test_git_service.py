@@ -59,7 +59,7 @@ def _insert_source(config: WorkspaceConfig, title: str = "Test Source") -> int:
 
 
 def test_commit_message_conventions():
-    assert commit_message("ingest", "add transcript") == "wakil ingest: add transcript"
+    assert commit_message("ingest", "add transcript") == "🧠 wakil ingest: add transcript"
     with pytest.raises(GitServiceError):
         commit_message("bogus", "x")
 

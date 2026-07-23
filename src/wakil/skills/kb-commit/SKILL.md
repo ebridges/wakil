@@ -29,9 +29,11 @@ skill — this is the fallback path, not the default one.
 
 ## The commit convention
 
-Every commit message is `wakil <kind>: <description>`, produced by
-`commit_message()` in `src/wakil/app/git_service.py`. `kind` must be one of
-`COMMIT_PREFIXES`:
+Every commit message is `<emoji> wakil <kind>: <description>`, produced by
+`commit_message()` in `src/wakil/app/git_service.py` — the emoji is part of
+the function's own output (`COMMIT_EMOJI`), not something this skill adds on
+top, so a wakil CLI `--commit` flag and this skill's hand-constructed commits
+carry the same emoji consistently. `kind` must be one of `COMMIT_PREFIXES`:
 
 ```python
 COMMIT_PREFIXES = ("ingest", "note", "link", "memory", "dream", "source", "chore")
@@ -41,12 +43,10 @@ An unrecognized kind is a hard error there (`GitServiceError: unknown commit
 kind: ...`), not a warning — treat the list above as closed, don't invent a new
 kind for a commit this skill produces.
 
-When this skill constructs a manual `git commit` message by hand (as opposed
-to a wakil CLI `--commit` flag doing it), prefix the subject line with the
-kind's emoji: `<emoji> wakil <kind>: <description>`. This is a presentation
-layer this skill adds on top of `commit_message()`'s output — the function
-itself still returns the bare `wakil <kind>: <description>` string, so
-anything parsing commit subjects programmatically is unaffected.
+When this skill constructs a manual `git commit` message by hand, reproduce
+`commit_message()`'s output exactly: `<emoji> wakil <kind>: <description>`,
+using the kind's emoji from the table below — don't drop the emoji, and don't
+add a second one.
 
 | Kind      | Emoji | Use for                                                    |
 | --------- | ----- | ----------------------------------------------------------- |
@@ -85,9 +85,8 @@ What each kind is for, going by how wakil's own code already uses them:
 There is no general-purpose `wakil commit` CLI command — `commit_message()` is
 a library function invoked by `ingest`/`enrich`/`schema migrate`'s own
 `--commit` flag and by this skill's manual `git commit` calls alike. Match its
-output exactly (`wakil <kind>: <description>`) as the base subject, adding
-only the emoji prefix described above, rather than inventing a different
-shape for a hand-run commit.
+output exactly (`<emoji> wakil <kind>: <description>`) rather than inventing a
+different shape for a hand-run commit.
 
 ## Procedure
 
