@@ -70,7 +70,7 @@ def search_workspace(
 
 def _ranked_memory_hits(rows: list[dict]) -> list[SearchHit]:
     """Order memory hits by lifecycle rank (durable first, faded/archived last),
-    breaking ties with the bm25 relevance score."""
+    breaking ties by confidence within the same state, then by bm25 relevance."""
 
     def sort_key(row: dict) -> tuple[float, float]:
         return (

@@ -89,7 +89,7 @@ class EntityResolution(BaseModel):
     target_note_path: str | None = Field(
         default=None, description="Existing note path, for action=update."
     )
-    confidence: float | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     proposed_frontmatter: dict | None = Field(
         default=None,
         description="For action=create: frontmatter satisfying the type's required "

@@ -82,3 +82,8 @@ def test_candidate_memory_model_rejects_out_of_range_confidence():
         CandidateMemoryModel(type="fact", content="X", confidence=1.5)
     with pytest.raises(ValidationError):
         CandidateMemoryModel(type="fact", content="X", confidence=-0.1)
+
+
+def test_candidate_memory_model_accepts_boundary_confidence():
+    assert CandidateMemoryModel(type="fact", content="X", confidence=0.0).confidence == 0.0
+    assert CandidateMemoryModel(type="fact", content="X", confidence=1.0).confidence == 1.0

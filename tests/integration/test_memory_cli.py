@@ -35,6 +35,13 @@ def kb_with_memories(kb_path: Path) -> Path:
                     content="Jane owns routing design.",
                     state="working",
                 ),
+                Memory(
+                    workspace_id=ws,
+                    user_id=user,
+                    memory_type="opinion",
+                    content="The FNOL routing budget seems too tight.",
+                    state="candidate",
+                ),
             ]
         )
         session.commit()
@@ -51,6 +58,12 @@ def test_memory_list(kb_with_memories):
         app, ["-w", str(kb_with_memories), "memory", "list", "--state", "working"]
     )
     assert "Jane owns routing design." in result.output
+    assert "Prototype FNOL routing." not in result.output
+
+    result = runner.invoke(
+        app, ["-w", str(kb_with_memories), "memory", "list", "--type", "opinion"]
+    )
+    assert "The FNOL routing budget seems too tight." in result.output
     assert "Prototype FNOL routing." not in result.output
 
 
@@ -73,7 +86,7 @@ def test_memory_promote_and_archive(kb_with_memories):
     config = WorkspaceConfig.load(kb_with_memories)
     with open_session(config) as session:
         states = {m.id: m.state for m in session.scalars(select(Memory))}
-    assert states == {1: "durable", 2: "durable"}
+    assert states == {1: "durable", 2: "durable", 3: "candidate"}
 
     result = runner.invoke(app, ["-w", str(kb_with_memories), "memory", "archive", "1"])
     assert result.exit_code == 0

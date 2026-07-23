@@ -120,6 +120,7 @@ def retrieval_rank(
         if age_days > WORKING_FADE_DAYS:
             rank = _FADED_WORKING_RANK
     effective_confidence = confidence if confidence is not None else _DEFAULT_CONFIDENCE
+    effective_confidence = max(0.0, min(1.0, effective_confidence))
     return rank + (1.0 - effective_confidence) * _CONFIDENCE_SPREAD
 
 
