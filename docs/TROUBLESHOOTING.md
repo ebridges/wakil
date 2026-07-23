@@ -14,6 +14,15 @@ nothing; see the `development-docs` skill (`.claude/skills/development-docs/SKIL
 the judgment process that maintains this file. Every entry cites a concrete
 source (commit SHA, PR #, or session detail) for traceability.
 
+### Commit-message emoji was a "manual commits only" presentation layer, so automatic commits silently lacked it
+**Date:** 2026-07-23 · **Source:** `src/wakil/app/git_service.py`, `src/wakil/skills/kb-commit/SKILL.md`
+
+**Symptom:** Commits made by `wakil ingest --commit`/`--branch`/`--pr` (on by default per ADR 0003) showed up in `git log` with no emoji (e.g. `wakil source: add mosaic offer sync ian gutwinski`), while the `kb-commit` skill's documented examples all showed an emoji-prefixed subject (`📥 wakil source: ...`) — read as a bug from the user's side.
+
+**Root cause:** `commit_message()` deliberately returned the bare `wakil <kind>: <description>` string; `kb-commit/SKILL.md` described the emoji as a "presentation layer this skill adds on top of `commit_message()`'s output," applied only when a commit is hand-constructed by that skill, specifically to keep the function's own output unaffected. In practice all wakil-generated commits land in the same `git log`, so this was an inconsistency a user would see immediately, not an internal implementation seam — and no code anywhere actually parsed the bare format (confirmed by a full-codebase search before fixing), so the split had no real justification.
+
+**Fix:** Moved the emoji into `commit_message()` itself (`COMMIT_EMOJI` dict, keyed by kind) so every wakil-generated commit — automatic CLI flag or `kb-commit`'s manual commit — carries the same prefix. When a "presentation layer added on top of a shared helper" is actually visible to the end user (not just internal/programmatic consumers), prefer folding it into the helper rather than splitting it across two call paths that both write to the same user-visible log.
+
 ### Unquoted `[[wikilink]]` in YAML frontmatter parses as a nested list
 **Date:** 2026-07-18 · **Source:** session 0062da63-7923-40bd-b839-86cf8fb1d21f
 

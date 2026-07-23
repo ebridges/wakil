@@ -77,7 +77,7 @@ def test_migrate_with_commit(kb_path: Path):
         text=True,
         check=True,
     ).stdout.strip()
-    assert subject == "wakil chore: normalize person frontmatter"
+    assert subject == "🔧 wakil chore: normalize person frontmatter"
 
 
 def test_migrate_unknown_type_filter_fails(kb_path: Path):

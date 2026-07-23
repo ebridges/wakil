@@ -178,8 +178,8 @@ with no schema is a hard stop, not a best-guess write. Re-running requires
 `--force`.
 
 Both steps preview before writing (`--yes` skips the prompt) and accept
-`--branch`/`--commit`/`--pr`; captures commit as `wakil source:`, enrichment
-as `wakil ingest:`. Proposed notes fall back to `drafts/` when routing is
+`--branch`/`--commit`/`--pr`; captures commit as `📥 wakil source:`, enrichment
+as `🧠 wakil ingest:`. Proposed notes fall back to `drafts/` when routing is
 unclear or the path collides; existing files are never overwritten. Extracted
 memories are stored as `candidate` state for review with `wakil memory`.
 
@@ -199,7 +199,7 @@ reviewable git history:
 - `--pr` additionally pushes the branch and opens a pull request via the
   GitHub CLI (`gh`), when it is installed and an `origin` remote exists.
 
-Commits follow the wakil conventions (`wakil ingest: add ...`) and every
+Commits follow the wakil conventions (`🧠 wakil ingest: add ...`) and every
 commit is recorded in the workspace database (`git_changes`). `wakil git
 summary` shows the current branch, pending changes, recent commits, and
 wakil-created branches; `wakil git history <path>` shows one file's history.

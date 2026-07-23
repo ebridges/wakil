@@ -43,9 +43,9 @@ commit conventions, gh PRs, git summary", merged 2026-07-09):
   commit there), and `--pr` (implies `--branch`; pushes and opens a PR via
   `gh` with a summary and review checklist; degrades cleanly — clear error,
   not a crash — when `gh` or an `origin` remote is absent).
-- Commit messages follow a fixed convention (`wakil ingest: add <title>`,
-  summary as body), and every commit is recorded in `git_changes` and
-  back-filled onto the `IngestRun`.
+- Commit messages follow a fixed, emoji-prefixed convention
+  (`🧠 wakil ingest: add <title>`, summary as body), and every commit is
+  recorded in `git_changes` and back-filled onto the `IngestRun`.
 - New read commands, `wakil git summary` and `wakil git history <path>`,
   surface current branch, pending changes, recent commits, and per-file
   history without leaving the CLI.

@@ -1,9 +1,11 @@
 """Git-native knowledge-base changes: ingest branches, commits, PRs.
 
 Commit messages follow the wakil conventions from the build plan
-(`wakil ingest:`, `wakil note:`, ...). Only files wakil itself wrote are
-ever staged, and branching requires a clean tree so wakil's changes never
-mix with the user's uncommitted work.
+(`📥 wakil source:`, `📝 wakil note:`, ...) — `commit_message()` prefixes
+each kind with its emoji (`COMMIT_EMOJI`) so every wakil-generated commit,
+automatic or hand-constructed, carries it consistently. Only files wakil
+itself wrote are ever staged, and branching requires a clean tree so
+wakil's changes never mix with the user's uncommitted work.
 
 Branch/commit/PR are on by default for `wakil ingest`/`wakil enrich`
 (`--local` opts out) and are tracked per **source**, not per command
@@ -39,6 +41,16 @@ from wakil.storage.schema import GitChange, IngestRun, Source, Workspace
 COMMIT_PREFIXES = ("ingest", "note", "link", "memory", "dream", "source", "chore")
 PHASES = ("capture", "enrichment")
 
+COMMIT_EMOJI = {
+    "source": "📥",
+    "ingest": "🧠",
+    "note": "📝",
+    "link": "🔗",
+    "chore": "🔧",
+    "memory": "💾",
+    "dream": "💭",
+}
+
 
 class GitServiceError(RuntimeError):
     pass
@@ -68,7 +80,7 @@ class LandingContext:
 def commit_message(kind: str, description: str) -> str:
     if kind not in COMMIT_PREFIXES:
         raise GitServiceError(f"unknown commit kind: {kind}")
-    return f"wakil {kind}: {description}"
+    return f"{COMMIT_EMOJI[kind]} wakil {kind}: {description}"
 
 
 def ingest_branch_name(root, title: str) -> str:
