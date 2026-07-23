@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from wakil.config.settings import (
@@ -17,9 +17,16 @@ from wakil.config.settings import (
 )
 from wakil.integrations.git import GitInfo, inspect_git
 from wakil.integrations.qmd import QmdInfo, detect_qmd
-from wakil.knowledge.markdown import discover_markdown_files, read_markdown_file
+from wakil.knowledge.markdown import MarkdownFile, discover_markdown_files, read_markdown_file
+from wakil.knowledge.wikilinks import normalize_target, parse_wikilinks
 from wakil.storage.database import create_db_engine, init_db, make_session_factory
-from wakil.storage.schema import Memory, Note, Source, User, Workspace, utcnow
+from wakil.storage.schema import Memory, Note, Relationship, Source, User, Workspace, utcnow
+
+# Predicate applied to every generic Note↔Note edge extracted at index
+# time (ADR 0006, docs/relationship-graph-traversal-proposal.md Phase 1).
+# `Relationship.predicate` is free-string by convention (see ADR 0013),
+# so this is a documented value, not an enforced enum.
+MENTIONS_PREDICATE = "mentions"
 
 DEFAULT_USER_NAME = "default"
 
@@ -132,6 +139,10 @@ def index_notes(
 ) -> IndexResult:
     """Sync the notes table with the Markdown files currently on disk.
 
+    Also extracts each note body's `[[wikilinks]]` into generic `mentions`
+    Relationship rows (ADR 0006 Phase 1) — this is the only place backlinks
+    ever become real for hand-edited or wakil-authored content.
+
     `prune=False` skips removing notes missing from `root` — for a linked
     git worktree, "missing here" just means "on a different branch," not
     gone; only the canonical checkout (see `init_workspace`) should be
@@ -143,11 +154,14 @@ def index_notes(
         for note in session.scalars(select(Note).where(Note.workspace_id == workspace_id))
     }
     seen: set[str] = set()
+    # Kept per-key so mentions-sync doesn't have to re-read files from disk.
+    parsed: dict[str, MarkdownFile] = {}
 
     for relative_path in discover_markdown_files(root):
         md = read_markdown_file(root, relative_path)
         key = str(relative_path)
         seen.add(key)
+        parsed[key] = md
         note = existing.get(key)
         if note is None:
             session.add(
@@ -170,12 +184,107 @@ def index_notes(
             result.unchanged += 1
 
     if prune:
+        removed_note_ids: list[int] = []
         for key, note in existing.items():
             if key not in seen:
+                removed_note_ids.append(note.id)
                 session.delete(note)
                 result.removed += 1
+        if removed_note_ids:
+            # SQLite has no ON DELETE CASCADE wired up (see
+            # database.py — FK enforcement isn't on), so orphan Note↔Note
+            # rows have to be cleaned up explicitly here rather than
+            # relying on the DB to cascade.
+            session.execute(
+                delete(Relationship).where(
+                    Relationship.workspace_id == workspace_id,
+                    or_(
+                        Relationship.subject_note_id.in_(removed_note_ids),
+                        Relationship.object_note_id.in_(removed_note_ids),
+                    ),
+                )
+            )
+
+    # Note-row inserts above are pending until flush; the mentions-sync
+    # step below needs their ids to build edges. Everything after this
+    # commits in the caller's own outer transaction — no separate commit.
+    session.flush()
+    _sync_note_mentions(session, workspace_id, seen, parsed)
 
     return result
+
+
+def _sync_note_mentions(
+    session: Session,
+    workspace_id: int,
+    present_paths: set[str],
+    parsed: dict[str, MarkdownFile],
+) -> None:
+    """Reconcile `mentions` Note↔Note edges against wikilinks on disk.
+
+    For every note we saw on disk this run, compute the set of wikilink
+    targets that resolve to real notes and diff against the existing
+    `mentions` rows for that note — insert what's new, delete what's gone.
+    Dead-link targets (wikilinks pointing at nothing) are skipped
+    silently: dead-link detection is `maintain`'s job, not indexing's.
+
+    Notes not in `present_paths` (linked-worktree case: file exists on
+    another branch, not here) are left completely alone — outgoing edges
+    for those notes are preserved rather than mistakenly pruned.
+    """
+    notes = list(session.scalars(select(Note).where(Note.workspace_id == workspace_id)))
+    # Resolve wikilink targets against the same normalized path form —
+    # this kb mixes [[people/x]] and [[sources/y.md]] for the identical
+    # note (see ingest_service._normalize_link_path's own comment).
+    by_norm_path: dict[str, Note] = {}
+    for note in notes:
+        by_norm_path[normalize_target(note.path)] = note
+
+    subject_ids = [
+        note.id for note in notes if note.path in present_paths and note.path in parsed
+    ]
+    if not subject_ids:
+        return
+
+    existing_edges: dict[int, dict[int, Relationship]] = {}
+    for edge in session.scalars(
+        select(Relationship).where(
+            Relationship.workspace_id == workspace_id,
+            Relationship.predicate == MENTIONS_PREDICATE,
+            Relationship.subject_note_id.in_(subject_ids),
+            Relationship.object_note_id.is_not(None),
+        )
+    ):
+        existing_edges.setdefault(edge.subject_note_id, {})[edge.object_note_id] = edge
+
+    for note in notes:
+        if note.path not in present_paths:
+            continue
+        md = parsed.get(note.path)
+        if md is None:
+            continue
+        wanted: set[int] = set()
+        for link in parse_wikilinks(md.body):
+            target = by_norm_path.get(normalize_target(link.target))
+            if target is None or target.id == note.id:
+                # Unresolved (dead link) or self-link — skip. A self-link
+                # would produce a degenerate A→A row that no query cares
+                # about; keep the table clean.
+                continue
+            wanted.add(target.id)
+
+        current = existing_edges.get(note.id, {})
+        for object_id in wanted - current.keys():
+            session.add(
+                Relationship(
+                    workspace_id=workspace_id,
+                    subject_note_id=note.id,
+                    object_note_id=object_id,
+                    predicate=MENTIONS_PREDICATE,
+                )
+            )
+        for object_id in current.keys() - wanted:
+            session.delete(current[object_id])
 
 
 def _build_status(
