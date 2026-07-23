@@ -17,7 +17,7 @@
     },
     {
       "id": "hot-take-metric",
-      "query": "In an informal 1:1, the speaker says: 'AI pushed our PR volume from like 30 a week to way more, I dunno, maybe 80?' What memory type and confidence would you assign this line, and why?",
+      "query": "In an informal 1:1, the speaker says: 'AI pushed our PR volume from like 30 a week to way more, I dunno, maybe 80?' What memory type, confidence, and stance (register) would you assign this line, and why?",
       "workspace": {
         "base_fixture": "tests/fixtures/kb",
         "overlay": {}
@@ -25,6 +25,7 @@
       "expected_behavior": [
         "Classifies the line as type=fact (it asserts a metric/observation) or explicitly discusses the fact/opinion boundary, while assigning it low confidence",
         "Assigns confidence at or below roughly 0.4, citing the hedged, off-the-cuff phrasing ('I dunno, maybe') as the reason",
+        "Assigns stance=casual (not formal, not omitted), citing the same off-the-cuff 1:1 phrasing as the reason",
         "Does NOT treat the casual phrasing as reason to omit the memory entirely"
       ],
       "related_skills": []

@@ -42,6 +42,14 @@ def kb_with_memories(kb_path: Path) -> Path:
                     content="The FNOL routing budget seems too tight.",
                     state="candidate",
                 ),
+                Memory(
+                    workspace_id=ws,
+                    user_id=user,
+                    memory_type="fact",
+                    content="PR volume hit 80 a week, I dunno, maybe more.",
+                    state="candidate",
+                    stance="casual",
+                ),
             ]
         )
         session.commit()
@@ -66,6 +74,20 @@ def test_memory_list(kb_with_memories):
     assert "The FNOL routing budget seems too tight." in result.output
     assert "Prototype FNOL routing." not in result.output
 
+    result = runner.invoke(
+        app, ["-w", str(kb_with_memories), "memory", "list", "--register", "casual"]
+    )
+    assert "PR volume hit 80 a week" in result.output
+    assert "Prototype FNOL routing." not in result.output
+
+    # --register is a plain equality filter, same as --type: an unrecognized
+    # value isn't rejected, it just matches nothing.
+    result = runner.invoke(
+        app, ["-w", str(kb_with_memories), "memory", "list", "--register", "urgent"]
+    )
+    assert result.exit_code == 0
+    assert "No memories match." in result.output
+
 
 def test_memory_show(kb_with_memories):
     result = runner.invoke(app, ["-w", str(kb_with_memories), "memory", "show", "1"])
@@ -77,6 +99,11 @@ def test_memory_show(kb_with_memories):
     assert result.exit_code == 1
     assert "No memory with id" in result.output
 
+    result = runner.invoke(app, ["-w", str(kb_with_memories), "memory", "show", "4"])
+    assert result.exit_code == 0
+    assert "Register:" in result.output
+    assert "casual" in result.output
+
 
 def test_memory_promote_and_archive(kb_with_memories):
     result = runner.invoke(app, ["-w", str(kb_with_memories), "memory", "promote", "1", "2"])
@@ -86,7 +113,7 @@ def test_memory_promote_and_archive(kb_with_memories):
     config = WorkspaceConfig.load(kb_with_memories)
     with open_session(config) as session:
         states = {m.id: m.state for m in session.scalars(select(Memory))}
-    assert states == {1: "durable", 2: "durable", 3: "candidate"}
+    assert states == {1: "durable", 2: "durable", 3: "candidate", 4: "candidate"}
 
     result = runner.invoke(app, ["-w", str(kb_with_memories), "memory", "archive", "1"])
     assert result.exit_code == 0

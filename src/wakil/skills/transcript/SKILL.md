@@ -27,8 +27,10 @@ changes.
 - On top of the fact-vs-opinion distinction given elsewhere in this request:
   casually-asserted 1:1 claims (an off-the-cuff metric, a provocative
   aside, something hedged or jokey) get low `confidence` (guidance: ≤0.4)
-  even when phrased fact-like — never silently upgrade a hot take to a
-  confident fact.
+  and `stance="casual"` even when phrased fact-like — never silently
+  upgrade a hot take to a confident, formal-register fact. `stance` (the
+  claim's register/commitment level) is independent of `type`: a casual
+  opinion and a casual fact are both valid.
 - Date what happened. Memories describing dated events (the meeting itself,
   a committed deadline, an announced change) are event-type memories carrying
   the event's own date — not the date you are writing this.

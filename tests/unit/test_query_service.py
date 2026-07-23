@@ -6,7 +6,7 @@ from sqlalchemy import select
 from wakil.app.query_service import run_query
 from wakil.app.workspace_service import init_workspace, open_session
 from wakil.config.settings import WorkspaceConfig
-from wakil.storage.schema import QueryRun
+from wakil.storage.schema import Memory, QueryRun, User, Workspace
 
 
 class FakeClient:
@@ -79,3 +79,78 @@ def test_query_records_error_when_model_fails(kb_path: Path):
     with open_session(config) as session:
         run = session.scalar(select(QueryRun))
     assert run.status == "error"
+
+
+def test_query_excludes_casual_memories_by_default(kb_path: Path):
+    init_workspace(kb_path)
+    config = WorkspaceConfig.load(kb_path)
+    with open_session(config) as session:
+        ws = session.scalar(select(Workspace.id))
+        user = session.scalar(select(User.id))
+        session.add(
+            Memory(
+                workspace_id=ws,
+                user_id=user,
+                memory_type="fact",
+                content="zugzwang PR volume hit 80 a week",
+                stance="casual",
+            )
+        )
+        session.commit()
+
+    result = run_query(config, "zugzwang", FakeClient())
+
+    assert result.contexts == []
+
+
+def test_query_includes_casual_memories_when_requested(kb_path: Path):
+    init_workspace(kb_path)
+    config = WorkspaceConfig.load(kb_path)
+    with open_session(config) as session:
+        ws = session.scalar(select(Workspace.id))
+        user = session.scalar(select(User.id))
+        session.add(
+            Memory(
+                workspace_id=ws,
+                user_id=user,
+                memory_type="fact",
+                content="zugzwang PR volume hit 80 a week",
+                stance="casual",
+            )
+        )
+        session.commit()
+
+    result = run_query(config, "zugzwang", FakeClient(), include_casual=True)
+
+    assert any(c.kind == "memory" for c in result.contexts)
+
+
+def test_query_includes_formal_and_untagged_memories_by_default(kb_path: Path):
+    init_workspace(kb_path)
+    config = WorkspaceConfig.load(kb_path)
+    with open_session(config) as session:
+        ws = session.scalar(select(Workspace.id))
+        user = session.scalar(select(User.id))
+        session.add_all(
+            [
+                Memory(
+                    workspace_id=ws,
+                    user_id=user,
+                    memory_type="fact",
+                    content="zugzwang formal claim",
+                    stance="formal",
+                ),
+                Memory(
+                    workspace_id=ws,
+                    user_id=user,
+                    memory_type="fact",
+                    content="zugzwang untagged claim",
+                ),
+            ]
+        )
+        session.commit()
+
+    result = run_query(config, "zugzwang", FakeClient())
+
+    memory_texts = {c.text for c in result.contexts if c.kind == "memory"}
+    assert memory_texts == {"zugzwang formal claim", "zugzwang untagged claim"}

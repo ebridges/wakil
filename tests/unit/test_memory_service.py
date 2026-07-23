@@ -31,6 +31,7 @@ def _add_memory(
     created_at=None,
     confidence=None,
     memory_type="fact",
+    stance=None,
 ) -> int:
     user_id = session.scalar(select(User.id))
     memory = Memory(
@@ -40,6 +41,7 @@ def _add_memory(
         content=content,
         state=state,
         confidence=confidence,
+        stance=stance,
     )
     if created_at is not None:
         memory.created_at = created_at
@@ -72,6 +74,18 @@ def test_list_memories_filters_by_type(workspace):
         assert [m.content for m in list_memories(session, ws, memory_type="opinion")] == [
             "an opinion"
         ]
+
+
+def test_list_memories_filters_by_stance(workspace):
+    with open_session(workspace) as session:
+        ws = session.scalar(select(Workspace.id))
+        _add_memory(session, ws, "a hot take", stance="casual")
+        _add_memory(session, ws, "a formal claim", stance="formal")
+        _add_memory(session, ws, "an untagged claim")
+        session.commit()
+
+        assert [m.content for m in list_memories(session, ws, stance="casual")] == ["a hot take"]
+        assert len(list_memories(session, ws)) == 3
 
 
 def test_valid_transitions(workspace):

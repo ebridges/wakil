@@ -87,3 +87,17 @@ def test_candidate_memory_model_rejects_out_of_range_confidence():
 def test_candidate_memory_model_accepts_boundary_confidence():
     assert CandidateMemoryModel(type="fact", content="X", confidence=0.0).confidence == 0.0
     assert CandidateMemoryModel(type="fact", content="X", confidence=1.0).confidence == 1.0
+
+
+def test_candidate_memory_model_stance_defaults_to_none():
+    assert CandidateMemoryModel(type="fact", content="X").stance is None
+
+
+def test_candidate_memory_model_accepts_valid_stance_values():
+    assert CandidateMemoryModel(type="fact", content="X", stance="casual").stance == "casual"
+    assert CandidateMemoryModel(type="fact", content="X", stance="formal").stance == "formal"
+
+
+def test_candidate_memory_model_rejects_invalid_stance():
+    with pytest.raises(ValidationError):
+        CandidateMemoryModel(type="fact", content="X", stance="urgent")
