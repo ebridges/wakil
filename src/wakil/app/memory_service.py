@@ -37,6 +37,13 @@ _STATE_RANK = {"durable": 0.0, "candidate": 1.0, "working": 2.0, "archived": 4.0
 WORKING_FADE_DAYS = 30
 _FADED_WORKING_RANK = 3.0
 
+# confidence tiebreak within a state: NULL (most existing rows) is treated as
+# neutral, and the spread stays under the 1.0 gap between adjacent
+# _STATE_RANK values so confidence can never move a memory across a state
+# boundary — it only orders memories that already share a state.
+_DEFAULT_CONFIDENCE = 0.5
+_CONFIDENCE_SPREAD = 0.5
+
 
 class MemoryError(RuntimeError):
     pass
@@ -95,15 +102,25 @@ def transition_memories(
     return results
 
 
-def retrieval_rank(state: str, created_at: datetime | None) -> float:
-    """Lower ranks first. Encodes the fading rules described above."""
+def retrieval_rank(
+    state: str, created_at: datetime | None, confidence: float | None = None
+) -> float:
+    """Lower ranks first. Encodes the fading rules described above.
+
+    `confidence` only breaks ties *within* the same state bucket — it is
+    added as a fractional offset (higher confidence = lower offset) on top
+    of the integer state rank, so it can never move a memory across a state
+    boundary (a low-confidence durable memory still outranks every
+    candidate memory).
+    """
     rank = _STATE_RANK.get(state, 2.0)
     if state == "working" and created_at is not None:
         created = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
         age_days = (datetime.now(UTC) - created).days
         if age_days > WORKING_FADE_DAYS:
             rank = _FADED_WORKING_RANK
-    return rank
+    effective_confidence = confidence if confidence is not None else _DEFAULT_CONFIDENCE
+    return rank + (1.0 - effective_confidence) * _CONFIDENCE_SPREAD
 
 
 def touch_memories(session: Session, memory_ids: list[int]) -> None:

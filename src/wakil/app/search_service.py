@@ -73,7 +73,10 @@ def _ranked_memory_hits(rows: list[dict]) -> list[SearchHit]:
     breaking ties with the bm25 relevance score."""
 
     def sort_key(row: dict) -> tuple[float, float]:
-        return (retrieval_rank(row["state"], _parse_dt(row["created_at"])), row["score"])
+        return (
+            retrieval_rank(row["state"], _parse_dt(row["created_at"]), row.get("confidence")),
+            row["score"],
+        )
 
     return [_fts_hit("memory", row) for row in sorted(rows, key=sort_key)]
 
