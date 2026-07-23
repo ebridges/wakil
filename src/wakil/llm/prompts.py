@@ -117,6 +117,11 @@ def build_extraction_prompt(
         "since it names the type rather than being one of its fields. Its "
         "body must follow that type's page_shape — match the shape name "
         "against the templates that follow.",
+        "When tagging a memory's `type`, distinguish observed fact from subjective "
+        "judgment: a claim asserting what *is* (a number, an event, a stated position) "
+        "is `fact`; a claim asserting what is good/bad/worth-it, or a causal 'because' "
+        "clause the source doesn't itself establish, is interpretation and belongs as "
+        "`opinion`, not `fact`.",
         describe_entity_types_full(entity_types),
         "",
         describe_page_shapes(page_shapes),

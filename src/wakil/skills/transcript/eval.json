@@ -1,0 +1,48 @@
+{
+  "skill": "transcript",
+  "scenarios": [
+    {
+      "id": "clear-opinion",
+      "query": "This transcript excerpt includes the line: 'Honestly I think the $630K comp package is reasonable for someone at that level.' If you were extracting memories from this transcript, what memory `type` would you assign this line, and why?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Classifies the line as type=opinion, not type=fact",
+        "Explains the distinction: this is a value judgment ('reasonable') attributed to the speaker, not an observed/stated actuality",
+        "Does NOT classify it as type=hypothesis (it is not a tentative claim about the world, it's a stance)"
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "hot-take-metric",
+      "query": "In an informal 1:1, the speaker says: 'AI pushed our PR volume from like 30 a week to way more, I dunno, maybe 80?' What memory type and confidence would you assign this line, and why?",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Classifies the line as type=fact (it asserts a metric/observation) or explicitly discusses the fact/opinion boundary, while assigning it low confidence",
+        "Assigns confidence at or below roughly 0.4, citing the hedged, off-the-cuff phrasing ('I dunno, maybe') as the reason",
+        "Does NOT treat the casual phrasing as reason to omit the memory entirely"
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "hypothesis-vs-opinion-because-clause",
+      "query": "The transcript says: 'Greenlite paused hiring because each additional engineer was expected to slow down the roadmap more than they'd add.' Classify this as fact, opinion, or hypothesis, and explain your reasoning for the boundary you drew.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {}
+      },
+      "expected_behavior": [
+        "Identifies that 'Greenlite paused hiring' is the factual/observed part",
+        "Identifies that the causal 'because' clause is not established by the transcript as a directly-reported reason, and treats it as interpretation rather than fact",
+        "Reasons explicitly about opinion vs. hypothesis for the causal clause rather than defaulting to one silently — e.g. distinguishes a stance/judgment about why (opinion) from a tentative claim about the world that could later be verified (hypothesis), and states which it picked and why",
+        "Does not simply relabel the entire sentence as type=opinion without addressing the fact/interpretation split within it"
+      ],
+      "related_skills": []
+    }
+  ]
+}

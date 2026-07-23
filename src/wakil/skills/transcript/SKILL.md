@@ -24,6 +24,14 @@ changes.
 - Separate decisions from open questions. A decision has an owner and a
   next step; anything still contested belongs in a question-type memory, not
   a decision.
+- Separate stated fact from speaker opinion. A number, event, or stated
+  position is a `fact`-type memory; a value judgment ("reasonable,"
+  "worth it," "should") or an unestablished causal "because" clause is the
+  speaker's interpretation, not an observed fact — tag it `opinion`, not
+  `fact`. Casually-asserted 1:1 claims (an off-the-cuff metric, a
+  provocative aside, something hedged or jokey) get low `confidence`
+  (guidance: ≤0.4) even when phrased fact-like — never silently upgrade a
+  hot take to a confident fact.
 - Date what happened. Memories describing dated events (the meeting itself,
   a committed deadline, an announced change) are event-type memories carrying
   the event's own date — not the date you are writing this.
