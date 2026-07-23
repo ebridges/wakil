@@ -207,6 +207,14 @@ Adding `register: Literal["formal", "casual"] | None = Field(...)` to a Pydantic
 
 If a Pydantic model needs a field for a "register"/"category"/"kind of speech" concept, don't use that literal name — this codebase uses `stance` instead (kept consistent on the paired SQLAlchemy column and dataclass too, to avoid a translation layer at the ORM boundary), with `register` reserved for user-facing vocabulary only (CLI flag `--register`, display column), mirroring the existing `--type` → `memory_type` precedent (`type` collides with Python's builtin the same way). Before naming any new Pydantic field, a quick sanity check — define a throwaway `class T(BaseModel): <name>: str | None = None` and watch for a `UserWarning` — catches this class of collision (also applies to `copy`, `dict`, `json`, `schema`, and other `BaseModel`/`ABCMeta` method names) before it reaches a migration or a real model.
 
+### `mentions` relationship edges inherit the same per-worktree "last indexed wins" property as `Note.content_hash`
+
+**Date:** 2026-07-23 · **Source:** PR #29 (`relationship-graph-traversal-9xnnu9`), `_sync_note_mentions` in `src/wakil/app/workspace_service.py`
+
+`index_notes` extracts `[[wikilink]]`s from each note body it sees on disk into `mentions` `Relationship` rows (ADR 0006 Phase 1), and `_sync_note_mentions` deliberately leaves notes absent from the current checkout's `present_paths` untouched — this is correct and already documented in its own docstring, so a note that only exists on another branch doesn't have its edges wrongly pruned. But the corollary is the same underlying property as the "Git worktrees fix the ingest lock race, but wakil's workspace identity isn't worktree-aware" entry above, one level down: a note's `mentions` edges reflect whichever worktree last ran `index_notes` against it, exactly like `Note.content_hash`/frontmatter already only reflect the last-indexed worktree's version of that file's content. Two linked worktrees on divergent branches, sharing one `state_root`-keyed database, will have the more-recently-indexed worktree's link graph for a shared note "win" — not a new bug, just the existing single-writer-view property extending into the new relationship table now that one exists.
+
+This isn't a regression PR #29 introduced (the `Note` row's own `content_hash`/frontmatter already had this property before any `Relationship` table existed) and there's no reported symptom yet — recorded here so that if `wakil relationships`/backlink output ever looks stale or one-sided for a note actively edited across two worktrees, the first thing to check is which worktree most recently ran `index_notes` against that note, not the traversal query itself.
+
 ### An adversarial-review subagent's isolation checkouts left the working tree in detached HEAD
 
 **Date:** 2026-07-23 · **Source:** PR #27 (`feat/memory-register-phase-2`), round-2 adversarial review
