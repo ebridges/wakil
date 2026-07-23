@@ -117,14 +117,19 @@ class Relationship(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"))
-    subject_memory_id: Mapped[int] = mapped_column(ForeignKey("memories.id"))
+    # Memory↔Memory (semantic) and Note↔Note (structural, from wikilinks)
+    # edges live in one table, distinguished by which pair of columns is
+    # populated. Both pairs are nullable so a row is either one or the
+    # other, matching the nullable-provenance pattern already used for
+    # source_id/note_id (ADR 0006, entity-model.md). Backlinks are a live
+    # query (WHERE object_note_id = X), never stored prose.
+    subject_memory_id: Mapped[int | None] = mapped_column(
+        ForeignKey("memories.id"), default=None
+    )
     predicate: Mapped[str] = mapped_column(String(50))
-    object_memory_id: Mapped[int] = mapped_column(ForeignKey("memories.id"))
-    # Note↔Note structural edges (wikilinks/backlinks) are a different thing
-    # from Memory↔Memory semantic edges; these columns widen the table to
-    # carry both, mirroring the nullable-provenance pattern of source_id/
-    # note_id (entity-model.md). Backlinks become a live query
-    # (WHERE object_note_id = X), never stored prose.
+    object_memory_id: Mapped[int | None] = mapped_column(
+        ForeignKey("memories.id"), default=None
+    )
     subject_note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id"), default=None)
     object_note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id"), default=None)
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"), default=None)
