@@ -44,6 +44,8 @@ from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
 from wakil.config.settings import WorkspaceConfig
 from wakil.integrations.web import fetch_article
+from wakil.knowledge.wikilinks import WIKILINK_RE as _WIKILINK_RE
+from wakil.knowledge.wikilinks import normalize_target as _normalize_link_path
 from wakil.llm.client import ModelClient
 from wakil.llm.prompts import (
     CAPTURE_METADATA_SYSTEM_PROMPT,
@@ -844,8 +846,10 @@ def _build_stub_entities(
     return stubs
 
 
-# Wikilink form per note-conformance/SKILL.md: [[path]] or [[path|display]].
-_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
+# Wikilink parsing/normalization live in wakil.knowledge.wikilinks (shared
+# with index-time extraction) — imported at the top of the module. This
+# section retains only the entity-resolution reconciliation logic that
+# builds on that parse.
 
 
 def _deslug(path: str) -> str:
@@ -854,20 +858,6 @@ def _deslug(path: str) -> str:
     if stem.endswith(".md"):
         stem = stem[:-3]
     return stem.replace("-", " ").replace("_", " ")
-
-
-def _normalize_link_path(path: str) -> str:
-    """A path with any trailing `.md` stripped, for same-target comparison.
-
-    This KB's own wikilinks mix both conventions (`[[people/x]]` and
-    `[[sources/y.md]]` both appear for real, valid links) — extraction's
-    `.md`-less link and entity-resolution's `target_note_path` (always
-    `.md`, matching `Note.path`) can refer to the identical page while
-    differing only by this suffix. Only rewrite a link when it points at a
-    genuinely different entity, never just to change its extension style.
-    """
-    stripped = path.strip()
-    return stripped[:-3] if stripped.endswith(".md") else stripped
 
 
 def _reconcile_entity_links(config: WorkspaceConfig, proposal: EnrichmentProposal) -> None:
