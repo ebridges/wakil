@@ -23,14 +23,23 @@ def workspace(kb_path: Path) -> WorkspaceConfig:
     return WorkspaceConfig.load(kb_path)
 
 
-def _add_memory(session, workspace_id, content, state="candidate", created_at=None) -> int:
+def _add_memory(
+    session,
+    workspace_id,
+    content,
+    state="candidate",
+    created_at=None,
+    confidence=None,
+    memory_type="fact",
+) -> int:
     user_id = session.scalar(select(User.id))
     memory = Memory(
         workspace_id=workspace_id,
         user_id=user_id,
-        memory_type="fact",
+        memory_type=memory_type,
         content=content,
         state=state,
+        confidence=confidence,
     )
     if created_at is not None:
         memory.created_at = created_at
@@ -51,6 +60,18 @@ def test_list_memories_filters_by_state(workspace):
         assert [m.content for m in candidates] == ["a candidate"]
         with pytest.raises(MemoryError, match="Unknown state"):
             list_memories(session, ws, state="bogus")
+
+
+def test_list_memories_filters_by_type(workspace):
+    with open_session(workspace) as session:
+        ws = session.scalar(select(Workspace.id))
+        _add_memory(session, ws, "an opinion", memory_type="opinion")
+        _add_memory(session, ws, "a fact", memory_type="fact")
+        session.commit()
+
+        assert [m.content for m in list_memories(session, ws, memory_type="opinion")] == [
+            "an opinion"
+        ]
 
 
 def test_valid_transitions(workspace):
@@ -108,6 +129,34 @@ def test_retrieval_rank_orders_states():
     faded = retrieval_rank("working", now - timedelta(days=45))
     archived = retrieval_rank("archived", now)
     assert durable < candidate < working < faded < archived
+
+
+def test_retrieval_rank_breaks_ties_by_confidence_within_state():
+    now = datetime.now(UTC)
+    high = retrieval_rank("candidate", now, confidence=0.9)
+    low = retrieval_rank("candidate", now, confidence=0.2)
+    assert high < low
+    # confidence never crosses a state boundary
+    assert retrieval_rank("candidate", now, confidence=0.0) < retrieval_rank(
+        "working", now, confidence=1.0
+    )
+
+
+def test_search_orders_same_state_memories_by_confidence(workspace):
+    with open_session(workspace) as session:
+        ws = session.scalar(select(Workspace.id))
+        _add_memory(session, ws, "zugzwang low conf", state="candidate", confidence=0.1)
+        _add_memory(session, ws, "zugzwang high conf", state="candidate", confidence=0.9)
+        _add_memory(session, ws, "zugzwang null conf", state="candidate", confidence=None)
+        session.commit()
+
+        hits = [h for h in search_workspace(session, workspace, "zugzwang") if h.kind == "memory"]
+    titles = [h.title for h in hits]
+    assert titles == [
+        "zugzwang high conf",
+        "zugzwang null conf",
+        "zugzwang low conf",
+    ]
 
 
 def test_search_orders_memories_by_lifecycle(workspace):

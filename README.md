@@ -81,8 +81,18 @@ Ingests propose memories in `candidate` state; you review and decide:
 moves them to durable, `reject` removes them from search, and `archive` keeps
 them searchable but downranked. Invalid transitions are refused. Rather than
 deleting, retrieval fades memories: durable ranks first, then candidate, then
-working (fading further after 30 days), then archived. Memories used to
-answer a query get their `last_seen_at` bumped for future ranking.
+working (fading further after 30 days), then archived — and, as a secondary
+tiebreak *within* the same state, higher-confidence memories rank ahead of
+lower-confidence ones. Memories used to answer a query get their
+`last_seen_at` bumped for future ranking.
+
+Memory `type` includes `fact | opinion | summary | relationship | question |
+hypothesis | decision | theme | event` — `opinion` marks a subjective value
+judgment or interpretation, as distinct from `fact`. Lifecycle `state`
+transitions remain entirely manual (`promote`/`reject`/`archive`); there is
+no automatic promotion or demotion based on type or confidence — a
+low-confidence `opinion` still starts in `candidate` like everything else
+and stays there until you act on it.
 
 ## Selecting a workspace
 

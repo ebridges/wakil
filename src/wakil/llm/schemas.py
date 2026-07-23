@@ -30,11 +30,13 @@ class ModelContractError(RuntimeError):
 class CandidateMemoryModel(BaseModel):
     type: str = Field(
         default="fact",
-        description="fact | summary | relationship | question | hypothesis | decision "
-        "| theme | event (event = something dated that happened)",
+        description="fact | opinion | summary | relationship | question | hypothesis | decision "
+        "| theme | event (event = something dated that happened; opinion = a subjective "
+        "value judgment, stance, or interpretation attributed to a speaker, distinct from "
+        "fact — an observed/stated actuality)",
     )
     content: str = Field(description="One self-contained claim, observation, or question.")
-    confidence: float | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     event_date: dt.date | None = Field(
         default=None,
         description="ISO date of the event itself, only for type=event.",
@@ -87,7 +89,7 @@ class EntityResolution(BaseModel):
     target_note_path: str | None = Field(
         default=None, description="Existing note path, for action=update."
     )
-    confidence: float | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     proposed_frontmatter: dict | None = Field(
         default=None,
         description="For action=create: frontmatter satisfying the type's required "
