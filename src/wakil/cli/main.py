@@ -28,6 +28,7 @@ from wakil.ui.console import (
     print_skill_validation,
     print_skill_which,
     print_status,
+    print_traversal_result,
 )
 
 if TYPE_CHECKING:
@@ -166,6 +167,74 @@ def index(ctx: typer.Context) -> None:
     """Re-index Markdown files into the workspace database."""
     _, index_result = init_workspace(_resolve_workspace(ctx))
     print_index_result(index_result)
+
+
+@app.command()
+def relationships(
+    ctx: typer.Context,
+    note_path: Annotated[
+        str,
+        typer.Argument(
+            help="Workspace-relative path to the anchor note (e.g. people/alice.md).",
+        ),
+    ],
+    direction: Annotated[
+        str,
+        typer.Option(
+            "--direction",
+            help="Follow outgoing edges (out), incoming backlinks (in), or both.",
+        ),
+    ] = "both",
+    predicate: Annotated[
+        str | None,
+        typer.Option(
+            "--predicate",
+            help="Restrict to a single predicate (e.g. 'mentions'). Default: all.",
+        ),
+    ] = None,
+    depth: Annotated[
+        int,
+        typer.Option(
+            "--depth",
+            help=(
+                "Max hops to walk from the anchor (1 = direct edges). "
+                "Silently clamped to the built-in max — see graph_service.MAX_TRAVERSAL_DEPTH."
+            ),
+        ),
+    ] = 1,
+) -> None:
+    """Traverse Note↔Note relationship edges from a note (ADR 0006 Phase 2)."""
+    from sqlalchemy import select
+
+    from wakil.app.graph_service import TraversalError, traverse
+    from wakil.app.workspace_service import open_session
+    from wakil.storage.schema import Workspace
+
+    if direction not in ("out", "in", "both"):
+        console.print(
+            f"[red]--direction must be one of out|in|both[/red] (got {direction!r})"
+        )
+        raise typer.Exit(code=2)
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    with open_session(config) as session:
+        workspace = session.scalar(
+            select(Workspace).where(Workspace.root_path == str(config.state_root))
+        )
+        try:
+            result = traverse(
+                session,
+                workspace.id,
+                note_path,
+                direction=direction,  # type: ignore[arg-type]
+                predicate=predicate,
+                depth=depth,
+            )
+        except TraversalError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+    print_traversal_result(result)
 
 
 @app.command()

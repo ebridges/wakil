@@ -9,6 +9,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
+from wakil.app.graph_service import TraversalResult
 from wakil.app.ingest_service import (
     AbstractBackfillItem,
     CaptureProposal,
@@ -408,6 +409,37 @@ def print_transitions(results: list) -> None:
             f"Memory [bold]#{result.memory_id}[/bold]: "
             f"{_styled_state(result.old_state)} → {_styled_state(result.new_state)}"
         )
+
+
+def print_traversal_result(result: TraversalResult) -> None:
+    """Render a graph traversal as a table, one row per reachable note."""
+    anchor_label = result.anchor_path
+    if result.anchor_title and result.anchor_title != result.anchor_path:
+        anchor_label = f"{result.anchor_path}  ({result.anchor_title})"
+    filters: list[str] = [f"direction={result.direction}", f"depth={result.depth}"]
+    if result.predicate:
+        filters.append(f"predicate={result.predicate}")
+    if not result.hits:
+        console.print(
+            f"No related notes reachable from [bold]{escape(anchor_label)}[/bold] "
+            f"({', '.join(filters)})."
+        )
+        return
+    table = Table(title=f"Relationships: {anchor_label}  [{', '.join(filters)}]")
+    table.add_column("Depth", style="bold", justify="right")
+    table.add_column("Dir", style="cyan", justify="center")
+    table.add_column("Predicate", style="magenta")
+    table.add_column("Path", overflow="fold")
+    table.add_column("Title", overflow="fold")
+    for hit in result.hits:
+        table.add_row(
+            str(hit.depth),
+            hit.direction,
+            hit.via_predicate,
+            hit.path,
+            hit.title or "",
+        )
+    console.print(table)
 
 
 def print_index_result(result: IndexResult) -> None:

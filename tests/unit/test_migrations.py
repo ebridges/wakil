@@ -283,17 +283,13 @@ def test_note_to_note_relationship_roundtrip(kb_path: Path):
     config = WorkspaceConfig.load(kb_path)
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
-        user = session.scalar(select(User.id))
         notes = list(session.scalars(select(Note).limit(2)))
-        memory = Memory(workspace_id=ws, user_id=user, memory_type="fact", content="x")
-        session.add(memory)
-        session.flush()
+        # ADR 0006's intent (finalized in migration 0006): a note-only
+        # Relationship row leaves the memory FKs NULL, no dummy row needed.
         session.add(
             Relationship(
                 workspace_id=ws,
-                subject_memory_id=memory.id,
                 predicate="mentions",
-                object_memory_id=memory.id,
                 subject_note_id=notes[0].id,
                 object_note_id=notes[1].id,
             )
@@ -302,7 +298,16 @@ def test_note_to_note_relationship_roundtrip(kb_path: Path):
 
         # Backlinks as a live query, per entity-model.md.
         backlinks = list(
-            session.scalars(select(Relationship).where(Relationship.object_note_id == notes[1].id))
+            session.scalars(
+                select(Relationship).where(
+                    Relationship.object_note_id == notes[1].id,
+                    Relationship.predicate == "mentions",
+                )
+            )
         )
-        assert len(backlinks) == 1
-        assert backlinks[0].subject_note_id == notes[0].id
+        assert any(
+            row.subject_note_id == notes[0].id
+            and row.subject_memory_id is None
+            and row.object_memory_id is None
+            for row in backlinks
+        )

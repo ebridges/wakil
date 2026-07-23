@@ -22,6 +22,7 @@ class MarkdownFile:
     title: str
     content_hash: str
     metadata: dict = field(default_factory=dict)
+    body: str = ""  # Markdown after frontmatter, used by index-time wikilink extraction.
 
 
 def discover_markdown_files(root: Path) -> list[Path]:
@@ -56,7 +57,11 @@ def read_markdown_file(root: Path, relative_path: Path) -> MarkdownFile:
 
     title = _extract_title(metadata, body, relative_path)
     return MarkdownFile(
-        path=relative_path, title=title, content_hash=content_hash, metadata=metadata
+        path=relative_path,
+        title=title,
+        content_hash=content_hash,
+        metadata=metadata,
+        body=body,
     )
 
 
