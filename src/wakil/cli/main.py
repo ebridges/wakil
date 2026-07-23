@@ -705,6 +705,10 @@ def memory_list(
         str | None,
         typer.Option("--type", help="Filter by memory type (fact, decision, ...)."),
     ] = None,
+    register: Annotated[
+        str | None,
+        typer.Option("--register", help="Filter by register: formal|casual."),
+    ] = None,
     limit: Annotated[int, typer.Option("--limit", help="Max memories to show.")] = 50,
 ) -> None:
     """List memories, newest first."""
@@ -715,7 +719,12 @@ def memory_list(
     with session:
         try:
             memories = list_memories(
-                session, workspace_id, state=state, memory_type=memory_type, limit=limit
+                session,
+                workspace_id,
+                state=state,
+                memory_type=memory_type,
+                stance=register,
+                limit=limit,
             )
         except MemoryError as exc:
             console.print(f"[red]{exc}[/red]")

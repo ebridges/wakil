@@ -61,6 +61,7 @@ def list_memories(
     workspace_id: int,
     state: str | None = None,
     memory_type: str | None = None,
+    stance: str | None = None,
     limit: int = 50,
 ) -> list[Memory]:
     stmt = select(Memory).where(Memory.workspace_id == workspace_id)
@@ -70,6 +71,8 @@ def list_memories(
         stmt = stmt.where(Memory.state == state)
     if memory_type is not None:
         stmt = stmt.where(Memory.memory_type == memory_type)
+    if stance is not None:
+        stmt = stmt.where(Memory.stance == stance)
     stmt = stmt.order_by(Memory.created_at.desc()).limit(limit)
     return list(session.scalars(stmt))
 

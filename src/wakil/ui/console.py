@@ -366,6 +366,7 @@ def print_memories(memories: list) -> None:
     table.add_column("Type", style="magenta")
     table.add_column("Content", overflow="fold", max_width=70)
     table.add_column("Conf", justify="right")
+    table.add_column("Register", style="dim")
     table.add_column("Source", style="dim")
     for memory in memories:
         conf = f"{memory.confidence:.2f}" if memory.confidence is not None else "-"
@@ -376,6 +377,7 @@ def print_memories(memories: list) -> None:
             memory.memory_type,
             memory.content,
             conf,
+            memory.stance or "-",
             source,
         )
     console.print(table)
@@ -390,6 +392,7 @@ def print_memory_detail(memory) -> None:
         f"[bold]State:[/bold] {_styled_state(memory.state)}",
         f"[bold]Type:[/bold] {memory.memory_type}",
         f"[bold]Confidence:[/bold] {memory.confidence if memory.confidence is not None else '-'}",
+        f"[bold]Register:[/bold] {memory.stance or '-'}",
         f"[bold]Source:[/bold] {f'source:{memory.source_id}' if memory.source_id else '-'}",
         f"[bold]Created:[/bold] {memory.created_at}",
         f"[bold]Last seen:[/bold] {memory.last_seen_at or '-'}",
