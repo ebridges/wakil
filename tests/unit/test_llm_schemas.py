@@ -1,8 +1,8 @@
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from wakil.llm.client import ModelTruncatedError
-from wakil.llm.schemas import ModelContractError, complete_with_contract
+from wakil.llm.schemas import CandidateMemoryModel, ModelContractError, complete_with_contract
 
 
 class _Output(BaseModel):
@@ -70,3 +70,15 @@ def test_complete_with_contract_raises_after_second_invalid_response():
     client = _ScriptedClient(["not json", "still not json"])
     with pytest.raises(ModelContractError):
         complete_with_contract(client, "sys", "prompt", _Output)
+
+
+def test_candidate_memory_model_accepts_opinion_type():
+    memory = CandidateMemoryModel(type="opinion", content="X was worth it.", confidence=0.3)
+    assert memory.type == "opinion"
+
+
+def test_candidate_memory_model_rejects_out_of_range_confidence():
+    with pytest.raises(ValidationError):
+        CandidateMemoryModel(type="fact", content="X", confidence=1.5)
+    with pytest.raises(ValidationError):
+        CandidateMemoryModel(type="fact", content="X", confidence=-0.1)
