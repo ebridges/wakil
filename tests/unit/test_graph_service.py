@@ -91,8 +91,26 @@ def test_both_direction_merges_and_dedupes(tmp_path: Path):
         ws = session.scalar(select(Workspace.id))
         result = traverse(session, ws, "a.md", direction="both", depth=1)
 
-    # b is reachable both ways at depth 1 — one row, not two.
+    # b is reachable both ways at depth 1 — one row, marked 'both'.
     assert _paths(result) == [("b.md", 1)]
+    assert [hit.direction for hit in result.hits] == ["both"]
+
+
+def test_asymmetric_link_reports_the_singleton_direction(tmp_path: Path):
+    """A one-way relationship in `both` mode reports 'in' or 'out', not 'both'."""
+    config = _kb(tmp_path / "kb")
+    _seed_chain(
+        config,
+        ("a.md", "mentions", "b.md"),  # only out-edge
+        ("c.md", "mentions", "a.md"),  # only in-edge
+    )
+
+    with open_session(config) as session:
+        ws = session.scalar(select(Workspace.id))
+        result = traverse(session, ws, "a.md", direction="both", depth=1)
+
+    by_path = {hit.path: hit.direction for hit in result.hits}
+    assert by_path == {"b.md": "out", "c.md": "in"}
 
 
 def test_multi_hop_walk(tmp_path: Path):

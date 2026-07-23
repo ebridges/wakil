@@ -43,7 +43,10 @@ class TraversalHit:
     title: str | None
     depth: int
     via_predicate: str
-    direction: Direction  # 'out' if anchor→hit, 'in' if hit→anchor
+    # 'out' if anchor→hit only, 'in' if hit→anchor only, 'both' if the note
+    # is reachable both ways at this same depth (mutual link) — surfaces
+    # bidirectionality that the underlying walk edges alone would hide.
+    direction: Direction
 
 
 @dataclass(frozen=True)
@@ -142,9 +145,10 @@ def traverse(
     # Two-step aggregation: `walk` collects every reachable (note, depth,
     # predicate, direction) tuple; `best_depth` picks the shortest hop
     # per note; the outer SELECT joins back to `walk` at that depth and
-    # tie-breaks (predicate, direction) lexicographically for a stable
-    # single row per note. Doing this all in one subquery hits SQLite's
-    # "misuse of aggregate MIN()" — hence the split.
+    # collapses to one row per note — predicate by lexicographic tie-break,
+    # direction promoted to 'both' when the note is reachable both ways at
+    # the same depth (otherwise the singleton). Doing this all in one
+    # subquery hits SQLite's "misuse of aggregate MIN()" — hence the split.
     sql = text(
         f"""
         WITH RECURSIVE walk(note_id, depth, via_predicate, direction) AS (
@@ -156,12 +160,15 @@ def traverse(
             SELECT note_id, MIN(depth) AS depth FROM walk GROUP BY note_id
         )
         SELECT n.id, n.path, n.title, b.depth,
-               (SELECT w.via_predicate FROM walk w
-                  WHERE w.note_id = n.id AND w.depth = b.depth
-                  ORDER BY w.via_predicate, w.direction LIMIT 1) AS via_predicate,
-               (SELECT w.direction FROM walk w
-                  WHERE w.note_id = n.id AND w.depth = b.depth
-                  ORDER BY w.via_predicate, w.direction LIMIT 1) AS direction
+               (SELECT MIN(w.via_predicate) FROM walk w
+                  WHERE w.note_id = n.id AND w.depth = b.depth) AS via_predicate,
+               CASE
+                 WHEN (SELECT COUNT(DISTINCT w.direction) FROM walk w
+                         WHERE w.note_id = n.id AND w.depth = b.depth) > 1
+                 THEN 'both'
+                 ELSE (SELECT MIN(w.direction) FROM walk w
+                         WHERE w.note_id = n.id AND w.depth = b.depth)
+               END AS direction
         FROM best_depth b JOIN notes n ON n.id = b.note_id
         WHERE n.workspace_id = :ws
         ORDER BY b.depth, n.path

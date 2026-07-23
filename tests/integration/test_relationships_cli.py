@@ -96,3 +96,16 @@ def test_missing_anchor_note_exits_with_error(tmp_path: Path):
     )
     assert result.exit_code == 1, result.output
     assert "no note" in result.output
+
+
+def test_bad_depth_exits_with_error(tmp_path: Path):
+    """Symmetric to bad --direction: a --depth < 1 argument should surface
+    as a clean CLI error, not an unhandled traceback."""
+    kb = tmp_path / "kb"
+    _init_kb(kb)
+
+    result = runner.invoke(
+        app, ["-w", str(kb), "relationships", "people/alice.md", "--depth", "0"]
+    )
+    assert result.exit_code == 1, result.output
+    assert "depth" in result.output
