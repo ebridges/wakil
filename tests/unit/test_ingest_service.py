@@ -21,6 +21,7 @@ from wakil.app.ingest_service import (
     apply_enrichment,
     clean_transcript,
     infer_meeting_date,
+    parse_json_transcript,
     parse_whisper_transcript,
     plan_abstract_backfill,
     prepare_capture,
@@ -145,6 +146,18 @@ def _write_whisper(path: Path, transcripts: list[dict], date_created: float | No
 
 def _segment(speaker: str, text: str, start: int) -> dict:
     return {"start": start, "end": start + 1000, "speaker": {"name": speaker}, "text": text}
+
+
+def _write_json_transcript(path: Path, segments: list[dict]) -> Path:
+    path.write_text(json.dumps({"segments": segments, "text": ""}))
+    return path
+
+
+def _json_segment(speaker: str, text: str, start: int) -> dict:
+    # Same shape as _segment's "start"/"end"/"text", but a plain-string
+    # "speaker" rather than a `{"name": ...}` object -- the one structural
+    # difference from the .whisper archive format.
+    return {"start": start, "end": start + 1000, "speaker": speaker, "text": text, "words": []}
 
 
 def _capture_client(payload=None) -> FakeClient:
@@ -370,6 +383,54 @@ def test_capture_transcript_whisper_rejects_missing_metadata(workspace, kb_path)
         archive.writestr("originalAudio", b"")
     with pytest.raises(IngestError, match="no metadata.json"):
         prepare_capture(workspace, "transcript", _capture_client(), file=empty)
+
+
+def test_capture_transcript_json_segments(workspace, kb_path):
+    # A plain-JSON transcript export (e.g. faster-whisper/WhisperKit-style
+    # "segments" array with flat "speaker" strings) -- structurally close to
+    # but not the same as the .whisper zip archive format above.
+    json_file = _write_json_transcript(
+        kb_path / "2026-07-16-mosaic-eleni-karahalios.json",
+        [
+            _json_segment("Edward Bridges", "Hi, this is Ed.", 0),
+            _json_segment("Eleni Karahalios", "Hey Ed, this is Eleni.", 1000),
+            _json_segment("Eleni Karahalios", "How are you?", 2000),
+            _json_segment("Edward Bridges", "I'm glad we managed to uh work through it.", 3000),
+        ],
+    )
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=json_file)
+
+    assert proposal.meeting_date == "2026-07-16"  # from the filename
+    assert (
+        "**Edward Bridges**: Hi, this is Ed.\n\n"
+        "**Eleni Karahalios**: Hey Ed, this is Eleni. How are you?\n\n"
+        "**Edward Bridges**: I'm glad we managed to work through it."
+    ) in proposal.raw_file.content
+    body = proposal.raw_file.content.split("---", 2)[2].lstrip("\n")
+    assert body.startswith("# 2026-07-16-mosaic-eleni-karahalios\n\n")
+
+
+def test_capture_transcript_json_rejects_missing_segments(workspace, kb_path):
+    bad = kb_path / "broken.json"
+    bad.write_text(json.dumps({"text": "no segments here"}))
+    with pytest.raises(IngestError, match="no `segments` array"):
+        prepare_capture(workspace, "transcript", _capture_client(), file=bad)
+
+
+def test_capture_transcript_json_rejects_invalid_json(workspace, kb_path):
+    bad = kb_path / "broken2.json"
+    bad.write_text("not json at all")
+    with pytest.raises(IngestError, match="Could not read JSON transcript"):
+        prepare_capture(workspace, "transcript", _capture_client(), file=bad)
+
+
+def test_parse_json_transcript_strips_filler_words_only(kb_path):
+    json_file = _write_json_transcript(
+        kb_path / "sample.json",
+        [_json_segment("Jane", "I um I was calling you, uh, about the offer.", 0)],
+    )
+    dialogue = parse_json_transcript(json_file)
+    assert dialogue == "**Jane**: I I was calling you, about the offer."
 
 
 def test_capture_uses_model_generated_title_and_abstract(workspace, transcript):
