@@ -27,6 +27,8 @@ from wakil.ui.console import (
     print_skill_list,
     print_skill_validation,
     print_skill_which,
+    print_source_detail,
+    print_sources,
     print_status,
     print_traversal_result,
 )
@@ -681,6 +683,50 @@ def ingest_article(
         context=context,
         context_file=context_file,
     )
+
+
+@sources_app.command("list")
+def sources_list(
+    ctx: typer.Context,
+    status: Annotated[
+        str | None,
+        typer.Option("--status", help="Filter by status (e.g. raw, enriched)."),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Max rows to show (default 50; pass 0 for no limit)."),
+    ] = 50,
+) -> None:
+    """List captured sources for this workspace, most recent first."""
+    from wakil.app.ingest_service import IngestError, list_sources
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    effective_limit = None if limit is not None and limit <= 0 else limit
+    try:
+        sources = list_sources(config, status=status, limit=effective_limit)
+    except IngestError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    print_sources(sources)
+
+
+@sources_app.command("show")
+def sources_show(
+    ctx: typer.Context,
+    source_id: Annotated[int, typer.Argument(help="Source id (see wakil sources list).")],
+) -> None:
+    """Show one source in full, including git branch/PR landing state."""
+    from wakil.app.ingest_service import IngestError, get_source
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    try:
+        source = get_source(config, source_id)
+    except IngestError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    print_source_detail(source)
 
 
 @sources_app.command("backfill-abstract")

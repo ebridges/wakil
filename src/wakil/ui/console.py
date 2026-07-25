@@ -18,6 +18,7 @@ from wakil.app.ingest_service import (
     EnrichmentResult,
     EntityUpdate,
     ProposedFile,
+    SourceSummary,
     slugify,
 )
 from wakil.app.qmd_service import CollectionPlan
@@ -409,6 +410,64 @@ def print_transitions(results: list) -> None:
             f"Memory [bold]#{result.memory_id}[/bold]: "
             f"{_styled_state(result.old_state)} → {_styled_state(result.new_state)}"
         )
+
+
+_SOURCE_STATUS_STYLES = {
+    "raw": "yellow",
+    "enriched": "green",
+    "new": "dim",
+}
+
+
+def _styled_source_status(status: str) -> str:
+    style = _SOURCE_STATUS_STYLES.get(status, "white")
+    return f"[{style}]{status}[/{style}]"
+
+
+def print_sources(sources: list[SourceSummary]) -> None:
+    if not sources:
+        console.print("No sources match.")
+        return
+    table = Table(title="Sources")
+    table.add_column("ID", style="bold", justify="right")
+    table.add_column("Type", style="magenta")
+    table.add_column("Title", overflow="fold", max_width=50)
+    table.add_column("Status")
+    table.add_column("Created")
+    table.add_column("Branch")
+    table.add_column("PR")
+    for source in sources:
+        table.add_row(
+            str(source.id),
+            source.source_type,
+            source.title or "-",
+            _styled_source_status(source.status),
+            str(source.created_at),
+            "[green]yes[/green]" if source.git_branch else "[dim]-[/dim]",
+            "[green]yes[/green]" if source.git_pr_url else "[dim]-[/dim]",
+        )
+    console.print(table)
+    console.print("[dim]wakil sources show <id> for detail.[/dim]")
+
+
+def print_source_detail(source: SourceSummary) -> None:
+    table = Table(title=f"Source #{source.id}", show_header=False)
+    table.add_column("Field", style="bold cyan")
+    table.add_column("Value")
+    table.add_row("Type", source.source_type)
+    table.add_row("Title", source.title or "-")
+    table.add_row("Origin", source.origin or "-")
+    table.add_row("Status", _styled_source_status(source.status))
+    table.add_row("Author", source.author or "-")
+    table.add_row("Published", str(source.published_at) if source.published_at else "-")
+    table.add_row("Retrieved", str(source.retrieved_at) if source.retrieved_at else "-")
+    table.add_row("Raw text path", source.raw_text_path or "-")
+    table.add_row("Content hash", source.content_hash or "-")
+    table.add_row("Git branch", source.git_branch or "-")
+    table.add_row("Git PR", source.git_pr_url or "-")
+    table.add_row("Created", str(source.created_at))
+    table.add_row("Updated", str(source.updated_at))
+    console.print(table)
 
 
 def print_traversal_result(result: TraversalResult) -> None:

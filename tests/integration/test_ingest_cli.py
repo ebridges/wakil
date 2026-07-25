@@ -341,4 +341,69 @@ def test_enrich_bad_context_aborts_before_branch_switch(kb_path: Path, monkeypat
     assert result.exit_code == 1
     assert "Context resolution failed" in result.output
     assert "On branch" not in result.output
+
+
+def test_sources_list_empty(kb_path: Path):
+    runner.invoke(app, ["init", str(kb_path)])
+    result = runner.invoke(app, ["-w", str(kb_path), "sources", "list"])
+    assert result.exit_code == 0
+    assert "No sources match" in result.output
+
+
+def test_sources_list_shows_captured_source(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "sources", "list"])
+    assert result.exit_code == 0, result.output
+    assert "2026-07-09 Fake Capture Title" in result.output
+    assert "raw" in result.output
+    assert "wakil sources show <id> for detail" in result.output
+
+
+def test_sources_list_status_filter(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeClient(), FakeClient())
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+    runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
+
+    raw_result = runner.invoke(app, ["-w", str(kb_path), "sources", "list", "--status", "raw"])
+    assert raw_result.exit_code == 0
+    assert "No sources match" in raw_result.output
+
+    enriched_result = runner.invoke(
+        app, ["-w", str(kb_path), "sources", "list", "--status", "enriched"]
+    )
+    assert enriched_result.exit_code == 0
+    assert "enriched" in enriched_result.output
+
+
+def test_sources_list_limit_zero_means_unbounded(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "sources", "list", "--limit", "0"])
+    assert result.exit_code == 0
+    assert "2026-07-09 Fake Capture Title" in result.output
+
+
+def test_sources_show_detail(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "sources", "show", "1"])
+    assert result.exit_code == 0, result.output
+    assert "Source #1" in result.output
+    assert "2026-07-09 Fake Capture Title" in result.output
+    assert "sources/transcripts" in result.output
+
+
+def test_sources_show_unknown_id(kb_path: Path):
+    runner.invoke(app, ["init", str(kb_path)])
+    result = runner.invoke(app, ["-w", str(kb_path), "sources", "show", "42"])
+    assert result.exit_code == 1
+    assert "No source with id 42" in result.output
     assert "Enrichment preview" not in result.output
