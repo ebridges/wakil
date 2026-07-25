@@ -31,6 +31,7 @@ import hashlib
 import json
 import re
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -240,6 +241,9 @@ def prepare_capture(
         if kind == "transcript" and file.suffix.lower() == ".whisper":
             text, recorded_at = parse_whisper_transcript(file)
             meeting_date = infer_meeting_date(file, text) or recorded_at
+        elif kind == "transcript" and file.suffix.lower() == ".json":
+            text = parse_json_transcript(file)
+            meeting_date = infer_meeting_date(file, text)
         else:
             try:
                 raw = file.read_text(encoding="utf-8", errors="replace")
@@ -457,6 +461,86 @@ def apply_abstract_backfill(
             updated.append(item.raw_text_path)
         session.commit()
     return updated
+
+
+# --------------------------------------------------------------------------
+# Source audit trail: list/show already-captured sources (`wakil sources
+# list|show`). Read-only -- the status vocabulary a source actually moves
+# through is just "raw" (apply_capture, the only place a Source row gets
+# created) -> "enriched" (apply_enrichment); the "new" column default is
+# never written by current code, it only guards rows some future writer
+# might add without going through capture.
+
+
+@dataclass
+class SourceSummary:
+    """One `wakil sources list`/`show` row -- a flattened, detached snapshot
+    of a Source row, not the live ORM object (the session that read it is
+    closed by the time the CLI prints it)."""
+
+    id: int
+    source_type: str
+    title: str | None
+    origin: str | None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    git_branch: str | None
+    git_pr_url: str | None
+    raw_text_path: str | None = None
+    author: str | None = None
+    published_at: datetime | None = None
+    retrieved_at: datetime | None = None
+    content_hash: str | None = None
+
+
+def _summarize_source(row: Source) -> SourceSummary:
+    return SourceSummary(
+        id=row.id,
+        source_type=row.source_type,
+        title=row.title,
+        origin=row.origin,
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        git_branch=row.git_branch,
+        git_pr_url=row.git_pr_url,
+        raw_text_path=row.raw_text_path,
+        author=row.author,
+        published_at=row.published_at,
+        retrieved_at=row.retrieved_at,
+        content_hash=row.content_hash,
+    )
+
+
+def list_sources(
+    config: WorkspaceConfig, status: str | None = None, limit: int | None = 50
+) -> list[SourceSummary]:
+    """Sources for this workspace, most recent first. `limit=None` returns
+    every row -- used for the post-batch audit pass before opening a
+    migration category's PR, where "did anything get missed" matters more
+    than a short list."""
+    with open_session(config) as session:
+        workspace_id, _ = _require_workspace_ids(session, config)
+        stmt = (
+            select(Source)
+            .where(Source.workspace_id == workspace_id)
+            .order_by(Source.created_at.desc(), Source.id.desc())
+        )
+        if status is not None:
+            stmt = stmt.where(Source.status == status)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return [_summarize_source(row) for row in session.scalars(stmt)]
+
+
+def get_source(config: WorkspaceConfig, source_id: int) -> SourceSummary:
+    with open_session(config) as session:
+        workspace_id, _ = _require_workspace_ids(session, config)
+        row = session.get(Source, source_id)
+        if row is None or row.workspace_id != workspace_id:
+            raise IngestError(f"No source with id {source_id} in this workspace.")
+        return _summarize_source(row)
 
 
 # --------------------------------------------------------------------------
@@ -1365,15 +1449,34 @@ def _read_whisper_metadata(file: Path) -> dict:
         raise IngestError(f"Could not read whisper metadata from {file}: {exc}") from exc
 
 
+def _dialogue_from_segments(segments: list[dict], speaker_of: Callable[[dict], str]) -> str:
+    """Merge diarized segments into `**Speaker**: turn` dialogue text.
+
+    Shared by every diarized JSON transcript shape wakil recognizes:
+    consecutive segments from the same speaker are merged into one turn, and
+    standalone ASR filler tokens are stripped (see `_strip_filler_words`) --
+    otherwise the text is kept verbatim. `speaker_of` isolates the one thing
+    that varies between shapes (where/how the speaker label is stored).
+    """
+    turns: list[tuple[str, list[str]]] = []
+    for segment in sorted(segments, key=lambda s: s.get("start", 0)):
+        text = _strip_filler_words(str(segment.get("text", "")).strip())
+        if not text:
+            continue
+        speaker = speaker_of(segment).strip() or "Unknown speaker"
+        if turns and turns[-1][0] == speaker:
+            turns[-1][1].append(text)
+        else:
+            turns.append((speaker, [text]))
+    return "\n\n".join(f"**{speaker}**: {' '.join(parts)}" for speaker, parts in turns)
+
+
 def parse_whisper_transcript(file: Path) -> tuple[str, str | None]:
     """Extract speaker-labeled dialogue from an Apple-style .whisper archive.
 
     A `.whisper` file is a zip containing `metadata.json`: diarized
     `transcripts` segments (speaker name, start/end ms, text) plus a
-    `speakers` roster and capture timestamps. Consecutive segments from the
-    same speaker are merged into one turn, and standalone ASR filler tokens
-    are stripped (see `_strip_filler_words`) — otherwise the text is kept
-    verbatim.
+    `speakers` roster and capture timestamps.
 
     Returns (dialogue_text, recorded_at) where recorded_at is an ISO date
     derived from the archive's own capture timestamp, or None if absent.
@@ -1383,23 +1486,38 @@ def parse_whisper_transcript(file: Path) -> tuple[str, str | None]:
     if not isinstance(segments, list) or not segments:
         raise IngestError(f"{file}: metadata.json has no transcript segments")
 
-    turns: list[tuple[str, list[str]]] = []
-    for segment in sorted(segments, key=lambda s: s.get("start", 0)):
-        text = _strip_filler_words(str(segment.get("text", "")).strip())
-        if not text:
-            continue
-        speaker = str((segment.get("speaker") or {}).get("name") or "").strip() or "Unknown speaker"
-        if turns and turns[-1][0] == speaker:
-            turns[-1][1].append(text)
-        else:
-            turns.append((speaker, [text]))
-
-    if not turns:
+    dialogue = _dialogue_from_segments(
+        segments, lambda s: str((s.get("speaker") or {}).get("name") or "")
+    )
+    if not dialogue:
         raise IngestError(f"{file}: transcript segments contained no text")
 
-    dialogue = "\n\n".join(f"**{speaker}**: {' '.join(parts)}" for speaker, parts in turns)
     recorded_at = _whisper_recorded_at(data.get("dateCreated"))
     return dialogue, recorded_at
+
+
+def parse_json_transcript(file: Path) -> str:
+    """Extract speaker-labeled dialogue from a plain-JSON transcript export.
+
+    A different diarized shape from the `.whisper` archive above: an
+    unwrapped `.json` file (no zip, no `speakers`/capture-timestamp
+    metadata) with a top-level `segments` array, each item's `speaker` a
+    plain string rather than a `{"name": ...}` object. Handled identically
+    otherwise — merged into speaker turns via `_dialogue_from_segments`.
+    """
+    try:
+        data = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise IngestError(f"Could not read JSON transcript {file}: {exc}") from exc
+
+    segments = data.get("segments") if isinstance(data, dict) else None
+    if not isinstance(segments, list) or not segments:
+        raise IngestError(f"{file}: no `segments` array found in JSON transcript")
+
+    dialogue = _dialogue_from_segments(segments, lambda s: str(s.get("speaker") or ""))
+    if not dialogue:
+        raise IngestError(f"{file}: transcript segments contained no text")
+    return dialogue
 
 
 _ISO_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
