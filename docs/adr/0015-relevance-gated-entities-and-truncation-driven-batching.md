@@ -7,10 +7,11 @@ audience: wakil design
 
 # Relevance-Gated Entity Selection and Truncation-Driven Batching for Entity Revision Calls
 
-`status: accepted` means the design below is settled, not that all of it is
-built: Decision 1 is implemented (pending its live-eval gate, see
-Consequences); Decision 2 is not yet implemented — see its steps for what
-remains.
+`status: accepted` means the design below is settled. Decision 1 is
+implemented (pending its live-eval gate, see Consequences). Decision 2 is
+fully implemented: Step A was tried and ruled out live; Step B (bisection)
+is implemented, unit-tested, and live-validated against the real
+originally-failing transcript — see PR #32.
 
 ## Context
 
@@ -110,9 +111,9 @@ Diagnosing this run surfaced two separate, compounding problems:
   observed to truncate.
 
 **2. Respond to truncation with a sequenced, evidence-gated set of fixes —
-not a single mechanism adopted on the strength of one incident** (Step A
-below has now been tried and ruled out; Step B remains proposed, not yet
-implemented):
+not a single mechanism adopted on the strength of one incident** (both
+steps below are now resolved: Step A was tried and ruled out live; Step B
+is implemented and live-validated — commit `c240f3c`, PR #32):
 
 - **Step A — tried, rejected.** `AnthropicClient.complete` (`llm/client.py`)
   hardcodes `thinking={"type": "adaptive"}` for every call, with no bound
@@ -166,7 +167,7 @@ implemented):
   (Mosaic's ~53KB note, correctly judged `peripheral`) without touching
   `thinking` at all, and Step B is the mechanism actually available for
   whatever risk remains after that filtering.
-- **Step B — confirmed necessary, not yet implemented.** Re-running the
+- **Step B — confirmed necessary, now implemented.** Re-running the
   original failing source through the actual `wakil enrich` command with
   Decision 1 (relevance filtering) in place, on the real live pipeline
   rather than a reconstruction (2026-07-25): relevance filtering correctly
@@ -196,8 +197,9 @@ implemented):
     even though it was rejected as the trigger for *whether* to cut (see
     Alternatives Considered).
   - **Hard ceiling, not unbounded recursion**: a fixed maximum recursion
-    depth (proposed: 3, i.e. at most 8 sub-batches from one original call)
-    caps worst-case latency and API cost for a single `wakil enrich`
+    depth (`_MAX_BISECTION_DEPTH = 3`, i.e. at most 8 sub-batches from one
+    original call) caps worst-case latency and API cost for a single
+    `wakil enrich`
     invocation. A batch that still fails at the depth limit surfaces as a
     real, visible failure for its remaining entities — not further split,
     not retried indefinitely.
@@ -295,9 +297,9 @@ implemented):
   other nine targets combined. Filtering it out doesn't just reduce entity
   *count*, it removes the single largest driver of expected output size
   from the batch entirely.
-- Revision-call count becomes variable per run instead of fixed at one
-  once Step B lands, bounded by a fixed recursion-depth ceiling (proposed:
-  3) rather than unbounded — most enrichments still cost exactly one call;
+- Revision-call count is now variable per run instead of fixed at one,
+  bounded by a fixed recursion-depth ceiling (`_MAX_BISECTION_DEPTH = 3`)
+  rather than unbounded — most enrichments still cost exactly one call;
   a run whose survivors genuinely overflow the budget pays for a bounded
   number of extra calls, not an open-ended fan-out. "Bounded" is not
   "small": depth 3 with per-node doubling retry means a worst-case run can
@@ -313,10 +315,10 @@ implemented):
   background noise a user learns to skim past. This is a known, accepted
   UX risk, not something this ADR resolves; its long-term visibility to
   the user hasn't been validated.
-- `ModelContractError` needs a structured way to distinguish truncation
-  from validation failure before Step B can be implemented safely; this is
-  a prerequisite, not yet done, and is testable deterministically (a
-  scripted fake client), not a live-model concern.
+- `ModelContractError` now carries a structured `truncated: bool` (commit
+  `c240f3c`) distinguishing truncation from validation failure, the
+  prerequisite Step B needed to split safely — tested deterministically
+  (a scripted fake client), not a live-model concern.
 - This does not eliminate truncation risk outright: a single entity whose
   own existing note is large enough to overflow the budget by itself, or a
   batch that still fails at the recursion-depth ceiling, is a real,
