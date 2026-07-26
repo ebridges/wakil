@@ -51,12 +51,14 @@ from wakil.llm.client import ModelClient
 from wakil.llm.prompts import (
     CAPTURE_METADATA_SYSTEM_PROMPT,
     build_capture_metadata_prompt,
+    build_compile_prompt,
     build_extraction_prompt,
     build_resolution_prompt,
     build_revision_prompt,
 )
 from wakil.llm.schemas import (
     CaptureMetadata,
+    EntityCompileOutput,
     EntityResolution,
     EntityResolutionOutput,
     EntityRevision,
@@ -1038,6 +1040,34 @@ def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
 _TRAILING_HR_RE = re.compile(r"\n*-{3,}\s*$")
 
 
+def _split_note_sections(content: str) -> tuple[str, str, str] | None:
+    """Locate an entity note body's three load-bearing pieces: the H1 line,
+    the top (Compiled Truth) section, and the Timeline section — the same
+    shape both `_merge_entity_note` (revision merges) and
+    `prepare_entity_compile` (ADR 0016) need to identify before touching a
+    note. `content` is the note body with frontmatter already stripped
+    (e.g. `frontmatter.loads(...).content`).
+
+    Returns None if the note doesn't have the expected H1 + '## Timeline /
+    Log' shape — callers surface that as a warning/error rather than
+    guessing at a different structure.
+    """
+    h1_match = _H1_RE.search(content)
+    timeline_match = _TIMELINE_HEADING_RE.search(content)
+    if h1_match is None or timeline_match is None or timeline_match.start() <= h1_match.end():
+        return None
+
+    h1_line = content[h1_match.start() : h1_match.end()]
+    # Same convention callers re-apply when writing a new top section: the
+    # "---" divider right before Timeline is not itself part of the
+    # top-section content.
+    top_section = _TRAILING_HR_RE.sub(
+        "", content[h1_match.end() : timeline_match.start()]
+    ).strip("\n")
+    timeline_section = content[timeline_match.start() :]
+    return h1_line, top_section, timeline_section
+
+
 def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -> str | None:
     """Deterministic surgical merge — never a full-file regeneration (the
     "clobbering bug" note-revision's own skill warns against): existing
@@ -1054,17 +1084,10 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
         return None
     body = post.content
 
-    h1_match = _H1_RE.search(body)
-    timeline_match = _TIMELINE_HEADING_RE.search(body)
-    if h1_match is None or timeline_match is None or timeline_match.start() <= h1_match.end():
+    sections = _split_note_sections(body)
+    if sections is None:
         return None
-
-    h1_line = body[h1_match.start() : h1_match.end()]
-    # Same convention the code below re-applies when writing a new top
-    # section: the "---" divider right before Timeline is not itself part
-    # of the top-section content.
-    old_top = _TRAILING_HR_RE.sub("", body[h1_match.end() : timeline_match.start()]).strip("\n")
-    timeline_section = body[timeline_match.start() :]
+    h1_line, old_top, timeline_section = sections
 
     metadata = dict(post.metadata)
     if revision.frontmatter_updates:
@@ -1448,6 +1471,102 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
             relationships_created=relationships_created,
             stale_updates_skipped=stale_updates_skipped,
         )
+
+
+# --------------------------------------------------------------------------
+# Entity compile pilot (docs/adr/0016): `wakil entities compile SLUG`, a
+# single-entity, additive-only re-synthesis of Compiled Truth from an
+# entity's own Timeline — no new source, no batching, no due-check. Reuses
+# `_merge_entity_note` exactly as-is (a synthetic EntityRevision with no
+# timeline_entry/frontmatter_updates) rather than a second merge path.
+
+
+def _resolve_entity_slug(config: WorkspaceConfig, slug: str) -> Path | None:
+    """Search every entity type's canonical directory (per the schema
+    catalog, not a hardcoded directory list) for `<slug>.md`, returning the
+    first match. Directories are checked in a deterministic (sorted) order
+    so the result doesn't depend on dict-iteration order of the schema
+    catalog; only one page per slug is expected to exist in practice."""
+    schemas = load_entity_schemas(config.root_path)
+    directories = sorted({schema.directory for schema in schemas.values() if schema.directory})
+    for directory in directories:
+        candidate = config.root_path / directory / f"{slug}.md"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def prepare_entity_compile(config: WorkspaceConfig, client: ModelClient, slug: str) -> EntityUpdate:
+    """Prepare (but don't write) a compile of one entity's Compiled Truth.
+
+    Resolves `slug` to a note, reads it, and hands its own Timeline to the
+    `entity-compile` skill (docs/adr/0016) — an additive-only re-synthesis,
+    not a merge against any new source. `ModelContractError` is left to
+    propagate: this is a single-target CLI command, not a degrade-and-
+    continue enrichment DAG step, so there is no partial result worth
+    returning on failure.
+    """
+    target = _resolve_entity_slug(config, slug)
+    if target is None:
+        raise IngestError(f"No entity note found for slug '{slug}'.")
+
+    old_content = target.read_text(encoding="utf-8")
+    try:
+        post = frontmatter_lib.loads(old_content)
+    except Exception as exc:
+        raise IngestError(f"{target}: could not parse frontmatter: {exc}") from exc
+
+    sections = _split_note_sections(post.content)
+    if sections is None:
+        raise IngestError(
+            f"{target}: doesn't match the expected H1 / 'Timeline / Log' shape — "
+            "cannot compile"
+        )
+    h1_line, top_section, timeline_section = sections
+    entity_name = h1_line.lstrip("#").strip() or slug
+
+    skill = load_skill("entity-compile", config.root_path)
+    system = build_system_prompt(skill, EntityCompileOutput)
+    cacheable_prefix, prompt = build_compile_prompt(entity_name, top_section, timeline_section)
+    result = complete_with_contract(
+        client, system, prompt, EntityCompileOutput, cacheable_prefix=cacheable_prefix
+    )
+
+    target_note_path = str(target.relative_to(config.root_path))
+    revision = EntityRevision(
+        target_note_path=target_note_path,
+        has_update=True,
+        compiled_truth=result.compiled_truth,
+        timeline_entry=None,
+        frontmatter_updates=None,
+    )
+    today = datetime.now(UTC).date().isoformat()
+    new_content = _merge_entity_note(old_content, revision, today)
+    if new_content is None:
+        # Shouldn't happen — _split_note_sections above already validated
+        # the same shape _merge_entity_note requires — but never silently
+        # fabricate a different result if it does.
+        raise IngestError(f"{target}: merge failed unexpectedly after a successful compile call.")
+
+    return EntityUpdate(
+        target_note_path=target_note_path, old_content=old_content, new_content=new_content
+    )
+
+
+def apply_entity_compile(config: WorkspaceConfig, update: EntityUpdate) -> bool:
+    """Write a prepared compile, unless the target changed on disk since
+    prepare — the same re-read-and-compare stale-guard `apply_enrichment`
+    uses for entity updates. Returns True if written, False if skipped as
+    stale (the caller reports accordingly)."""
+    target = config.root_path / update.target_note_path
+    try:
+        current = target.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if current != update.old_content:
+        return False
+    target.write_text(update.new_content, encoding="utf-8")
+    return True
 
 
 # --------------------------------------------------------------------------

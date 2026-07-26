@@ -226,6 +226,42 @@ def build_revision_prompt(
     return cacheable_prefix, variable_suffix
 
 
+def build_compile_prompt(
+    entity_name: str, top_section: str, timeline_section: str
+) -> tuple[str, str]:
+    """User content for the entity-compile call (`wakil entities compile
+    SLUG`, docs/adr/0016).
+
+    Unlike build_revision_prompt, there is no separate source document to
+    inline — the entity's own Timeline *is* the source, and it's what's
+    byte-identical across any retry of this call. Returns (cacheable_prefix,
+    variable_suffix): the Timeline goes in cacheable_prefix so it's eligible
+    for a prompt-cache hit; the note's current top section and the task
+    instructions go in variable_suffix, instructions last, so the concrete
+    ask sits right before generation starts — the same "long content first,
+    task last" convention build_revision_prompt documents in its own
+    docstring.
+    """
+    cacheable_prefix = f"{entity_name}'s full Timeline / Log:\n\n{timeline_section}"
+
+    suffix_parts = [
+        f"{entity_name}'s current Compiled Truth (top section):\n\n"
+        f"{top_section or '(empty — no Compiled Truth has been written yet)'}",
+        "",
+        "Re-synthesize Compiled Truth for this entity as the union of every "
+        "fact already present anywhere in the Timeline above — additive-only "
+        "synthesis, never a lossy summary. Every fact already present in the "
+        "Timeline must be present, in some form, in your output; omitting one "
+        "is a defect, not an acceptable simplification. If genuinely unsure "
+        "whether two Timeline entries describe the same fact or two "
+        "different facts, include both rather than merging or dropping "
+        "either.",
+    ]
+    variable_suffix = "\n".join(suffix_parts)
+
+    return cacheable_prefix, variable_suffix
+
+
 def describe_entity_types(schemas: dict[str, EntitySchema]) -> str:
     """A compact, schema-derived catalog of entity types for the prompt."""
     lines = []

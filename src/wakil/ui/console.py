@@ -155,6 +155,13 @@ def _print_file_preview(proposed: ProposedFile) -> None:
     )
 
 
+def print_entity_update_preview(update: EntityUpdate) -> None:
+    """Public entry point for previewing a single `EntityUpdate` (e.g. from
+    `wakil entities compile`) — renders the same diff panel enrichment
+    previews use for entity updates."""
+    _print_entity_update(update)
+
+
 def _print_entity_update(update: EntityUpdate) -> None:
     diff_lines = list(
         difflib.unified_diff(

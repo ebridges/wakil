@@ -3,6 +3,7 @@ import zipfile
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import frontmatter
 import pytest
 import yaml
 from sqlalchemy import select
@@ -17,10 +18,12 @@ from wakil.app.ingest_service import (
     _merge_entity_note,
     _require_workspace_ids,
     _split_candidates_by_content_length,
+    _split_note_sections,
     _title_terms,
     apply_abstract_backfill,
     apply_capture,
     apply_enrichment,
+    apply_entity_compile,
     clean_transcript,
     infer_meeting_date,
     parse_json_transcript,
@@ -28,6 +31,7 @@ from wakil.app.ingest_service import (
     plan_abstract_backfill,
     prepare_capture,
     prepare_enrichment,
+    prepare_entity_compile,
     slugify,
     strip_srt,
     transcript_frontmatter_template,
@@ -753,6 +757,37 @@ REAL_SHAPED_PERSON = (
 )
 
 
+def test_split_note_sections_splits_real_shaped_person(workspace):
+    body = frontmatter.loads(REAL_SHAPED_PERSON).content
+    result = _split_note_sections(body)
+
+    assert result is not None
+    h1_line, top_section, timeline_section = result
+    assert h1_line == "# priya-shah"
+    assert "**Recruiter** at [[companies/acme|Acme]]. First screen 2026-06-01." in top_section
+    # The "---" divider right before Timeline is not part of the top section.
+    assert "---" not in top_section
+    assert timeline_section.startswith("## Timeline / Log")
+    assert "### 2026-06-01 — recruiter screen" in timeline_section
+    assert "- **2026-06-01** | Referenced in [some-meeting]" in timeline_section
+
+
+def test_split_note_sections_returns_none_for_missing_timeline_heading(workspace):
+    # Mirrors _merge_entity_note's own shape-mismatch fixture: an H1 with no
+    # "## Timeline / Log" heading at all.
+    minimal = "---\ntype: person\nname: Jane Doe\n---\n\n# Jane Doe\n\nWorks on claims.\n"
+    body = frontmatter.loads(minimal).content
+    assert _split_note_sections(body) is None
+
+
+def test_split_note_sections_returns_none_for_missing_h1(workspace):
+    no_h1 = (
+        "---\ntype: person\nname: Jane Doe\n---\n\nWorks on claims.\n\n## Timeline / Log\n\nstuff\n"
+    )
+    body = frontmatter.loads(no_h1).content
+    assert _split_note_sections(body) is None
+
+
 def test_merge_entity_note_replaces_top_section_preserves_h1_and_prepends_timeline(workspace):
     revision = EntityRevision(
         target_note_path="people/priya-shah.md",
@@ -1307,6 +1342,68 @@ def test_apply_enrichment_skips_stale_entity_update_without_clobbering(
     assert "people/priya-shah.md" not in result.files_written
     assert any("changed on disk" in msg for msg in result.stale_updates_skipped)
     # Never clobbered — the user's concurrent edit is exactly what's on disk.
+    assert target.read_text() == hand_edit
+
+
+# --------------------------------------------------------------------------
+# Entity compile pilot (docs/adr/0016): `wakil entities compile SLUG`.
+
+
+def test_prepare_and_apply_entity_compile_happy_path(workspace, kb_path):
+    _write_person(kb_path, "priya-shah")
+    compiled_truth = (
+        "**Recruiter** at [[companies/acme|Acme]]. Now running a second search "
+        "for the same VP Eng role."
+    )
+    client = FakeClient([{"compiled_truth": compiled_truth}])
+
+    update = prepare_entity_compile(workspace, client, "priya-shah")
+
+    assert len(client.calls) == 1
+    assert update.target_note_path == "people/priya-shah.md"
+    assert compiled_truth in update.new_content
+    # Old top-section prose is gone, replaced, not appended alongside.
+    assert "First screen 2026-06-01" not in update.new_content
+    # The original Timeline entries survive byte-for-byte -- compile is
+    # additive-only re-synthesis of Compiled Truth, never a Timeline rewrite.
+    assert "### 2026-06-01 — recruiter screen\n- Introductory call, discussed the VP Eng role." in (
+        update.new_content
+    )
+    assert (
+        "- **2026-06-01** | Referenced in [some-meeting](meetings/2026/2026-06-01-screen.md)"
+        in update.new_content
+    )
+
+    written = apply_entity_compile(workspace, update)
+
+    assert written is True
+    on_disk = (workspace.root_path / "people/priya-shah.md").read_text()
+    assert compiled_truth in on_disk
+
+
+def test_prepare_entity_compile_unknown_slug_raises_without_model_call(workspace, kb_path):
+    client = FakeClient([])
+
+    with pytest.raises(IngestError, match="No entity note found for slug 'nonexistent-slug'"):
+        prepare_entity_compile(workspace, client, "nonexistent-slug")
+
+    assert client.calls == []
+
+
+def test_apply_entity_compile_skips_stale_update_without_clobbering(workspace, kb_path):
+    _write_person(kb_path, "priya-shah")
+    client = FakeClient([{"compiled_truth": "New synthesized truth."}])
+    update = prepare_entity_compile(workspace, client, "priya-shah")
+
+    # The file changes on disk after prepare, before apply.
+    target = workspace.root_path / "people/priya-shah.md"
+    hand_edit = target.read_text() + "\n<!-- user's own concurrent edit -->\n"
+    target.write_text(hand_edit)
+
+    written = apply_entity_compile(workspace, update)
+
+    assert written is False
+    # Never clobbered -- the user's concurrent edit is exactly what's on disk.
     assert target.read_text() == hand_edit
 
 

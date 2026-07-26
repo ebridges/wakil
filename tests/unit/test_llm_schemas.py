@@ -4,6 +4,7 @@ from pydantic import BaseModel, ValidationError
 from wakil.llm.client import ModelTruncatedError
 from wakil.llm.schemas import (
     CandidateMemoryModel,
+    EntityCompileOutput,
     EntityResolution,
     ModelContractError,
     complete_with_contract,
@@ -148,3 +149,13 @@ def test_candidate_memory_model_accepts_valid_stance_values():
 def test_candidate_memory_model_rejects_invalid_stance():
     with pytest.raises(ValidationError):
         CandidateMemoryModel(type="fact", content="X", stance="urgent")
+
+
+def test_entity_compile_output_accepts_compiled_truth():
+    output = EntityCompileOutput(compiled_truth="The re-synthesized top section.")
+    assert output.compiled_truth == "The re-synthesized top section."
+
+
+def test_entity_compile_output_rejects_missing_compiled_truth():
+    with pytest.raises(ValidationError):
+        EntityCompileOutput()
