@@ -1085,6 +1085,12 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
     return f"---\n{frontmatter_yaml}---\n\n{new_body}"
 
 
+# Entities the resolution step judged not worth a full revision pass. A
+# missing/None relevance is treated as inclusive by omission (falls through
+# to the candidates list) rather than assumed low — see entity-resolve/SKILL.md.
+_LOW_RELEVANCE = {"minor", "peripheral"}
+
+
 def _run_entity_updates(
     config: WorkspaceConfig, client: ModelClient, text: str, proposal: EnrichmentProposal
 ) -> None:
@@ -1095,11 +1101,15 @@ def _run_entity_updates(
     """
     schemas = load_entity_schemas(config.root_path)
     candidates: list[tuple[EntityResolution, Path, str]] = []
+    below_threshold: list[tuple[str, str]] = []
     for resolution in proposal.entity_resolutions:
         if resolution.action != "update" or not resolution.target_note_path:
             continue
         schema = schemas.get(resolution.entity_type)
         if schema is None or schema.page_shape != "compiled-truth-timeline":
+            continue
+        if resolution.relevance in _LOW_RELEVANCE:
+            below_threshold.append((resolution.name, resolution.relevance))
             continue
         target = config.root_path / resolution.target_note_path
         if not target.is_file():
@@ -1117,6 +1127,14 @@ def _run_entity_updates(
             )
             continue
         candidates.append((resolution, target, content))
+
+    if below_threshold:
+        count = len(below_threshold)
+        entity_word = "entity" if count == 1 else "entities"
+        names = ", ".join(f"{name} ({relevance})" for name, relevance in below_threshold)
+        proposal.warnings.append(
+            f"{count} {entity_word} left untouched as below the relevance threshold: {names}"
+        )
 
     if not candidates:
         return

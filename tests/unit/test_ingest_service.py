@@ -1007,6 +1007,71 @@ def test_entity_update_warns_when_target_missing_on_disk(workspace, transcript):
     assert len(client.calls) == 2
 
 
+@pytest.mark.parametrize("relevance", ["minor", "peripheral"])
+def test_entity_update_excluded_when_relevance_below_threshold(
+    workspace, transcript, kb_path, relevance
+):
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": relevance,
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution])  # no 3rd response needed/consumed
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.entity_updates == []
+    assert any(
+        "below the relevance threshold" in warning and "Priya Shah" in warning
+        for warning in proposal.warnings
+    )
+    assert len(client.calls) == 2
+
+
+@pytest.mark.parametrize("relevance", ["central", "notable", None])
+def test_entity_update_proceeds_when_relevance_at_or_above_threshold(
+    workspace, transcript, kb_path, relevance
+):
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": relevance,
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert not any("below the relevance threshold" in warning for warning in proposal.warnings)
+
+
 def test_apply_enrichment_skips_stale_entity_update_without_clobbering(
     workspace, transcript, kb_path
 ):

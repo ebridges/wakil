@@ -2,7 +2,12 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from wakil.llm.client import ModelTruncatedError
-from wakil.llm.schemas import CandidateMemoryModel, ModelContractError, complete_with_contract
+from wakil.llm.schemas import (
+    CandidateMemoryModel,
+    EntityResolution,
+    ModelContractError,
+    complete_with_contract,
+)
 
 
 class _Output(BaseModel):
@@ -109,6 +114,24 @@ def test_candidate_memory_model_accepts_boundary_confidence():
 
 def test_candidate_memory_model_stance_defaults_to_none():
     assert CandidateMemoryModel(type="fact", content="X").stance is None
+
+
+def test_entity_resolution_relevance_defaults_to_none():
+    resolution = EntityResolution(name="X", entity_type="person", action="update")
+    assert resolution.relevance is None
+
+
+def test_entity_resolution_accepts_valid_relevance_values():
+    for value in ("central", "notable", "minor", "peripheral"):
+        resolution = EntityResolution(
+            name="X", entity_type="person", action="update", relevance=value
+        )
+        assert resolution.relevance == value
+
+
+def test_entity_resolution_rejects_invalid_relevance():
+    with pytest.raises(ValidationError):
+        EntityResolution(name="X", entity_type="person", action="update", relevance="urgent")
 
 
 def test_candidate_memory_model_accepts_valid_stance_values():

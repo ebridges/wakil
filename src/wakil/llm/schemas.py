@@ -97,7 +97,26 @@ class EntityResolution(BaseModel):
     target_note_path: str | None = Field(
         default=None, description="Existing note path, for action=update."
     )
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Identity-match certainty only — how sure this mention resolves to "
+        "this specific existing page, not how much the source discusses it. An "
+        "unambiguous, distinctly-named entity resolves with high confidence even if "
+        "it's mentioned only in passing; a common or ambiguous name gets lower "
+        "confidence even if it's central to the source. See `relevance` for the "
+        "separate question of how much the source actually concerns this entity.",
+    )
+    relevance: Literal["central", "notable", "minor", "peripheral"] | None = Field(
+        default=None,
+        description="How much this source actually concerns this entity — "
+        "independent of confidence. central: a primary subject of or participant in "
+        "the source. notable: a real stakeholder in what's discussed, even if not "
+        "personally discussed at length. minor: mentioned with some context but not "
+        "a focus. peripheral: named only as background — the source isn't really "
+        "about them. See the skill body for worked examples.",
+    )
     proposed_frontmatter: dict | None = Field(
         default=None,
         description="For action=create: frontmatter satisfying the type's required "
