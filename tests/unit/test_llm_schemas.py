@@ -78,12 +78,18 @@ def test_complete_with_contract_raises_after_second_truncation():
         complete_with_contract(client, "sys", "prompt", _Output)
     assert "truncated" in str(exc_info.value)
     assert "max_tokens=16384" in str(exc_info.value)
+    # Callers (e.g. entity-revision bisection, ADR 0015) branch on this to
+    # decide whether splitting a batch and retrying could help at all.
+    assert exc_info.value.truncated is True
 
 
 def test_complete_with_contract_raises_after_second_invalid_response():
     client = _ScriptedClient(["not json", "still not json"])
-    with pytest.raises(ModelContractError):
+    with pytest.raises(ModelContractError) as exc_info:
         complete_with_contract(client, "sys", "prompt", _Output)
+    # A validation failure would recur identically on a smaller request for
+    # an unrelated reason, so callers must not treat it like a truncation.
+    assert exc_info.value.truncated is False
 
 
 def test_complete_with_contract_passes_cacheable_prefix_unchanged_across_retry():

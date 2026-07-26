@@ -21,9 +21,15 @@ from wakil.llm.client import DEFAULT_MAX_TOKENS, ModelClient, ModelTruncatedErro
 class ModelContractError(RuntimeError):
     """The model failed to produce schema-valid output twice in a row."""
 
-    def __init__(self, contract: str, detail: str):
+    def __init__(self, contract: str, detail: str, *, truncated: bool):
         self.contract = contract
         self.detail = detail
+        # Distinguishes "kept hitting max_tokens" from "kept producing
+        # malformed JSON" — only the former is something a caller can
+        # meaningfully react to (e.g. by splitting a batch and retrying;
+        # see ADR 0015). A validation failure will recur identically on a
+        # smaller request for an unrelated reason, so it isn't.
+        self.truncated = truncated
         super().__init__(f"{contract}: model output failed validation twice: {detail}")
 
 
@@ -200,11 +206,11 @@ def complete_with_contract[T: BaseModel](
             return validate_model_response(raw, schema)
         except ModelTruncatedError as exc:
             if attempt == 2:
-                raise ModelContractError(schema.__name__, str(exc)) from exc
+                raise ModelContractError(schema.__name__, str(exc), truncated=True) from exc
             max_tokens *= 2
         except ValidationError as exc:
             if attempt == 2:
-                raise ModelContractError(schema.__name__, str(exc)) from exc
+                raise ModelContractError(schema.__name__, str(exc), truncated=False) from exc
             prompt = (
                 f"{prompt}\n\n"
                 f"Your previous response was not valid:\n{exc}\n\n"

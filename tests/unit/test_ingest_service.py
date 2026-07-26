@@ -7,6 +7,7 @@ import pytest
 import yaml
 from sqlalchemy import select
 
+from wakil.app import ingest_service
 from wakil.app.ingest_service import (
     EnrichmentProposal,
     EntityUpdate,
@@ -15,6 +16,7 @@ from wakil.app.ingest_service import (
     _is_noise_candidate,
     _merge_entity_note,
     _require_workspace_ids,
+    _split_candidates_by_content_length,
     _title_terms,
     apply_abstract_backfill,
     apply_capture,
@@ -33,7 +35,8 @@ from wakil.app.ingest_service import (
 )
 from wakil.app.workspace_service import index_notes, init_workspace, open_session
 from wakil.config.settings import WorkspaceConfig
-from wakil.llm.schemas import EntityRevision
+from wakil.llm.client import ModelTruncatedError
+from wakil.llm.schemas import EntityResolution, EntityRevision
 from wakil.schema.loader import load_entity_schemas
 from wakil.storage.schema import IngestRun, Memory, Note, Relationship, Source
 
@@ -114,7 +117,10 @@ class FakeClient:
     def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
         self.calls.append((system, prompt))
         assert self.queue, "FakeClient ran out of scripted responses"
-        return self.queue.pop(0)
+        step = self.queue.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
 
 
 @pytest.fixture
@@ -1070,6 +1076,195 @@ def test_entity_update_proceeds_when_relevance_at_or_above_threshold(
 
     assert len(proposal.entity_updates) == 1
     assert not any("below the relevance threshold" in warning for warning in proposal.warnings)
+
+
+def _candidate(name: str, content_len: int):
+    resolution = EntityResolution(name=name, entity_type="person", action="update")
+    return (resolution, Path(f"people/{name}.md"), "x" * content_len)
+
+
+def test_split_by_content_length_isolates_largest_into_its_own_half():
+    candidates = [_candidate("a", 10), _candidate("b", 5), _candidate("c", 100), _candidate("d", 3)]
+    half_a, half_b = _split_candidates_by_content_length(candidates)
+
+    names_a = {c[0].name for c in half_a}
+    names_b = {c[0].name for c in half_b}
+    assert names_a | names_b == {"a", "b", "c", "d"}
+    assert names_a & names_b == set()
+    assert names_a == {"c"}  # the single largest, alone
+    assert names_b == {"a", "b", "d"}
+
+
+def test_split_by_content_length_balances_total_size_not_count():
+    candidates = [_candidate("a", 100), _candidate("b", 1), _candidate("c", 1), _candidate("d", 1)]
+    half_a, half_b = _split_candidates_by_content_length(candidates)
+
+    assert sum(len(c[2]) for c in half_a) == 100
+    assert sum(len(c[2]) for c in half_b) == 3
+
+
+def test_split_by_content_length_two_candidates_splits_one_each():
+    half_a, half_b = _split_candidates_by_content_length([_candidate("a", 10), _candidate("b", 5)])
+    assert len(half_a) == 1
+    assert len(half_b) == 1
+
+
+# A note shaped like REAL_SHAPED_PERSON but padded to be dramatically larger
+# than a typical target note — for exercising which half of a bisection
+# split a large note lands in.
+LONG_SHAPED_PERSON = (
+    "---\n"
+    "type: person\n"
+    "name: Alice Long\n"
+    "status: active\n"
+    "created: 2026-06-01\n"
+    "updated: 2026-06-01\n"
+    "---\n\n"
+    "# alice\n\n"
+    + ("Filler paragraph to inflate this note's existing content length. " * 100)
+    + "\n\n---\n\n"
+    "## Timeline / Log\n\n"
+    "### 2026-06-01 — history\n"
+    "- Some prior detail.\n"
+)
+
+
+def test_entity_updates_bisect_and_recover_after_truncation(workspace, transcript, kb_path):
+    _write_person(kb_path, "alice", content=LONG_SHAPED_PERSON)
+    _write_person(kb_path, "bob")
+    _write_person(kb_path, "carol")
+    resolution = {
+        "entities": [
+            {
+                "name": slug.title(),
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": f"people/{slug}.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+            for slug in ("alice", "bob", "carol")
+        ]
+    }
+    alice_revision = {
+        "revisions": [
+            {
+                "target_note_path": "people/alice.md",
+                "has_update": True,
+                "compiled_truth": "Alice updated truth.",
+                "timeline_entry": "### 2026-07-16 — alice update\n- detail",
+            }
+        ]
+    }
+    bob_carol_revision = {
+        "revisions": [
+            {
+                "target_note_path": "people/bob.md",
+                "has_update": True,
+                "compiled_truth": "Bob updated truth.",
+                "timeline_entry": "### 2026-07-16 — bob update\n- detail",
+            },
+            {
+                "target_note_path": "people/carol.md",
+                "has_update": True,
+                "compiled_truth": "Carol updated truth.",
+                "timeline_entry": "### 2026-07-16 — carol update\n- detail",
+            },
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient(
+        [
+            MODEL_JSON,
+            resolution,
+            # First (unsplit) attempt truncates twice -> triggers a split.
+            ModelTruncatedError(max_tokens=8192, partial="{"),
+            ModelTruncatedError(max_tokens=16384, partial="{"),
+            # alice, isolated as the largest note, succeeds alone.
+            alice_revision,
+            # bob + carol, the smaller remainder, succeed together.
+            bob_carol_revision,
+        ]
+    )
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert {u.target_note_path for u in proposal.entity_updates} == {
+        "people/alice.md",
+        "people/bob.md",
+        "people/carol.md",
+    }
+    assert not any("failed while revising" in warning for warning in proposal.warnings)
+    assert len(client.calls) == 6
+
+
+def test_entity_updates_stop_bisecting_at_depth_ceiling(
+    workspace, transcript, kb_path, monkeypatch
+):
+    monkeypatch.setattr(ingest_service, "_MAX_BISECTION_DEPTH", 1)
+    _write_person(kb_path, "dan")
+    _write_person(kb_path, "erin")
+    resolution = {
+        "entities": [
+            {
+                "name": slug.title(),
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": f"people/{slug}.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+            for slug in ("dan", "erin")
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    # Every revision attempt truncates, at every depth: 2 (top) + 2 (each of
+    # the 2 leaf sub-batches once split) = 6 truncations after extraction
+    # and resolution.
+    client = FakeClient(
+        [MODEL_JSON, resolution]
+        + [ModelTruncatedError(max_tokens=8192, partial="{") for _ in range(6)]
+    )
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.entity_updates == []
+    failure_warnings = [w for w in proposal.warnings if "failed while revising" in w]
+    # Split once (depth 0 -> 1), then the ceiling stops further splitting:
+    # two separate single-entity failures, not one two-entity failure and
+    # not unbounded further recursion.
+    assert len(failure_warnings) == 2
+    assert any("Dan" in w for w in failure_warnings)
+    assert any("Erin" in w for w in failure_warnings)
+    assert len(client.calls) == 8
+
+
+def test_entity_updates_validation_failure_does_not_trigger_split(workspace, transcript, kb_path):
+    _write_person(kb_path, "dan")
+    _write_person(kb_path, "erin")
+    resolution = {
+        "entities": [
+            {
+                "name": slug.title(),
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": f"people/{slug}.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+            for slug in ("dan", "erin")
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution, "not json", "still not json"])
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.entity_updates == []
+    failure_warnings = [w for w in proposal.warnings if "failed while revising" in w]
+    assert len(failure_warnings) == 1
+    assert "2 entities" in failure_warnings[0]
+    assert len(client.calls) == 4
 
 
 def test_apply_enrichment_skips_stale_entity_update_without_clobbering(

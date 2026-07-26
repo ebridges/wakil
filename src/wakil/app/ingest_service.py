@@ -1090,6 +1090,12 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
 # to the candidates list) rather than assumed low — see entity-resolve/SKILL.md.
 _LOW_RELEVANCE = {"minor", "peripheral"}
 
+# Caps worst-case fan-out from one truncating revision call to at most
+# 2**_MAX_BISECTION_DEPTH sub-batches (8 at the default) — see ADR 0015.
+_MAX_BISECTION_DEPTH = 3
+
+_EntityCandidate = tuple[EntityResolution, Path, str]
+
 
 def _run_entity_updates(
     config: WorkspaceConfig, client: ModelClient, text: str, proposal: EnrichmentProposal
@@ -1139,29 +1145,40 @@ def _run_entity_updates(
     if not candidates:
         return
 
-    targets = [(res.target_note_path, content) for res, _, content in candidates]
-    skill = load_skill("note-revision", config.root_path)
-    system = build_system_prompt(skill, EntityRevisionOutput)
-    cacheable_prefix, prompt = build_revision_prompt(
-        text, proposal.summary, targets, context=proposal.context
-    )
-    try:
-        result = complete_with_contract(
-            client, system, prompt, EntityRevisionOutput, cacheable_prefix=cacheable_prefix
-        )
-    except ModelContractError as exc:
-        count = len(candidates)
-        entity_word = "entity" if count == 1 else "entities"
-        proposal.warnings.append(
-            f"Entity updates failed while revising {count} {entity_word} in one call "
-            f"({', '.join(res.name for res, _, _ in candidates)}); "
-            f"existing notes left unchanged: {exc}"
-        )
-        return
+    _revise_candidates(config, client, text, proposal, candidates)
 
+
+def _split_candidates_by_content_length(
+    candidates: list[_EntityCandidate],
+) -> tuple[list[_EntityCandidate], list[_EntityCandidate]]:
+    """Greedy 2-way balance by existing-note content length (longest-first):
+    the single largest note is placed first, then each remaining candidate
+    joins whichever half currently has less total content. Isolates the
+    biggest cost driver from compounding with the next-biggest, rather than
+    blind index-order halving — see ADR 0015, Decision 2 Step B."""
+    ordered = sorted(candidates, key=lambda c: len(c[2]), reverse=True)
+    half_a: list[_EntityCandidate] = []
+    half_b: list[_EntityCandidate] = []
+    size_a = size_b = 0
+    for candidate in ordered:
+        content_len = len(candidate[2])
+        if size_a <= size_b:
+            half_a.append(candidate)
+            size_a += content_len
+        else:
+            half_b.append(candidate)
+            size_b += content_len
+    return half_a, half_b
+
+
+def _apply_entity_revisions(
+    proposal: EnrichmentProposal,
+    candidates: list[_EntityCandidate],
+    revisions: list[EntityRevision],
+) -> None:
     today = datetime.now(UTC).date().isoformat()
     by_path = {res.target_note_path: content for res, _, content in candidates}
-    for revision in result.revisions:
+    for revision in revisions:
         old_content = by_path.get(revision.target_note_path)
         if old_content is None or not revision.has_update:
             continue
@@ -1181,6 +1198,47 @@ def _run_entity_updates(
                 new_content=new_content,
             )
         )
+
+
+def _revise_candidates(
+    config: WorkspaceConfig,
+    client: ModelClient,
+    text: str,
+    proposal: EnrichmentProposal,
+    candidates: list[_EntityCandidate],
+    depth: int = 0,
+) -> None:
+    """Revise `candidates` in one call; on a truncated response, bisect by
+    existing-note content length and retry each half, recursively, up to
+    `_MAX_BISECTION_DEPTH` (ADR 0015, Decision 2 Step B). A validation
+    failure (not a truncation) never triggers a split — it would recur
+    identically on a smaller batch for an unrelated reason."""
+    targets = [(res.target_note_path, content) for res, _, content in candidates]
+    skill = load_skill("note-revision", config.root_path)
+    system = build_system_prompt(skill, EntityRevisionOutput)
+    cacheable_prefix, prompt = build_revision_prompt(
+        text, proposal.summary, targets, context=proposal.context
+    )
+    try:
+        result = complete_with_contract(
+            client, system, prompt, EntityRevisionOutput, cacheable_prefix=cacheable_prefix
+        )
+    except ModelContractError as exc:
+        if exc.truncated and len(candidates) > 1 and depth < _MAX_BISECTION_DEPTH:
+            half_a, half_b = _split_candidates_by_content_length(candidates)
+            _revise_candidates(config, client, text, proposal, half_a, depth + 1)
+            _revise_candidates(config, client, text, proposal, half_b, depth + 1)
+            return
+        count = len(candidates)
+        entity_word = "entity" if count == 1 else "entities"
+        proposal.warnings.append(
+            f"Entity updates failed while revising {count} {entity_word} in one call "
+            f"({', '.join(res.name for res, _, _ in candidates)}); "
+            f"existing notes left unchanged: {exc}"
+        )
+        return
+
+    _apply_entity_revisions(proposal, candidates, result.revisions)
 
 
 def _stub_content(metadata: dict, name: str) -> str:
