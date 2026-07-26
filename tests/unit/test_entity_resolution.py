@@ -36,7 +36,7 @@ class FakeClient:
     def __init__(self, payloads):
         self.queue = [json.dumps(p) if isinstance(p, dict) else p for p in payloads]
 
-    def complete(self, system, prompt, max_tokens=8192):
+    def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
         assert self.queue, "FakeClient ran out of scripted responses"
         return self.queue.pop(0)
 

@@ -2,7 +2,12 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from wakil.llm.client import ModelTruncatedError
-from wakil.llm.schemas import CandidateMemoryModel, ModelContractError, complete_with_contract
+from wakil.llm.schemas import (
+    CandidateMemoryModel,
+    EntityResolution,
+    ModelContractError,
+    complete_with_contract,
+)
 
 
 class _Output(BaseModel):
@@ -21,9 +26,18 @@ class _ScriptedClient:
     def __init__(self, script):
         self._script = list(script)
         self.calls: list[int] = []
+        self.cacheable_prefixes: list[str | None] = []
 
-    def complete(self, system: str, prompt: str, max_tokens: int = 8192) -> str:
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        max_tokens: int = 8192,
+        *,
+        cacheable_prefix: str | None = None,
+    ) -> str:
         self.calls.append(max_tokens)
+        self.cacheable_prefixes.append(cacheable_prefix)
         step = self._script.pop(0)
         if isinstance(step, Exception):
             raise step
@@ -64,12 +78,27 @@ def test_complete_with_contract_raises_after_second_truncation():
         complete_with_contract(client, "sys", "prompt", _Output)
     assert "truncated" in str(exc_info.value)
     assert "max_tokens=16384" in str(exc_info.value)
+    # Callers (e.g. entity-revision bisection, ADR 0015) branch on this to
+    # decide whether splitting a batch and retrying could help at all.
+    assert exc_info.value.truncated is True
 
 
 def test_complete_with_contract_raises_after_second_invalid_response():
     client = _ScriptedClient(["not json", "still not json"])
-    with pytest.raises(ModelContractError):
+    with pytest.raises(ModelContractError) as exc_info:
         complete_with_contract(client, "sys", "prompt", _Output)
+    # A validation failure would recur identically on a smaller request for
+    # an unrelated reason, so callers must not treat it like a truncation.
+    assert exc_info.value.truncated is False
+
+
+def test_complete_with_contract_passes_cacheable_prefix_unchanged_across_retry():
+    client = _ScriptedClient(["not json", '{"value": "ok"}'])
+    result = complete_with_contract(
+        client, "sys", "prompt", _Output, cacheable_prefix="stable source text"
+    )
+    assert result.value == "ok"
+    assert client.cacheable_prefixes == ["stable source text", "stable source text"]
 
 
 def test_candidate_memory_model_accepts_opinion_type():
@@ -91,6 +120,24 @@ def test_candidate_memory_model_accepts_boundary_confidence():
 
 def test_candidate_memory_model_stance_defaults_to_none():
     assert CandidateMemoryModel(type="fact", content="X").stance is None
+
+
+def test_entity_resolution_relevance_defaults_to_none():
+    resolution = EntityResolution(name="X", entity_type="person", action="update")
+    assert resolution.relevance is None
+
+
+def test_entity_resolution_accepts_valid_relevance_values():
+    for value in ("central", "notable", "minor", "peripheral"):
+        resolution = EntityResolution(
+            name="X", entity_type="person", action="update", relevance=value
+        )
+        assert resolution.relevance == value
+
+
+def test_entity_resolution_rejects_invalid_relevance():
+    with pytest.raises(ValidationError):
+        EntityResolution(name="X", entity_type="person", action="update", relevance="urgent")
 
 
 def test_candidate_memory_model_accepts_valid_stance_values():

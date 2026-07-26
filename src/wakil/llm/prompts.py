@@ -177,7 +177,7 @@ def build_revision_prompt(
     extraction_summary: str,
     targets: list[tuple[str, str]],
     context: str | None = None,
-) -> str:
+) -> tuple[str, str]:
     """User content for the entity-update call (DAG node 3).
 
     targets: (target_note_path, current_full_content) for every entity
@@ -189,8 +189,25 @@ def build_revision_prompt(
     Scoped to compiled-truth-timeline-shaped entities only (the caller
     filters); note-revision's own discipline (State vs. Timeline) doesn't
     define what an update means for a single-occurrence type.
+
+    Returns (cacheable_prefix, variable_suffix) instead of one string: the
+    source document and its context are identical across every retry of
+    this call, and across any future per-batch sub-calls that share the
+    same source, so they're kept separate and placed first so the caller
+    can mark them as a cached prefix. The target notes go last, closest to
+    the instructions asking the model to act on them — both because that's
+    the part that differs per batch, and because it puts the concrete task
+    right before generation starts.
     """
-    parts = [
+    prefix_parts = []
+    if context:
+        prefix_parts += ["User-provided context about this source:", context, ""]
+    if extraction_summary:
+        prefix_parts += [f"What this source is about:\n{extraction_summary}", ""]
+    prefix_parts += [f"Source document:\n\n{text}"]
+    cacheable_prefix = "\n".join(prefix_parts)
+
+    suffix_parts = [
         "For each existing note below, decide whether this source's mention "
         "of that entity actually warrants updating the page (has_update) — "
         "a passing reference that adds no new fact gets has_update=false, "
@@ -202,14 +219,11 @@ def build_revision_prompt(
         "restated or reordered.",
         "",
     ]
-    if context:
-        parts += ["User-provided context about this source:", context, ""]
-    if extraction_summary:
-        parts += [f"What this source is about:\n{extraction_summary}", ""]
     for path, content in targets:
-        parts += [f"### Existing note to consider: {path}\n\n{content}", ""]
-    parts += [f"Source document:\n\n{text}"]
-    return "\n".join(parts)
+        suffix_parts += [f"### Existing note to consider: {path}\n\n{content}", ""]
+    variable_suffix = "\n".join(suffix_parts).rstrip("\n")
+
+    return cacheable_prefix, variable_suffix
 
 
 def describe_entity_types(schemas: dict[str, EntitySchema]) -> str:

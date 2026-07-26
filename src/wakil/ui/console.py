@@ -249,6 +249,7 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
         table.add_column("Action")
         table.add_column("Target", overflow="fold")
         table.add_column("Conf", justify="right")
+        table.add_column("Relevance")
         for res in proposal.entity_resolutions:
             style = _ACTION_STYLES.get(res.action, "white")
             if res.action == "update":
@@ -264,6 +265,7 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
                 f"[{style}]{res.action}[/{style}]",
                 target,
                 conf,
+                res.relevance or "-",
             )
         console.print(table)
     if proposal.stub_entities:

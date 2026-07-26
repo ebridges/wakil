@@ -21,9 +21,15 @@ from wakil.llm.client import DEFAULT_MAX_TOKENS, ModelClient, ModelTruncatedErro
 class ModelContractError(RuntimeError):
     """The model failed to produce schema-valid output twice in a row."""
 
-    def __init__(self, contract: str, detail: str):
+    def __init__(self, contract: str, detail: str, *, truncated: bool):
         self.contract = contract
         self.detail = detail
+        # Distinguishes "kept hitting max_tokens" from "kept producing
+        # malformed JSON" — only the former is something a caller can
+        # meaningfully react to (e.g. by splitting a batch and retrying;
+        # see ADR 0015). A validation failure will recur identically on a
+        # smaller request for an unrelated reason, so it isn't.
+        self.truncated = truncated
         super().__init__(f"{contract}: model output failed validation twice: {detail}")
 
 
@@ -97,7 +103,26 @@ class EntityResolution(BaseModel):
     target_note_path: str | None = Field(
         default=None, description="Existing note path, for action=update."
     )
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Identity-match certainty only — how sure this mention resolves to "
+        "this specific existing page, not how much the source discusses it. An "
+        "unambiguous, distinctly-named entity resolves with high confidence even if "
+        "it's mentioned only in passing; a common or ambiguous name gets lower "
+        "confidence even if it's central to the source. See `relevance` for the "
+        "separate question of how much the source actually concerns this entity.",
+    )
+    relevance: Literal["central", "notable", "minor", "peripheral"] | None = Field(
+        default=None,
+        description="How much this source actually concerns this entity — "
+        "independent of confidence. central: a primary subject of or participant in "
+        "the source. notable: a real stakeholder in what's discussed, even if not "
+        "personally discussed at length. minor: mentioned with some context but not "
+        "a focus. peripheral: named only as background — the source isn't really "
+        "about them. See the skill body for worked examples.",
+    )
     proposed_frontmatter: dict | None = Field(
         default=None,
         description="For action=create: frontmatter satisfying the type's required "
@@ -150,7 +175,12 @@ def validate_model_response[T: BaseModel](raw: str, schema: type[T]) -> T:
 
 
 def complete_with_contract[T: BaseModel](
-    client: ModelClient, system: str, prompt: str, schema: type[T]
+    client: ModelClient,
+    system: str,
+    prompt: str,
+    schema: type[T],
+    *,
+    cacheable_prefix: str | None = None,
 ) -> T:
     """One model call validated against `schema`, with a single retry.
 
@@ -161,19 +191,26 @@ def complete_with_contract[T: BaseModel](
     truncate again. Either way, a second failure raises ModelContractError
     with the underlying detail so the caller can surface it visibly instead
     of a bare JSON-parse error.
+
+    `cacheable_prefix` is passed straight through to the client on every
+    attempt, unchanged — only `prompt` grows (the validation-error retry
+    text is appended to it), so the prefix stays byte-identical across
+    retries and is eligible for a prompt-cache hit.
     """
     max_tokens = DEFAULT_MAX_TOKENS
     for attempt in (1, 2):
         try:
-            raw = client.complete(system, prompt, max_tokens=max_tokens)
+            raw = client.complete(
+                system, prompt, max_tokens=max_tokens, cacheable_prefix=cacheable_prefix
+            )
             return validate_model_response(raw, schema)
         except ModelTruncatedError as exc:
             if attempt == 2:
-                raise ModelContractError(schema.__name__, str(exc)) from exc
+                raise ModelContractError(schema.__name__, str(exc), truncated=True) from exc
             max_tokens *= 2
         except ValidationError as exc:
             if attempt == 2:
-                raise ModelContractError(schema.__name__, str(exc)) from exc
+                raise ModelContractError(schema.__name__, str(exc), truncated=False) from exc
             prompt = (
                 f"{prompt}\n\n"
                 f"Your previous response was not valid:\n{exc}\n\n"

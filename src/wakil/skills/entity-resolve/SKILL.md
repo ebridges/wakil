@@ -60,3 +60,38 @@ Rules:
   not create a duplicate page for a spelling variant of an existing note.
 - Names in proposed frontmatter carry the authored, human casing — never
   slugs.
+
+## Relevance: how much does the source actually concern this entity?
+
+Separate from confidence (below), every entity you resolve also gets a
+`relevance` judgment: how much *this particular source* concerns them —
+not how important they are in general, and not how easy they were to
+resolve. This matters most for action=update: it decides whether the
+entity's page is worth the cost of a full revision pass later, so judge
+it from what the source actually does with the entity.
+
+- **central** — a primary subject of the source, or a participant in it.
+- **notable** — a real stakeholder in what's discussed, even if they're
+  not personally discussed at length (e.g. one of several people a
+  decision affects, named but never individually talked about).
+- **minor** — mentioned with some context, but not a focus of the source.
+- **peripheral** — named only as background. The source isn't really
+  about them, even if the mention is substantively true.
+
+Worked example, from a planning call between two participants scoping a
+consulting engagement: the two participants and the project being scoped
+are **central**. Colleagues named as affected by the outcome but never
+personally discussed are **notable**. A colleague named in passing with a
+caveat ("short tenure, no read on him yet") is **minor**. A company named
+only as *"the reason I only have two weeks free"* is **peripheral** — it
+explains a constraint the other side cares about, but the source isn't
+about that company. Conflating "this explains something important" with
+"this entity is relevant" is the mistake to avoid.
+
+## Confidence: is this the right page?
+
+`confidence` is a different question — identity-match certainty, not
+relevance. A distinctly-named, unambiguous entity resolves with high
+confidence even when it's barely mentioned (peripheral + high confidence
+is a normal combination, not a contradiction); a common or ambiguous name
+gets lower confidence even when it's central to the source.

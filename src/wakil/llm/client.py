@@ -45,8 +45,21 @@ class ModelTruncatedError(ModelError):
 class ModelClient(Protocol):
     model: str
 
-    def complete(self, system: str, prompt: str, max_tokens: int = DEFAULT_MAX_TOKENS) -> str:
-        """Return the model's text response for a single-turn prompt."""
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        *,
+        cacheable_prefix: str | None = None,
+    ) -> str:
+        """Return the model's text response for a single-turn prompt.
+
+        `cacheable_prefix`, when given, is stable content (e.g. a source
+        document) that precedes `prompt` and is worth marking for prompt
+        caching — the caller is expected to keep it byte-identical across
+        retries or repeated calls that share it.
+        """
         ...
 
 
@@ -57,13 +70,29 @@ class AnthropicClient:
         self._client = anthropic.Anthropic()
         self.model = model or DEFAULT_ANTHROPIC_MODEL
 
-    def complete(self, system: str, prompt: str, max_tokens: int = DEFAULT_MAX_TOKENS) -> str:
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        *,
+        cacheable_prefix: str | None = None,
+    ) -> str:
+        if cacheable_prefix:
+            content: str | list[dict[str, object]] = [
+                {"type": "text", "text": cacheable_prefix, "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": prompt},
+            ]
+        else:
+            content = prompt
         response = self._client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
-            system=system,
+            # `system` is the other half of every retry/repeat call sharing
+            # the same skill + schema — cheap to always mark cacheable.
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             thinking={"type": "adaptive"},
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
         )
         if response.stop_reason == "refusal":
             raise ModelError("The model declined to answer this request.")
@@ -79,9 +108,21 @@ class OpenAICompatibleClient:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
 
-    def complete(self, system: str, prompt: str, max_tokens: int = DEFAULT_MAX_TOKENS) -> str:
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        *,
+        cacheable_prefix: str | None = None,
+    ) -> str:
         import httpx
 
+        # No explicit cache_control for OpenAI-compatible endpoints — OpenAI
+        # itself caches matching prefixes automatically above ~1024 tokens;
+        # keeping cacheable_prefix as a stable leading segment is what makes
+        # that automatic match possible, nothing more is needed here.
+        user_content = f"{cacheable_prefix}\n\n{prompt}" if cacheable_prefix else prompt
         response = httpx.post(
             f"{self._base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self._api_key}"},
@@ -90,7 +131,7 @@ class OpenAICompatibleClient:
                 "max_tokens": max_tokens,
                 "messages": [
                     {"role": "system", "content": system},
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": user_content},
                 ],
             },
             timeout=300,

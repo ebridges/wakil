@@ -26,7 +26,7 @@ class FakeCaptureClient:
     def __init__(self):
         self.queue = [CAPTURE_METADATA_JSON]
 
-    def complete(self, system, prompt, max_tokens=8192):
+    def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
         return self.queue.pop(0)
 
 
@@ -169,7 +169,7 @@ def test_enrich_lands_on_the_same_branch_capture_started(git_kb, monkeypatch):
         def __init__(self):
             self.queue = [extraction, resolution]
 
-        def complete(self, system, prompt, max_tokens=8192):
+        def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
             return self.queue.pop(0)
 
     _client_queue(monkeypatch, FakeCaptureClient(), FakeClient())

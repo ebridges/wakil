@@ -43,7 +43,7 @@ def test_query_answers_with_citations(kb_path: Path, monkeypatch):
     class FakeClient:
         model = "fake-model"
 
-        def complete(self, system, prompt, max_tokens=8192):
+        def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
             return "Graph memory relates to claims routing [1]."
 
     monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
@@ -84,7 +84,7 @@ def test_query_include_casual_flag(kb_path: Path, monkeypatch):
     class FakeClient:
         model = "fake-model"
 
-        def complete(self, system, prompt, max_tokens=8192):
+        def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
             return "ok"
 
     monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())
