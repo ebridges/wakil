@@ -787,10 +787,30 @@ def entities_compile(
         bool,
         typer.Option("--commit", "-c", help="Commit the rewritten file (wakil chore: ...)."),
     ] = False,
+    full: Annotated[
+        bool,
+        typer.Option(
+            "--full",
+            help="Run full resynthesis directly (docs/adr/0017, Stage 2) instead of the "
+            "default additive compile — skips the size-triggered menu entirely.",
+        ),
+    ] = False,
 ) -> None:
     """Re-synthesize an entity note's Compiled Truth from its own Timeline."""
+    import click
+
     from wakil.app.git_service import GitServiceError, commit_change
-    from wakil.app.ingest_service import IngestError, apply_entity_compile, prepare_entity_compile
+    from wakil.app.ingest_service import (
+        _COMPILED_TRUTH_TARGET_CHARS,
+        _TIMELINE_HEADING_RE,
+        EntityUpdate,
+        IngestError,
+        apply_entity_compile,
+        compiled_truth_text,
+        prepare_entity_compile,
+        prepare_entity_full_resynthesis,
+        rebuild_entity_update_with_compiled_truth,
+    )
     from wakil.llm.client import resolve_client
     from wakil.llm.schemas import ModelContractError
 
@@ -804,6 +824,60 @@ def entities_compile(
         )
         raise typer.Exit(code=1)
 
+    def _apply_and_commit(target_update: EntityUpdate, commit_label: str) -> None:
+        written = apply_entity_compile(config, target_update)
+        if not written:
+            console.print(
+                f"[yellow]Skipped:[/yellow] {target_update.target_note_path} changed on disk "
+                "since the preview was prepared."
+            )
+            raise typer.Exit(code=1)
+        console.print(f"[green]Wrote {target_update.target_note_path}[/green]")
+        if commit:
+            try:
+                outcome = commit_change(
+                    config, [target_update.target_note_path], "chore", f"{commit_label} {slug}"
+                )
+            except GitServiceError as exc:
+                console.print(f"[red]Commit failed:[/red] {exc}")
+                raise typer.Exit(code=1) from exc
+            console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]")
+
+    def _run_full_resynthesis() -> None:
+        try:
+            with console.status(f"Running full resynthesis on '{slug}' with {client.model}..."):
+                full_update = prepare_entity_full_resynthesis(config, client, slug)
+        except (IngestError, ModelContractError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+
+        print_entity_update_preview(full_update)
+        if not yes and not typer.confirm("Apply this full resynthesis (write file)?"):
+            console.print("Aborted; nothing was written.")
+            raise typer.Exit(code=0)
+
+        _apply_and_commit(full_update, "full-compile")
+
+        before_text = compiled_truth_text(full_update.old_content)
+        after_text = compiled_truth_text(full_update.new_content)
+        if before_text is not None and after_text is not None:
+            before_size, after_size = len(before_text), len(after_text)
+            if after_size > _COMPILED_TRUTH_TARGET_CHARS:
+                console.print(
+                    f"[yellow]Reduced from {before_size} to {after_size} chars, still over "
+                    f"the {_COMPILED_TRUTH_TARGET_CHARS}-char target[/yellow] — this entity "
+                    "has substantial durable history; no further automated action is offered."
+                )
+            else:
+                console.print(
+                    f"[dim]Reduced from {before_size} to {after_size} chars "
+                    f"(target: {_COMPILED_TRUTH_TARGET_CHARS}).[/dim]"
+                )
+
+    if full:
+        _run_full_resynthesis()
+        return
+
     try:
         with console.status(f"Compiling '{slug}' with {client.model}..."):
             update = prepare_entity_compile(config, client, slug)
@@ -811,29 +885,82 @@ def entities_compile(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
+    text = compiled_truth_text(update.new_content)
+    size = len(text) if text is not None else None
+    if size is not None and size > _COMPILED_TRUTH_TARGET_CHARS:
+        while True:
+            console.print(
+                f"[yellow]Compiled Truth is {size} chars, over the "
+                f"{_COMPILED_TRUTH_TARGET_CHARS}-char target.[/yellow]"
+            )
+            choice = (
+                typer.prompt(
+                    "Apply as-is / Edit / Full resynthesis / Cancel [a/e/f/c]", default="c"
+                )
+                .strip()
+                .lower()
+            )
+            if choice == "a":
+                break
+            if choice == "f":
+                _run_full_resynthesis()
+                return
+            if choice == "c":
+                console.print("Aborted; nothing was written.")
+                raise typer.Exit(code=0)
+            if choice != "e":
+                console.print("[red]Please answer a, e, f, or c.[/red]")
+                continue
+
+            # Every reject-and-retry case here returns to this same outer
+            # a/e/f/c menu, deliberately, not an automatic re-invocation of
+            # click.edit(). An earlier version of this code auto-retried the
+            # editor directly for an empty/colliding edit (a literal reading
+            # of ADR 0017's "return to the edit choice") -- but click.edit()
+            # can return the same invalid content on every call (a
+            # misconfigured $EDITOR, or simply a user re-saving the same
+            # mistake), and an automatic retry loop has no bound and no way
+            # out short of eventually producing valid text or closing the
+            # editor unsaved. Bouncing back to an explicit menu the user must
+            # actively respond to (including "c" to cancel outright) is
+            # simpler and cannot loop forever; the one extra keystroke to
+            # reselect "e" is a small cost for removing a real hang risk.
+            edited = click.edit(text=text)
+            if edited is None:
+                console.print("[dim]Edit cancelled; nothing changed.[/dim]")
+                continue
+            if not edited.strip():
+                console.print(
+                    "[red]Compiled Truth can't be emptied via edit — write real content, "
+                    "or cancel.[/red]"
+                )
+                continue
+            if _TIMELINE_HEADING_RE.search(edited):
+                console.print(
+                    "[red]That text contains a '## Timeline' heading, which would collide "
+                    "with the note's real Timeline section — remove it, or cancel.[/red]"
+                )
+                continue
+            rebuilt = rebuild_entity_update_with_compiled_truth(update, edited)
+            if rebuilt is None:
+                console.print("[red]Could not merge the edited text — try again, or cancel.[/red]")
+                continue
+            update = rebuilt
+            text = edited
+            size = len(edited)
+            if size <= _COMPILED_TRUTH_TARGET_CHARS:
+                break
+            console.print(
+                f"[yellow]Still {size} chars, over the {_COMPILED_TRUTH_TARGET_CHARS}-char "
+                "target.[/yellow]"
+            )
+
     print_entity_update_preview(update)
     if not yes and not typer.confirm("Apply this compilation (write file)?"):
         console.print("Aborted; nothing was written.")
         raise typer.Exit(code=0)
 
-    written = apply_entity_compile(config, update)
-    if not written:
-        console.print(
-            f"[yellow]Skipped:[/yellow] {update.target_note_path} changed on disk since "
-            "the preview was prepared."
-        )
-        raise typer.Exit(code=1)
-    console.print(f"[green]Wrote {update.target_note_path}[/green]")
-
-    if commit:
-        try:
-            outcome = commit_change(
-                config, [update.target_note_path], "chore", f"compile {slug}"
-            )
-        except GitServiceError as exc:
-            console.print(f"[red]Commit failed:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
-        console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]")
+    _apply_and_commit(update, "compile")
 
 
 def _memory_session(ctx: typer.Context):

@@ -262,6 +262,56 @@ def build_compile_prompt(
     return cacheable_prefix, variable_suffix
 
 
+def build_full_resynthesis_prompt(entity_name: str, timeline_section: str) -> tuple[str, str]:
+    """User content for the full-resynthesis compile call (`wakil entities
+    compile SLUG --full`, docs/adr/0017 Stage 2).
+
+    Deliberately narrower than `build_compile_prompt`: there is no
+    `top_section`/current-Compiled-Truth parameter at all. This is not an
+    oversight carried over from `build_compile_prompt` — it's ADR
+    0017-mandated. Full resynthesis, unlike additive mode, is allowed to
+    drop content; showing the model "here is the current summary" alongside
+    the full Timeline risks anchoring it on whatever a *previous* run
+    already decided to compress, rather than re-deriving fresh from source
+    every time — and if that bias is real, it compounds across repeated
+    invocations with no floor. Keeping this prompt strictly Timeline-derived
+    prevents that by construction: every full resynthesis is a genuinely
+    fresh re-derivation from the one thing that's actually immutable, not an
+    edit of the last one.
+
+    Returns (cacheable_prefix, variable_suffix): the Timeline goes in
+    cacheable_prefix so it's eligible for a prompt-cache hit; the task
+    instructions go in variable_suffix, last, so the concrete ask sits right
+    before generation starts — the same "long content first, task last"
+    convention `build_compile_prompt` documents in its own docstring.
+    """
+    cacheable_prefix = f"{entity_name}'s full Timeline / Log:\n\n{timeline_section}"
+
+    suffix_parts = [
+        "Fully re-synthesize Compiled Truth for this entity from the "
+        "Timeline above only — this is full resynthesis, not the ordinary "
+        "additive merge, and no current Compiled Truth is given to you, on "
+        "purpose (see entity-compile/SKILL.md's \"Full resynthesis mode\" "
+        "section for why). Apply that section's two-part salience rule: "
+        "collapse a fact restated or updated across multiple entries toward "
+        "its current value, dropping an earlier value entirely where a "
+        "later entry clearly and unambiguously supersedes it; keep every "
+        "durable once-stated fact (identifying details, decisions, "
+        "commitments, ongoing status or relationship facts) intact "
+        "regardless of size pressure; compress or drop an ephemeral "
+        "once-stated fact (a scheduling detail, a meeting-day operational "
+        "note) only once whatever durable consequence it led to is already "
+        "captured elsewhere in your output. When genuinely uncertain "
+        "whether a once-stated fact is durable or ephemeral, default to "
+        "durable and keep it — wrongly keeping something only costs a "
+        "little verbosity, wrongly dropping it silently deletes a true "
+        "fact.",
+    ]
+    variable_suffix = "\n".join(suffix_parts)
+
+    return cacheable_prefix, variable_suffix
+
+
 def describe_entity_types(schemas: dict[str, EntitySchema]) -> str:
     """A compact, schema-derived catalog of entity types for the prompt."""
     lines = []

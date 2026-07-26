@@ -57,6 +57,82 @@
         "Does not propose any change to the Timeline / Log entries themselves, and does not invent a company detail (e.g. a specific investor name) that isn't present anywhere in the given Timeline"
       ],
       "related_skills": ["note-revision"]
+    },
+    {
+      "id": "full-resynthesis-drops-superseded-restatement",
+      "query": "Run full resynthesis (docs/adr/0017 Stage 2's 'wakil entities compile SLUG --full', not the ordinary additive mode) on companies/vantage-robotics.md: read its Timeline / Log in full and re-synthesize Compiled Truth from it exactly as entity-compile/SKILL.md's 'Full resynthesis mode' section specifies. This is the lossy mode, not the default additive-only one, so where an earlier value is clearly and unambiguously superseded by a later one, you are allowed to drop the earlier value entirely rather than keep both.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "companies/vantage-robotics.md": "---\ntype: company\nname: Vantage Robotics\ncreated: 2026-04-01\nupdated: 2026-04-01\n---\n\n# Vantage Robotics\n\n## Compiled Truth\n\n_Synthesized current state -- rewrite when facts change._\n\n## Timeline / Log\n\n### 2026-04-01 -- intro call\n- Vantage Robotics is raising a Series A targeting $8M.\n- CEO is Marcus Webb.\n\n### 2026-04-20 -- updated round size\n- Round size revised upward: now targeting $12M, same investor group as before.\n\n### 2026-05-05 -- close update\n- Round confirmed closed at $12M.\n"
+        }
+      },
+      "expected_behavior": [
+        "Reads the full Timeline / Log before writing anything",
+        "Recognizes the $8M initial Series A target as clearly and unambiguously superseded by the later $12M figure (revised upward on 2026-04-20, then confirmed closed at that value on 2026-05-05)",
+        "Omits the $8M figure from the synthesized Compiled Truth entirely -- not retained anywhere, including as an 'originally $8M, later revised to $12M' aside -- since this scenario specifically tests that full resynthesis mode can drop a superseded value outright, not just condense or footnote it",
+        "States the final $12M closed round size clearly, once",
+        "Keeps Marcus Webb as CEO intact -- a durable, once-stated identifying fact, unaffected by the redundancy rule",
+        "Does not propose any change to the Timeline / Log entries themselves -- only the Compiled Truth section is being re-synthesized"
+      ],
+      "related_skills": ["note-revision"]
+    },
+    {
+      "id": "full-resynthesis-keeps-durable-once-stated-fact",
+      "query": "Run full resynthesis (docs/adr/0017 Stage 2, not the ordinary additive mode) on companies/brightline-analytics.md: read its Timeline / Log in full and re-synthesize Compiled Truth from it as entity-compile/SKILL.md's 'Full resynthesis mode' section specifies -- apply the two-part salience rule (redundancy vs. durability), not just additive-mode dedup.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "companies/brightline-analytics.md": "---\ntype: company\nname: Brightline Analytics\ncreated: 2026-01-15\nupdated: 2026-01-15\n---\n\n# Brightline Analytics\n\n## Compiled Truth\n\n_Synthesized current state -- rewrite when facts change._\n\n## Timeline / Log\n\n### 2026-01-15 -- initial evaluation\n- Brightline Analytics is a fraud-detection SaaS vendor being evaluated for the claims team.\n- Engineering confirmed their API supports our claims schema without a custom adapter.\n\n### 2026-02-01 -- technical deep dive\n- Deep dive covered data residency and SOC 2 compliance; both check out.\n- The call ran fifteen minutes over because the prior meeting on the calendar ran long; nothing else notable came up.\n\n### 2026-02-20 -- final decision\n- Decision: proceeding with Brightline Analytics as the fraud-detection vendor; contract signature targeted for March 2026.\n- Brightline's primary point of contact going forward is their solutions engineer, Tanya Brooks.\n"
+        }
+      },
+      "expected_behavior": [
+        "Reads the full Timeline / Log before writing anything",
+        "States the final vendor decision -- proceeding with Brightline Analytics, contract signature targeted for March 2026 -- intact in the synthesized Compiled Truth, since it is a durable, once-stated decision",
+        "Names Tanya Brooks as the ongoing point of contact intact, since that is a durable, once-stated identifying/relationship fact, not eligible for compression regardless of size pressure",
+        "Does not drop, hedge, or vaguely paraphrase either the vendor decision or the point-of-contact fact even though each is mentioned only once in the Timeline",
+        "Does not treat 'mentioned only once' by itself as a reason to compress either fact -- the frequency-only reading is exactly the wrong rule for a once-stated durable fact",
+        "Does not propose any change to the Timeline / Log entries themselves"
+      ],
+      "related_skills": ["note-revision"]
+    },
+    {
+      "id": "full-resynthesis-compresses-ephemeral-once-stated-fact",
+      "query": "Run full resynthesis (docs/adr/0017 Stage 2, not the ordinary additive mode) on people/sonia-patel.md: read its Timeline / Log in full and re-synthesize Compiled Truth from it as entity-compile/SKILL.md's 'Full resynthesis mode' section specifies -- this is the mode with real compression power beyond additive mode's own deduplication, so apply the durability judgment, not just redundancy.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/sonia-patel.md": "---\ntype: person\nname: Sonia Patel\ncreated: 2026-05-01\nupdated: 2026-05-01\n---\n\n# Sonia Patel\n\n## Compiled Truth\n\n_Synthesized current state -- rewrite when facts change._\n\n## Timeline / Log\n\n### 2026-05-01 -- planning check-in\n- Sonia is the Engineering Manager for the Payments team.\n- The check-in was originally set for 9am but got moved to 3:30pm because Sonia's flight was delayed; nothing substantive changed as a result of the move.\n- Team decided to delay the Payments API v2 launch from June to August to allow more integration testing time.\n"
+        }
+      },
+      "expected_behavior": [
+        "Reads the full Timeline / Log before writing anything",
+        "Compresses or fully drops the flight-delay/reschedule detail (check-in moved from 9am to 3:30pm because of a delayed flight) from the synthesized Compiled Truth -- a once-stated, ephemeral scheduling detail whose relevance was spent the day it happened, and the Timeline itself already says nothing substantive changed as a result",
+        "Does not treat the reschedule as durable just because it was mentioned only once -- 'protect anything stated only once' is exactly the wrong rule here, and this scenario specifically tests that full resynthesis has real compression power beyond additive mode's own deduplication",
+        "Keeps Sonia's role (Engineering Manager, Payments team) intact -- a durable, once-stated identifying fact",
+        "Keeps the launch-delay decision (Payments API v2 pushed from June to August) intact -- a durable, once-stated decision -- and dropping the ephemeral reschedule detail does not come at the cost of this fact",
+        "Does not propose any change to the Timeline / Log entries themselves"
+      ],
+      "related_skills": ["note-revision"]
+    },
+    {
+      "id": "full-resynthesis-repeat-run-no-additional-loss",
+      "query": "people/felix-orenstein.md already had 'wakil entities compile felix-orenstein --full' run on it once (yesterday); its current Compiled Truth section (shown below) is that first run's output, and nothing has been added to the Timeline / Log since. Run full resynthesis again today, exactly as entity-compile/SKILL.md's 'Full resynthesis mode' section specifies: derive your answer only from the Timeline / Log text, the same as any other full-resynthesis call. The real command's prompt never actually inlines a note's current Compiled Truth for exactly this reason (docs/adr/0017 Stage 2): showing a fresh full-resynthesis call the prior run's own output risks anchoring on a possibly-already-compressed result and compounding loss across repeated runs, so treat the existing Compiled Truth text below as something to compare your own output against afterward, not as a source to read from or edit. Because this is a second consecutive run over an unchanged Timeline, your output should not have lost anything beyond what that first run already legitimately dropped.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/felix-orenstein.md": "---\ntype: person\nname: Felix Orenstein\ncreated: 2026-02-10\nupdated: 2026-03-10\n---\n\n# Felix Orenstein\n\n## Compiled Truth\n\nFelix Orenstein is Director of Platform Engineering at Solace Health. His team evaluated Kafka alternatives and selected Redpanda over Confluent for cost reasons; migration kickoff is targeted for Q2. His team grew by two engineers this quarter.\n\n---\n\n## Timeline / Log\n\n### 2026-02-10 -- intro\n- Felix is the Director of Platform Engineering at Solace Health.\n- Team is evaluating a move from on-prem Kafka to a managed streaming service, no vendor chosen yet.\n\n### 2026-02-24 -- vendor shortlist\n- Vendor shortlist narrowed to Confluent and Redpanda; Felix leans toward Redpanda for cost.\n- Call originally set for 9am was pushed to 11am same day because Felix had a conflicting board meeting; nothing else changed.\n\n### 2026-03-10 -- decision\n- Team selected Redpanda; migration kickoff targeted for Q2.\n- Felix's team grew by two engineers this quarter, per him.\n"
+        }
+      },
+      "expected_behavior": [
+        "Independently re-derives Compiled Truth from the Timeline / Log text (title and company, the Kafka-alternative evaluation, the Redpanda-over-Confluent decision and its cost rationale, the Q2 migration kickoff target, and the team growing by two engineers) rather than simply echoing the existing Compiled Truth verbatim",
+        "Retains every durable fact already present in the existing (first-run) Compiled Truth -- Felix's title and company, the Redpanda-over-Confluent decision, the Q2 migration kickoff target, and the team headcount growth -- none of these are further compressed or dropped on this second run",
+        "Does not reintroduce the superseded, redundant intermediate Timeline states (e.g. 'no vendor chosen yet', the Confluent-vs-Redpanda shortlist stage still being open) as if they were still current -- the final decision is stated once, the same as the first run already did",
+        "Compresses or drops the ephemeral 9am-to-11am reschedule detail exactly as the first run already did, rather than restoring it just because it is still present, unedited, in the Timeline / Log",
+        "The resulting Compiled Truth is not thinner or missing content relative to the existing one shown -- demonstrating that a second consecutive full-resynthesis run over an unchanged Timeline does not lose more content than the first run already did",
+        "Does not propose any change to the Timeline / Log entries themselves"
+      ],
+      "related_skills": ["note-revision"]
     }
   ]
 }
