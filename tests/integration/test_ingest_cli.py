@@ -407,3 +407,65 @@ def test_sources_show_unknown_id(kb_path: Path):
     assert result.exit_code == 1
     assert "No source with id 42" in result.output
     assert "Enrichment preview" not in result.output
+
+
+REAL_SHAPED_PERSON = (
+    "---\n"
+    "type: person\n"
+    "name: Priya Shah\n"
+    "status: active\n"
+    "created: 2026-06-01\n"
+    "updated: 2026-06-01\n"
+    "---\n\n"
+    "# priya-shah\n\n"
+    "**Recruiter** at [[companies/acme|Acme]]. First screen 2026-06-01.\n\n"
+    "---\n\n"
+    "## Timeline / Log\n\n"
+    "### 2026-06-01 — recruiter screen\n"
+    "- Introductory call, discussed the VP Eng role.\n"
+)
+
+
+def _write_person(kb_path: Path, slug: str = "priya-shah") -> None:
+    people = kb_path / "people"
+    people.mkdir(exist_ok=True)
+    (people / f"{slug}.md").write_text(REAL_SHAPED_PERSON.replace("priya-shah", slug))
+
+
+COMPILE_JSON = json.dumps(
+    {
+        "compiled_truth": "**Recruiter** at [[companies/acme|Acme]]. Now running a second search.",
+    }
+)
+
+
+class FakeCompileClient(FakeClient):
+    """The entity-compile call: one scripted EntityCompileOutput payload."""
+
+    def __init__(self, payloads=(COMPILE_JSON,)):
+        super().__init__(payloads)
+
+
+def test_entities_compile_writes_file_and_prints_confirmation(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCompileClient())
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "entities", "compile", "priya-shah", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "Wrote people/priya-shah.md" in result.output
+    on_disk = (kb_path / "people" / "priya-shah.md").read_text()
+    assert "Now running a second search." in on_disk
+    # Original Timeline entry survives untouched.
+    assert "### 2026-06-01 — recruiter screen" in on_disk
+
+
+def test_entities_compile_unknown_slug_fails_clearly(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCompileClient())
+    runner.invoke(app, ["init", str(kb_path)])
+
+    result = runner.invoke(app, ["-w", str(kb_path), "entities", "compile", "nonexistent", "--yes"])
+
+    assert result.exit_code == 1
+    assert "No entity note found for slug 'nonexistent'" in result.output

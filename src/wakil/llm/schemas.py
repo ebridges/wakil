@@ -165,6 +165,30 @@ class EntityRevisionOutput(BaseModel):
     revisions: list[EntityRevision] = Field(default_factory=list)
 
 
+class EntityCompileOutput(BaseModel):
+    """The entity-compile pilot's one-step DAG (`wakil entities compile
+    SLUG`, docs/adr/0016): re-synthesize a single entity's Compiled Truth
+    from its own existing Timeline, with no other source involved.
+
+    A minimal contract rather than reusing `EntityRevision`, deliberately:
+    `has_update` (a gate against a *new* mention that might not warrant a
+    change) and `timeline_entry` (a *new* dated entry to prepend) don't
+    apply here — compile always produces a result and never touches
+    Timeline, so a schema that can't even represent the fields this call
+    must never set is safer than one that can but is expected not to.
+    """
+
+    compiled_truth: str = Field(
+        description="The full re-synthesized Compiled Truth section: the union "
+        "of every fact already present anywhere in the Timeline text given — "
+        "additive-only synthesis, never a lossy summary. Omitting a fact that "
+        "is still true and present in the Timeline is a defect, not an "
+        "acceptable simplification. If genuinely unsure whether two Timeline "
+        "entries describe the same fact or two different facts, include both "
+        "rather than merging or dropping either."
+    )
+
+
 def validate_model_response[T: BaseModel](raw: str, schema: type[T]) -> T:
     """Strip code fences and validate; raises pydantic.ValidationError."""
     cleaned = raw.strip()

@@ -15,6 +15,7 @@ from wakil.ui.console import (
     print_capture_result,
     print_enrichment_proposal,
     print_enrichment_result,
+    print_entity_update_preview,
     print_index_result,
     print_proposal_issues,
     print_query_result,
@@ -64,6 +65,8 @@ qmd_collection_app = typer.Typer(
 qmd_app.add_typer(qmd_collection_app, name="collection")
 sources_app = typer.Typer(help="Maintain captured sources.", no_args_is_help=True)
 app.add_typer(sources_app, name="sources")
+entities_app = typer.Typer(help="Maintain compiled entity pages.", no_args_is_help=True)
+app.add_typer(entities_app, name="entities")
 
 
 @app.callback()
@@ -773,6 +776,64 @@ def sources_backfill_abstract(
 
     updated = apply_abstract_backfill(config, items)
     console.print(f"[green]Updated {len(updated)} source(s).[/green]")
+
+
+@entities_app.command("compile")
+def entities_compile(
+    ctx: typer.Context,
+    slug: Annotated[str, typer.Argument(help="Entity slug (the note's filename, no .md).")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+    commit: Annotated[
+        bool,
+        typer.Option("--commit", "-c", help="Commit the rewritten file (wakil chore: ...)."),
+    ] = False,
+) -> None:
+    """Re-synthesize an entity note's Compiled Truth from its own Timeline."""
+    from wakil.app.git_service import GitServiceError, commit_change
+    from wakil.app.ingest_service import IngestError, apply_entity_compile, prepare_entity_compile
+    from wakil.llm.client import resolve_client
+    from wakil.llm.schemas import ModelContractError
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    client = resolve_client()
+    if client is None:
+        console.print(
+            "[red]Compiling needs a model provider.[/red] Set [bold]ANTHROPIC_API_KEY[/bold] "
+            "(or OPENAI_API_KEY + WAKIL_MODEL for an OpenAI-compatible endpoint)."
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        with console.status(f"Compiling '{slug}' with {client.model}..."):
+            update = prepare_entity_compile(config, client, slug)
+    except (IngestError, ModelContractError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    print_entity_update_preview(update)
+    if not yes and not typer.confirm("Apply this compilation (write file)?"):
+        console.print("Aborted; nothing was written.")
+        raise typer.Exit(code=0)
+
+    written = apply_entity_compile(config, update)
+    if not written:
+        console.print(
+            f"[yellow]Skipped:[/yellow] {update.target_note_path} changed on disk since "
+            "the preview was prepared."
+        )
+        raise typer.Exit(code=1)
+    console.print(f"[green]Wrote {update.target_note_path}[/green]")
+
+    if commit:
+        try:
+            outcome = commit_change(
+                config, [update.target_note_path], "chore", f"compile {slug}"
+            )
+        except GitServiceError as exc:
+            console.print(f"[red]Commit failed:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+        console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]")
 
 
 def _memory_session(ctx: typer.Context):

@@ -1,0 +1,62 @@
+{
+  "skill": "entity-compile",
+  "scenarios": [
+    {
+      "id": "redundant-entries-compile-without-duplication",
+      "query": "Run `wakil entities compile jane-doe` in spirit: read people/jane-doe.md's Timeline / Log in full and re-synthesize its Compiled Truth section from it. Nothing new has happened -- there's no fresh source, just years of un-synthesized Timeline entries piled up on a page whose Compiled Truth was never kept current.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\ncompany: Acme Corp\nrole: Head of Claims Automation\ncreated: 2026-06-01\nupdated: 2026-06-01\n---\n\n# Jane Doe\n\n## Compiled Truth\n\nWorks on claims automation.\n\n## Timeline / Log\n\n### 2026-06-01 -- intro call\n- Jane leads claims automation at Acme Corp.\n- She's the primary champion for the graph-based FNOL routing pilot.\n\n### 2026-06-15 -- status check\n- Confirmed: Jane still leads claims automation at Acme Corp.\n- The FNOL routing pilot she championed is now live in production for the first cohort of claims.\n\n### 2026-07-01 -- planning meeting\n- Reiterated that Jane heads up claims automation at Acme Corp.\n- New, unrelated thread: she's now also evaluating a second vendor as a fallback in case the pilot doesn't scale.\n"
+        }
+      },
+      "expected_behavior": [
+        "Reads the full Timeline / Log before writing anything, rather than working only from the existing (thin) Compiled Truth or the query's summary",
+        "States Jane's role/company once in the synthesized Compiled Truth rather than repeating the same 'leads claims automation at Acme Corp' fact three times, one per Timeline entry it appeared in",
+        "Still includes the FNOL routing pilot reaching production, since that is a distinct fact from the role restatement, not a duplicate of it",
+        "Still includes the second-vendor fallback evaluation as a distinct, separate fact from the pilot going to production -- does not conflate the two or drop the newer, less-repeated one in favor of the more-repeated role fact",
+        "Does not invent facts about Jane that aren't present anywhere in the given Timeline",
+        "Does not propose editing, reordering, or adding any Timeline / Log entry -- only the Compiled Truth section is being re-synthesized here"
+      ],
+      "related_skills": ["note-revision"]
+    },
+    {
+      "id": "similar-but-distinct-meetings-stay-distinct",
+      "query": "Compile companies/acme-corp.md's Compiled Truth from its Timeline / Log. Same as before -- no new source, just synthesizing what's already recorded there.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "companies/acme-corp.md": "---\ntype: company\nname: Acme Corp\ncreated: 2026-05-01\nupdated: 2026-05-01\n---\n\n# Acme Corp\n\n## Compiled Truth\n\nClaims-routing vendor under evaluation.\n\n## Timeline / Log\n\n### 2026-05-10 -- vendor review with engineering\n- Engineering reviewed Acme Corp's claims-routing API and flagged that it doesn't support real-time updates yet.\n- Decision: continue the pilot, revisit real-time support in Q3.\n\n### 2026-06-02 -- vendor review with product\n- Product reviewed Acme Corp separately, focused on pricing, and flagged that the per-seat pricing model won't scale past about 50 users.\n- Decision: renegotiate pricing terms before committing further.\n"
+        }
+      },
+      "expected_behavior": [
+        "Reads the full Timeline / Log before writing anything",
+        "Recognizes the two Timeline entries as two distinct meetings covering different concerns (a real-time-updates engineering gap on 2026-05-10 vs. a per-seat pricing/scaling concern on 2026-06-01) even though both are generically 'vendor reviews' about the same company",
+        "Includes both the real-time-updates gap and the pricing/scaling concern as separate, named facts in the synthesized Compiled Truth -- does not merge them into one vague statement like 'some concerns were raised in vendor reviews'",
+        "Does not silently pick one meeting's outcome as if it were the only one, and does not drop either decision (continue pilot / renegotiate pricing)",
+        "If genuinely uncertain whether the two entries describe the same underlying evaluation or two different ones, keeps both rather than collapsing them -- but here they should be recognized as clearly distinct given the different topics and decisions",
+        "Does not propose any change to the Timeline / Log entries themselves"
+      ],
+      "related_skills": ["note-revision"]
+    },
+    {
+      "id": "placeholder-compiled-truth-gets-real-synthesis",
+      "query": "companies/mosaic-private-markets.md has never had its Compiled Truth section actually written -- it's still the auto-generated stub placeholder, even though the Timeline below it has real substance. Compile it.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "companies/mosaic-private-markets.md": "---\ntype: company\nname: Mosaic Private Markets\ncreated: 2026-05-02\nupdated: 2026-05-02\n---\n\n# Mosaic Private Markets\n\n## Compiled Truth\n\n_Synthesized current state -- rewrite when facts change._\n\n## Timeline / Log\n\n### 2026-05-02 -- intro call\n- Mosaic is raising a $40M Series B, targeting a Q3 close.\n- Lead investor not yet confirmed; two candidates in early conversations.\n\n### 2026-05-20 -- follow-up with CFO\n- Series B target confirmed at $40M; now in term-sheet discussions with both lead candidates from the intro call.\n- Use of proceeds: roughly 60% platform engineering, 40% go-to-market.\n\n### 2026-06-14 -- partner meeting\n- One of the two lead candidates dropped out over valuation disagreements.\n- The remaining lead candidate has verbally agreed to terms; signing expected early Q3.\n"
+        }
+      },
+      "expected_behavior": [
+        "Reads the full Timeline / Log before writing anything",
+        "Recognizes the existing Compiled Truth as an unwritten placeholder (the stub text '_Synthesized current state -- rewrite when facts change._'), not real content to preserve or echo back verbatim",
+        "Produces an actual synthesized paragraph covering the Series B raise ($40M, Q3 close target), the lead-investor situation narrowing from two candidates to one over the three entries, and the 60/40 use-of-proceeds split -- rather than leaving the placeholder text in place or outputting something equally generic",
+        "Does not drop the use-of-proceeds detail just because it appears in only one of the three Timeline entries",
+        "Does not silently state 'one lead investor' as if that were true from the start -- reflects that the field narrowed from two candidates to one, since the earlier candidate count is also a fact recorded in the Timeline",
+        "Does not propose any change to the Timeline / Log entries themselves, and does not invent a company detail (e.g. a specific investor name) that isn't present anywhere in the given Timeline"
+      ],
+      "related_skills": ["note-revision"]
+    }
+  ]
+}
