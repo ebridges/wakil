@@ -110,42 +110,62 @@ Diagnosing this run surfaced two separate, compounding problems:
   observed to truncate.
 
 **2. Respond to truncation with a sequenced, evidence-gated set of fixes —
-not a single mechanism adopted on the strength of one incident** (proposed,
-not yet implemented; each step below is a hypothesis to validate against a
-rerun of the real failing transcript before being adopted, not a foregone
-conclusion):
+not a single mechanism adopted on the strength of one incident** (Step A
+below has now been tried and ruled out; Step B remains proposed, not yet
+implemented):
 
-- **Step A — try the direct fix first.** `AnthropicClient.complete`
-  (`llm/client.py`) hardcodes `thinking={"type": "adaptive"}` for every
-  call, with no bound on how much of `max_tokens` adaptive thinking can
-  consume before any output is produced. `thinking: {type: "enabled",
-  budget_tokens: N}` — a fixed cap in place of adaptive mode — is **not**
-  a viable lever for the model this codebase points at:
-  `thinking.budget_tokens` returns a 400 error on `claude-opus-4-8`
-  (`DEFAULT_ANTHROPIC_MODEL`) and every later model in the same family, per
-  Anthropic's migration guide (platform.claude.com/docs/en/about-claude/
-  models/migration-guide.md, "Migrating to Claude Opus 5 from Claude Opus
-  4.8" and "Migrating to Claude Mythos 5 and Claude Fable 5 from Claude
-  Opus 4.8," fetched and confirmed live 2026-07-25 — `claude-opus-4-8` is
-  named explicitly). The two levers that are actually available on this
-  model, confirmed against the installed SDK's type definitions
-  (`anthropic==0.116.0`, `output_config_param.py`,
-  `thinking_config_disabled_param.py`): `output_config={"effort": ...}`
-  (`low`/`medium`/`high`/`xhigh`/`max`, compatible with `thinking:
-  {type: "adaptive"}`, currently never set by `AnthropicClient.complete`
-  so the call runs at whatever server-side default applies), and
-  `thinking: {type: "disabled"}` (eliminates thinking-token cost entirely,
-  at the price of whatever quality adaptive thinking buys for the
-  has_update judgment). Before adding any batching machinery, try lowering
-  `effort` and, separately, disabling thinking outright, and rerun the
-  original failing transcript against each — plus one live sanity check
-  against the real endpoint before writing the fallback logic, since a
-  documentation page, however current, is still one step removed from
-  observed server behavior. This targets the variable the diagnosis
-  actually blames — unlike batching, which targets entity count and only
-  helps if thinking cost happens to scale with it. If either lever alone
-  resolves real failures, Step B's added complexity may not be justified
-  at all.
+- **Step A — tried, rejected.** `AnthropicClient.complete` (`llm/client.py`)
+  hardcodes `thinking={"type": "adaptive"}` for every call, with no bound
+  on how much of `max_tokens` adaptive thinking can consume before any
+  output is produced. `thinking: {type: "enabled", budget_tokens: N}` — a
+  fixed cap in place of adaptive mode — is not viable at all: it returns a
+  400 error on `claude-opus-4-8` (`DEFAULT_ANTHROPIC_MODEL`) and every
+  later model in the family, per Anthropic's migration guide
+  (platform.claude.com/docs/en/about-claude/models/migration-guide.md,
+  "Migrating to Claude Opus 5 from Claude Opus 4.8" and "Migrating to
+  Claude Mythos 5 and Claude Fable 5 from Claude Opus 4.8," fetched and
+  confirmed live 2026-07-25). The two levers that are actually available —
+  `output_config={"effort": ...}` and `thinking: {type: "disabled"}`,
+  both confirmed real against the installed SDK's type definitions
+  (`anthropic==0.116.0`) — were tested directly against a reconstruction
+  of the original failing request (the same 10 entities, including
+  `companies/mosaic-private-markets.md` at ~53KB and
+  `people/edward-bridges.md` at ~32KB of existing content, ~68K input
+  tokens total, `max_tokens=16384` matching the second/final attempt that
+  originally truncated), replayed live against the Anthropic API. Results:
+  - **Baseline** (`thinking: {type: "adaptive"}`, no `output_config`):
+    completed without truncating this run (`stop_reason: end_turn`), but
+    consumed 16,296 of 16,384 output tokens (99.5%), 10,168 of them
+    thinking — confirming the batch genuinely operates at the edge of the
+    budget, even without directly reproducing a truncation on this
+    particular run (target-note content has likely drifted since the
+    original incident via unrelated later enrichments, so an exact replay
+    wasn't possible).
+  - **`output_config={"effort": "low"}`**: 10,111 thinking tokens — a
+    0.6% change from baseline. **Effort does not meaningfully control
+    adaptive-thinking cost for this call shape.** The hypothesis that
+    lowering `effort` reduces the dominant cost driver is not supported by
+    this data.
+  - **`thinking: {type: "disabled"}`**: avoided the budget crunch entirely
+    (8,589 of 16,384 output tokens, comfortable margin) — but the response
+    was not valid JSON. Without a dedicated thinking channel, the model
+    reasoned in plain prose directly in the text response ("Let me work
+    through each...") instead of emitting the required schema, violating
+    "respond with a single JSON object and nothing else." This is a hard
+    contract failure (the same practical outcome as `ModelContractError`),
+    not a quality tradeoff, and it occurred despite having budget to
+    spare — disabling thinking doesn't trade cost for quality here, it
+    breaks structured output outright.
+
+  **Neither lever is a viable fix.** `effort` doesn't touch the actual
+  cost driver; `disabled` avoids the token-budget problem but reliably
+  produces an unusable response for this task shape. Step A does not
+  reduce what Decision 2 needs to solve. This makes Decision 1's
+  relevance filtering more load-bearing than originally framed, not less:
+  it independently removes the single largest cost driver in this batch
+  (Mosaic's ~53KB note, correctly judged `peripheral`) without touching
+  `thinking` at all, and Step B is the mechanism actually available for
+  whatever risk remains after that filtering.
 - **Step B — if truncation still occurs, batch adaptively rather than by a
   precomputed size**, on the reasoning that thinking-token cost is not
   reliably predictable from the request ahead of time (see Context #2), so
@@ -192,15 +212,17 @@ conclusion):
 ## Alternatives considered
 
 - **Bound the thinking budget directly instead of working around it.**
-  Not rejected — promoted to Step A of Decision 2 above, as `effort`
-  reduction and `thinking: {type: "disabled"}` rather than
-  `budget_tokens` (unavailable on this model — see Step A). This is the
-  most direct response to the diagnosis in Context #2 (adaptive thinking,
-  not output text, consumed the budget) and needs to be tried and measured
-  against the real failing case before any batching complexity is added on
-  top of it. Listed here for visibility since an earlier draft of this ADR
-  omitted it entirely from the alternatives it weighed, despite it
-  targeting the named root cause more directly than anything that was
+  Tried and rejected — see Step A of Decision 2 above. `budget_tokens` is
+  unavailable on this model; the two levers that are available (`effort`
+  reduction, disabling thinking) were tested live against a reconstruction
+  of the original failing request and neither works (`effort` doesn't
+  meaningfully change thinking-token cost; disabling thinking breaks JSON
+  compliance). This was the most direct response to the diagnosis in
+  Context #2 (adaptive thinking, not output text, consumed the budget),
+  and testing it before building batching complexity was the right call —
+  it just didn't pan out. Listed here for visibility since an earlier
+  draft of this ADR omitted it entirely from the alternatives it weighed,
+  despite targeting the named root cause more directly than anything else
   discussed.
 - **A dedicated LLM call to cluster candidates into topically-related
   batches.** Rejected: every surviving candidate already comes from the
@@ -213,10 +235,11 @@ conclusion):
   particular smaller number is safe, and Decision 2's own diagnosis
   (thinking cost isn't reliably predictable from request content) cuts
   against trusting a number picked without measurement just as much as it
-  cuts against trusting an unbounded batch. The honest position is that
-  this hasn't been tested, not that it's disproven — which is exactly why
-  Decision 2 is sequenced to measure Step A and the real failure case
-  before committing to Step B's added complexity at all.
+  cuts against trusting an unbounded batch. This hasn't been directly
+  tested the way Step A was, but the same reasoning applies: a number
+  picked without measurement is exactly the kind of arbitrary guess this
+  ADR is trying to avoid, which is why Step B discovers its split points
+  from an actual truncation rather than a precomputed count.
 - **Existing-note content length as the sole batching trigger.** Rejected
   as the thing that decides *whether* to split — the observed failure
   shows thinking, not output text, was the dominant cost, so content
@@ -239,21 +262,29 @@ conclusion):
   project's own norm for judgment-guidance changes (ADR 0004). Until that
   exists, the field's real-world accuracy rests on one case study, not a
   verified pattern.
-- Decision 2's steps are ordered by directness and cost, and each is
-  gated on measuring it against the real originally-failing transcript
-  before being adopted — Step A (bound thinking directly) may turn out to
-  be sufficient on its own, in which case Step B's recursive machinery
-  should not be built at all. This ADR does not claim Step B is necessary,
-  only that *if* it is, it should be bounded and evidence-driven rather
-  than a fixed guess.
-- If Step B is needed: revision-call count becomes variable per run
-  instead of fixed at one, bounded by a fixed recursion-depth ceiling
-  (proposed: 3) rather than unbounded — most enrichments still cost
-  exactly one call; a run whose survivors genuinely overflow the budget
-  pays for a bounded number of extra calls, not an open-ended fan-out.
-  "Bounded" is not "small": depth 3 with per-node doubling retry means a
-  worst-case run can still cost on the order of 15-30 model calls. The
-  ceiling caps the failure mode, it is not a latency guarantee.
+- Decision 2's steps were ordered by directness and cost, gated on
+  measuring each against the real originally-failing transcript before
+  being adopted — that measurement happened (2026-07-25, see Step A) and
+  Step A did not pan out: neither available lever fixes the problem,
+  one of them (disabled thinking) actively breaks structured-output
+  compliance. Step B is therefore the operative mechanism for whatever
+  truncation risk remains after Decision 1's relevance filtering, not a
+  fallback that might prove unnecessary.
+- Decision 1's relevance filtering is now confirmed, independent of the
+  Step A result, to remove real cost: in the reconstructed failing
+  request, one excluded entity (`companies/mosaic-private-markets.md`,
+  judged `peripheral`) carried ~53KB of existing content — more than the
+  other nine targets combined. Filtering it out doesn't just reduce entity
+  *count*, it removes the single largest driver of expected output size
+  from the batch entirely.
+- Revision-call count becomes variable per run instead of fixed at one
+  once Step B lands, bounded by a fixed recursion-depth ceiling (proposed:
+  3) rather than unbounded — most enrichments still cost exactly one call;
+  a run whose survivors genuinely overflow the budget pays for a bounded
+  number of extra calls, not an open-ended fan-out. "Bounded" is not
+  "small": depth 3 with per-node doubling retry means a worst-case run can
+  still cost on the order of 15-30 model calls. The ceiling caps the
+  failure mode, it is not a latency guarantee.
 - The relevance-threshold warning this ADR introduces (Decision 1) differs
   from the DAG's existing `proposal.warnings` uses in one respect worth
   naming honestly: the existing cases (a missing target file, a failed
@@ -310,3 +341,9 @@ conclusion):
   `types/thinking_config_disabled_param.py`, `types/model_capabilities.py`
   (confirms `output_config.effort` and `thinking: {type: "disabled"}` as
   real, available parameters)
+- Step A live experiment (2026-07-25): reconstruction of the original
+  10-entity revision request (same target notes, source transcript, and
+  system prompt) replayed against `claude-opus-4-8` at
+  `max_tokens=16384` under three configurations (baseline adaptive,
+  `effort=low`, `thinking` disabled) — throwaway script, not committed to
+  either repo; results recorded in Decision 2 Step A above
