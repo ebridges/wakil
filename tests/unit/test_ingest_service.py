@@ -41,7 +41,7 @@ from wakil.app.ingest_service import (
 from wakil.app.workspace_service import index_notes, init_workspace, open_session
 from wakil.config.settings import WorkspaceConfig
 from wakil.llm.client import ModelTruncatedError
-from wakil.llm.schemas import EntityResolution, EntityRevision
+from wakil.llm.schemas import EntityResolution, EntityRevision, ModelContractError
 from wakil.schema.loader import load_entity_schemas
 from wakil.storage.schema import IngestRun, Memory, Note, Relationship, Source
 
@@ -1473,6 +1473,19 @@ def test_prepare_entity_full_resynthesis_happy_path_and_timeline_only_prompt(wor
     # truth specifically.
     assert "### 2026-06-01 — recruiter screen" in prefix
     assert "Introductory call, discussed the VP Eng role." in prefix
+
+
+def test_prepare_entity_full_resynthesis_rejects_empty_compiled_truth(workspace, kb_path):
+    _write_person(kb_path, "priya-shah")
+    client = FakeClient([{"compiled_truth": "   "}])
+
+    with pytest.raises(ModelContractError, match="empty compiled_truth"):
+        prepare_entity_full_resynthesis(workspace, client, "priya-shah")
+
+    # _merge_entity_note's "empty means no change" fallback is correct for
+    # additive mode but would silently keep the old Compiled Truth here,
+    # while the CLI still reported success -- must raise instead of
+    # returning a no-op EntityUpdate.
 
 
 def test_validate_proposal_rejects_entity_update_with_invalid_frontmatter(workspace, kb_path):

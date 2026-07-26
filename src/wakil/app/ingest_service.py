@@ -1612,6 +1612,18 @@ def prepare_entity_full_resynthesis(
     result = complete_with_contract(
         client, system, prompt, EntityCompileOutput, cacheable_prefix=cacheable_prefix
     )
+    if not result.compiled_truth.strip():
+        # _merge_entity_note treats an empty compiled_truth as "no change" —
+        # correct for prepare_entity_compile's additive mode, where that's a
+        # real possible outcome, but full resynthesis is defined (ADR 0017)
+        # to always produce a complete re-derivation. Letting an empty
+        # response fall through that fallback would silently keep the old
+        # Compiled Truth verbatim while the CLI still reports success.
+        raise ModelContractError(
+            contract="EntityCompileOutput",
+            detail="full resynthesis returned an empty compiled_truth",
+            truncated=False,
+        )
 
     target_note_path = str(target.relative_to(config.root_path))
     revision = EntityRevision(
