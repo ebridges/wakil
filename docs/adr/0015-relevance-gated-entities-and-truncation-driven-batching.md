@@ -166,11 +166,22 @@ implemented):
   (Mosaic's ~53KB note, correctly judged `peripheral`) without touching
   `thinking` at all, and Step B is the mechanism actually available for
   whatever risk remains after that filtering.
-- **Step B — if truncation still occurs, batch adaptively rather than by a
-  precomputed size**, on the reasoning that thinking-token cost is not
-  reliably predictable from the request ahead of time (see Context #2), so
-  a size discovered empirically from an actual truncation is more
-  defensible than one guessed at design time:
+- **Step B — confirmed necessary, not yet implemented.** Re-running the
+  original failing source through the actual `wakil enrich` command with
+  Decision 1 (relevance filtering) in place, on the real live pipeline
+  rather than a reconstruction (2026-07-25): relevance filtering correctly
+  excluded 6 of the original candidates (`Brian Corr`, `Jake McGuire`,
+  `Prabhuddha Bhan`, `Murtaza Mister` as `minor`; `Mosaic`, `Scorealytics
+  News Accuracy Framework` as `minor`/`peripheral`) — but the remaining
+  batch of 4 `central` entities (Lawrence Krubner, Edward Bridges,
+  Scorealytics, Scorealytics AI Mentoring Program — still including
+  `people/edward-bridges.md` at ~32KB) **still truncated**, at the same
+  `max_tokens=16384` ceiling, after only 3,783 output chars. Relevance
+  filtering reduced the problem; it did not eliminate it. Batch adaptively
+  rather than by a precomputed size, on the reasoning that thinking-token
+  cost is not reliably predictable from the request ahead of time (see
+  Context #2), so a size discovered empirically from an actual truncation
+  is more defensible than one guessed at design time:
   - Attempt the full relevance-filtered candidate set as **one** revision
     call — the common case after relevance filtering is already small
     (single digits for one source), so this costs nothing extra when
@@ -261,7 +272,14 @@ implemented):
   scenario calibrating the new `relevance` judgment, matching this
   project's own norm for judgment-guidance changes (ADR 0004). Until that
   exists, the field's real-world accuracy rests on one case study, not a
-  verified pattern.
+  verified pattern — and run-to-run inconsistency has already been
+  observed directly, not just theorized: the same source, re-resolved
+  2026-07-25, rated Brian Corr `minor` where the case study that motivated
+  this ADR rated the same mention "very relevant" (`central`). This
+  doesn't invalidate the mechanism (the field still correctly identified
+  Mosaic as low-value both times), but it's concrete evidence the
+  judgment isn't perfectly stable, strengthening rather than weakening the
+  case for the eval gate above.
 - Decision 2's steps were ordered by directness and cost, gated on
   measuring each against the real originally-failing transcript before
   being adopted — that measurement happened (2026-07-25, see Step A) and
@@ -347,3 +365,8 @@ implemented):
   `max_tokens=16384` under three configurations (baseline adaptive,
   `effort=low`, `thinking` disabled) — throwaway script, not committed to
   either repo; results recorded in Decision 2 Step A above
+- Step B validation run (2026-07-25): the same source (`wakil enrich
+  --force ... 6`) re-run through the actual, current pipeline (relevance
+  filtering + caching both live) rather than a reconstruction — confirms
+  Step B is needed, not just plausible; results recorded in Decision 2
+  Step B above
