@@ -79,7 +79,7 @@ class AnthropicClient:
         cacheable_prefix: str | None = None,
     ) -> str:
         if cacheable_prefix:
-            content: str | list[dict] = [
+            content: str | list[dict[str, object]] = [
                 {"type": "text", "text": cacheable_prefix, "cache_control": {"type": "ephemeral"}},
                 {"type": "text", "text": prompt},
             ]
