@@ -32,6 +32,7 @@ from wakil.app.ingest_service import (
     prepare_capture,
     prepare_enrichment,
     prepare_entity_compile,
+    prepare_entity_full_resynthesis,
     slugify,
     strip_srt,
     transcript_frontmatter_template,
@@ -1405,6 +1406,73 @@ def test_apply_entity_compile_skips_stale_update_without_clobbering(workspace, k
     assert written is False
     # Never clobbered -- the user's concurrent edit is exactly what's on disk.
     assert target.read_text() == hand_edit
+
+
+# --------------------------------------------------------------------------
+# Full resynthesis (docs/adr/0017, Stage 2): `wakil entities compile SLUG
+# --full`.
+
+
+class _PromptCapturingClient(FakeClient):
+    """Same scripted-response behavior as FakeClient, but also records each
+    call's cacheable_prefix -- the piece build_full_resynthesis_prompt
+    puts the Timeline text in -- separately from the (system, prompt) tuple
+    every other test in this file already asserts on, so adding this
+    doesn't change client.calls' shape for those tests."""
+
+    def __init__(self, payloads=None):
+        super().__init__(payloads)
+        self.cacheable_prefixes: list[str | None] = []
+
+    def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
+        self.cacheable_prefixes.append(cacheable_prefix)
+        return super().complete(system, prompt, max_tokens, cacheable_prefix=cacheable_prefix)
+
+
+def test_prepare_entity_full_resynthesis_happy_path_and_timeline_only_prompt(workspace, kb_path):
+    _write_person(kb_path, "priya-shah")
+    compiled_truth = (
+        "**Recruiter** at [[companies/acme|Acme]]. Running a second search for the same "
+        "VP Eng role after the first one fell through."
+    )
+    client = _PromptCapturingClient([{"compiled_truth": compiled_truth}])
+
+    update = prepare_entity_full_resynthesis(workspace, client, "priya-shah")
+
+    assert len(client.calls) == 1
+    assert update.target_note_path == "people/priya-shah.md"
+    assert compiled_truth in update.new_content
+    # Old top-section prose is gone, replaced, not appended alongside.
+    assert "First screen 2026-06-01" not in update.new_content
+    # The original Timeline entries survive byte-for-byte -- full resynthesis
+    # only ever rewrites Compiled Truth, never the Timeline itself.
+    assert "### 2026-06-01 — recruiter screen\n- Introductory call, discussed the VP Eng role." in (
+        update.new_content
+    )
+    assert (
+        "- **2026-06-01** | Referenced in [some-meeting](meetings/2026/2026-06-01-screen.md)"
+        in update.new_content
+    )
+
+    # ADR 0017: the full-resynthesis prompt is Timeline-only -- the note's
+    # prior Compiled Truth text is never shown to the model, on purpose
+    # (build_full_resynthesis_prompt takes no top_section parameter at all).
+    # Verify that directly against what was actually sent, in both halves of
+    # the call (the variable prompt suffix and the cacheable Timeline
+    # prefix), not just that the function ran.
+    system, prompt = client.calls[0]
+    old_top_section_text = "**Recruiter** at [[companies/acme|Acme]]. First screen 2026-06-01."
+    assert old_top_section_text not in prompt
+    assert "First screen 2026-06-01" not in prompt
+    prefix = client.cacheable_prefixes[0]
+    assert prefix is not None
+    assert old_top_section_text not in prefix
+    assert "First screen 2026-06-01" not in prefix
+    # The Timeline itself *is* in the cacheable prefix -- confirming the
+    # prompt isn't simply empty of everything, only of the prior compiled
+    # truth specifically.
+    assert "### 2026-06-01 — recruiter screen" in prefix
+    assert "Introductory call, discussed the VP Eng role." in prefix
 
 
 def test_validate_proposal_rejects_entity_update_with_invalid_frontmatter(workspace, kb_path):

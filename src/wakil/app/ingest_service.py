@@ -53,6 +53,7 @@ from wakil.llm.prompts import (
     build_capture_metadata_prompt,
     build_compile_prompt,
     build_extraction_prompt,
+    build_full_resynthesis_prompt,
     build_resolution_prompt,
     build_revision_prompt,
 )
@@ -1474,11 +1475,25 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
 
 
 # --------------------------------------------------------------------------
-# Entity compile pilot (docs/adr/0016): `wakil entities compile SLUG`, a
-# single-entity, additive-only re-synthesis of Compiled Truth from an
-# entity's own Timeline — no new source, no batching, no due-check. Reuses
-# `_merge_entity_note` exactly as-is (a synthetic EntityRevision with no
-# timeline_entry/frontmatter_updates) rather than a second merge path.
+# Entity compile pilot (docs/adr/0016) + bounded-size / full resynthesis
+# (docs/adr/0017 Stages 1-2): `wakil entities compile SLUG`, a single-entity
+# re-synthesis of Compiled Truth from an entity's own Timeline — no new
+# source, no batching, no due-check. Reuses `_merge_entity_note` exactly
+# as-is (a synthetic EntityRevision with no timeline_entry/
+# frontmatter_updates) rather than a second merge path, for both the
+# default additive mode and Stage 2's full-resynthesis mode.
+
+# ADR 0017, Stage 1: target size for a compiled entity's top section (H1 +
+# Compiled Truth). Anchored to query_service.py's NOTE_EXCERPT_CHARS = 2000
+# — the window `wakil query`'s `_build_contexts` actually reads for a note
+# — minus headroom for the frontmatter YAML and H1 line that share that
+# same window ahead of Compiled Truth itself; 1400 sits inside the ADR's
+# stated 1200-1500 range, calibrated against the two large, under-
+# synthesized notes (companies/mosaic-private-markets.md,
+# people/edward-bridges.md) that motivated this whole line of work, not
+# against the vault broadly — most ordinary notes are expected to never
+# approach it.
+_COMPILED_TRUTH_TARGET_CHARS = 1400
 
 
 def _resolve_entity_slug(config: WorkspaceConfig, slug: str) -> Path | None:
@@ -1550,6 +1565,125 @@ def prepare_entity_compile(config: WorkspaceConfig, client: ModelClient, slug: s
 
     return EntityUpdate(
         target_note_path=target_note_path, old_content=old_content, new_content=new_content
+    )
+
+
+def prepare_entity_full_resynthesis(
+    config: WorkspaceConfig, client: ModelClient, slug: str
+) -> EntityUpdate:
+    """Prepare (but don't write) a full resynthesis of one entity's Compiled
+    Truth (`wakil entities compile SLUG --full`, docs/adr/0017 Stage 2).
+
+    Mirrors `prepare_entity_compile`'s shape exactly — resolve slug, read
+    the note, split its sections, load the skill, build the system prompt —
+    with two differences: the user-content prompt comes from
+    `build_full_resynthesis_prompt` (Timeline-only, no `top_section` passed
+    at all, by ADR 0017's own design — see that function's docstring), and
+    the result is allowed to drop redundant or ephemeral content the way
+    additive mode never can. Loads the *same* `entity-compile` skill as the
+    additive path — its "Full resynthesis mode" section supplies the
+    different judgment; there is no second skill file. `ModelContractError`
+    is left to propagate, same reasoning as `prepare_entity_compile`: a
+    single-target CLI command has no partial result worth returning on
+    failure.
+    """
+    target = _resolve_entity_slug(config, slug)
+    if target is None:
+        raise IngestError(f"No entity note found for slug '{slug}'.")
+
+    old_content = target.read_text(encoding="utf-8")
+    try:
+        post = frontmatter_lib.loads(old_content)
+    except Exception as exc:
+        raise IngestError(f"{target}: could not parse frontmatter: {exc}") from exc
+
+    sections = _split_note_sections(post.content)
+    if sections is None:
+        raise IngestError(
+            f"{target}: doesn't match the expected H1 / 'Timeline / Log' shape — "
+            "cannot compile"
+        )
+    h1_line, _top_section, timeline_section = sections
+    entity_name = h1_line.lstrip("#").strip() or slug
+
+    skill = load_skill("entity-compile", config.root_path)
+    system = build_system_prompt(skill, EntityCompileOutput)
+    cacheable_prefix, prompt = build_full_resynthesis_prompt(entity_name, timeline_section)
+    result = complete_with_contract(
+        client, system, prompt, EntityCompileOutput, cacheable_prefix=cacheable_prefix
+    )
+
+    target_note_path = str(target.relative_to(config.root_path))
+    revision = EntityRevision(
+        target_note_path=target_note_path,
+        has_update=True,
+        compiled_truth=result.compiled_truth,
+        timeline_entry=None,
+        frontmatter_updates=None,
+    )
+    today = datetime.now(UTC).date().isoformat()
+    new_content = _merge_entity_note(old_content, revision, today)
+    if new_content is None:
+        # Shouldn't happen — _split_note_sections above already validated
+        # the same shape _merge_entity_note requires — but never silently
+        # fabricate a different result if it does.
+        raise IngestError(f"{target}: merge failed unexpectedly after a successful compile call.")
+
+    return EntityUpdate(
+        target_note_path=target_note_path, old_content=old_content, new_content=new_content
+    )
+
+
+def compiled_truth_text(content: str) -> str | None:
+    """The top (Compiled Truth) section of a full note body — frontmatter
+    parsed off, H1 line and Timeline section excluded — the same slice
+    `_split_note_sections` isolates for `prepare_entity_compile` itself.
+    Used by the CLI's Stage 1 size check (docs/adr/0017) both to measure
+    against `_COMPILED_TRUTH_TARGET_CHARS` and, when the user chooses to
+    hand-edit it, as the text handed to `click.edit()`. Returns None if
+    `content` doesn't parse as frontmatter+body, or doesn't have the
+    expected H1 + 'Timeline / Log' shape — the caller treats that as "can't
+    judge size," not an error, since a `EntityUpdate` already produced by
+    `_merge_entity_note` is expected to always have this shape.
+    """
+    try:
+        post = frontmatter_lib.loads(content)
+    except Exception:
+        return None
+    sections = _split_note_sections(post.content)
+    if sections is None:
+        return None
+    return sections[1]
+
+
+def rebuild_entity_update_with_compiled_truth(
+    update: EntityUpdate, compiled_truth: str
+) -> EntityUpdate | None:
+    """Re-run the deterministic merge (docs/adr/0017, Stage 1's "Edit"
+    choice) with `compiled_truth` — e.g. text a user hand-edited via
+    `click.edit()` — standing in for the model's own output. Always merges
+    against `update.old_content` (the true original on disk), never against
+    `update.new_content`, which already has a compiled truth merged into it
+    once. Returns None if the merge fails unexpectedly — shouldn't happen,
+    since `update.old_content` already passed this same shape check once
+    when `update` was first prepared, but never fabricate a result if it
+    does.
+    """
+    revision = EntityRevision(
+        target_note_path=update.target_note_path,
+        has_update=True,
+        compiled_truth=compiled_truth,
+        timeline_entry=None,
+        frontmatter_updates=None,
+    )
+    today = datetime.now(UTC).date().isoformat()
+    new_content = _merge_entity_note(update.old_content, revision, today)
+    if new_content is None:
+        return None
+    return EntityUpdate(
+        target_note_path=update.target_note_path,
+        old_content=update.old_content,
+        new_content=new_content,
     )
 
 

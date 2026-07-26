@@ -469,3 +469,213 @@ def test_entities_compile_unknown_slug_fails_clearly(kb_path: Path, monkeypatch)
 
     assert result.exit_code == 1
     assert "No entity note found for slug 'nonexistent'" in result.output
+
+
+# --------------------------------------------------------------------------
+# Compiled Truth size-check menu + --full (docs/adr/0017, Stages 1-2).
+
+# Comfortably over _COMPILED_TRUTH_TARGET_CHARS (1400).
+_OVER_TARGET_TRUTH = "**Recruiter** at [[companies/acme|Acme]]. " + (
+    "Extensive detail about this ongoing relationship. " * 30
+)
+assert len(_OVER_TARGET_TRUTH) > 1400
+
+OVER_TARGET_COMPILE_JSON = json.dumps({"compiled_truth": _OVER_TARGET_TRUTH})
+
+
+def test_entities_compile_under_target_shows_no_menu(kb_path: Path, monkeypatch):
+    # Regression test: ordinary (under-target) usage is unaffected by the
+    # size-check menu -- it never appears at all.
+    _client_queue(monkeypatch, FakeCompileClient())
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "entities", "compile", "priya-shah", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "over the" not in result.output
+    assert "Apply as-is" not in result.output
+    assert "Wrote people/priya-shah.md" in result.output
+
+
+def test_entities_compile_over_target_shows_menu_and_apply_as_is(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON,)))
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah"], input="a\ny\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "over the" in result.output
+    assert "Apply as-is / Edit / Full resynthesis / Cancel" in result.output
+    assert "Wrote people/priya-shah.md" in result.output
+    on_disk = (kb_path / "people" / "priya-shah.md").read_text()
+    assert "Extensive detail about this ongoing relationship." in on_disk
+
+
+def test_entities_compile_over_target_cancel_writes_nothing(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON,)))
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+    before = (kb_path / "people" / "priya-shah.md").read_text()
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah"], input="c\n"
+    )
+
+    assert result.exit_code == 0
+    assert "Aborted; nothing was written." in result.output
+    assert (kb_path / "people" / "priya-shah.md").read_text() == before
+
+
+def test_entities_compile_over_target_edit_rejects_empty_edit(kb_path: Path, monkeypatch):
+    # ADR 0017's adversarial review caught this bug: an empty hand-edit must
+    # not be allowed to wipe Compiled Truth via the "Edit" menu choice.
+    _client_queue(monkeypatch, FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON,)))
+    monkeypatch.setattr("click.edit", lambda text=None, **kwargs: "   \n")
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+    before = (kb_path / "people" / "priya-shah.md").read_text()
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah"], input="e\nc\n"
+    )
+
+    assert result.exit_code == 0
+    assert "can't be emptied via edit" in result.output
+    assert "Aborted; nothing was written." in result.output
+    assert (kb_path / "people" / "priya-shah.md").read_text() == before
+
+
+def test_entities_compile_over_target_edit_rejects_timeline_heading_collision(
+    kb_path: Path, monkeypatch
+):
+    # ADR 0017's adversarial review's other caught bug: a hand-edit that
+    # itself contains a "## Timeline" heading must be rejected, or it would
+    # collide with the note's real Timeline section on merge.
+    _client_queue(monkeypatch, FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON,)))
+    monkeypatch.setattr(
+        "click.edit", lambda text=None, **kwargs: "Some prose.\n\n## Timeline\n\nMore prose.\n"
+    )
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+    before = (kb_path / "people" / "priya-shah.md").read_text()
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah"], input="e\nc\n"
+    )
+
+    assert result.exit_code == 0
+    assert "collide" in result.output
+    assert "Aborted; nothing was written." in result.output
+    assert (kb_path / "people" / "priya-shah.md").read_text() == before
+
+
+def test_entities_compile_over_target_edit_cancelled_returns_to_full_menu(
+    kb_path: Path, monkeypatch
+):
+    # click.edit() returning None (nothing saved) is a cancelled edit, not an
+    # empty one -- ADR 0017: it returns to the *same three-choice menu*, not
+    # straight back into the editor the way an empty/colliding edit does.
+    _client_queue(monkeypatch, FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON,)))
+    monkeypatch.setattr("click.edit", lambda text=None, **kwargs: None)
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+    before = (kb_path / "people" / "priya-shah.md").read_text()
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah"], input="e\nc\n"
+    )
+
+    assert result.exit_code == 0
+    assert "Edit cancelled; nothing changed." in result.output
+    assert "Aborted; nothing was written." in result.output
+    assert (kb_path / "people" / "priya-shah.md").read_text() == before
+
+
+def test_entities_compile_over_target_edit_still_over_target_returns_to_full_menu(
+    kb_path: Path, monkeypatch
+):
+    # A real, valid edit that's still over target loops back to the a/e/f/c
+    # menu (ADR 0017), not silently proceeding and not looping the editor
+    # again the way an edit-specific problem (empty/collision) does.
+    _client_queue(monkeypatch, FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON,)))
+    monkeypatch.setattr("click.edit", lambda text=None, **kwargs: _OVER_TARGET_TRUTH)
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+    before = (kb_path / "people" / "priya-shah.md").read_text()
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah"], input="e\nc\n"
+    )
+
+    assert result.exit_code == 0
+    assert "still" in result.output.lower()
+    assert "over the" in result.output
+    assert "Aborted; nothing was written." in result.output
+    assert (kb_path / "people" / "priya-shah.md").read_text() == before
+
+
+def test_entities_compile_over_target_edit_success_applies_edited_text(
+    kb_path: Path, monkeypatch
+):
+    _client_queue(monkeypatch, FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON,)))
+    monkeypatch.setattr(
+        "click.edit", lambda text=None, **kwargs: "Hand-trimmed Compiled Truth, under target."
+    )
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah"], input="e\ny\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Wrote people/priya-shah.md" in result.output
+    on_disk = (kb_path / "people" / "priya-shah.md").read_text()
+    assert "Hand-trimmed Compiled Truth, under target." in on_disk
+    assert "Extensive detail about this ongoing relationship." not in on_disk
+    # Original Timeline entry survives untouched.
+    assert "### 2026-06-01 — recruiter screen" in on_disk
+
+
+def test_entities_compile_over_target_menu_full_resynthesis(kb_path: Path, monkeypatch):
+    # Choosing "f" from the menu reaches full resynthesis without needing
+    # the --full flag -- a second scripted model response is consumed for it.
+    _client_queue(
+        monkeypatch,
+        FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON, COMPILE_JSON)),
+    )
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah"], input="f\ny\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Wrote people/priya-shah.md" in result.output
+    on_disk = (kb_path / "people" / "priya-shah.md").read_text()
+    assert "Now running a second search." in on_disk
+    assert "### 2026-06-01 — recruiter screen" in on_disk
+
+
+def test_entities_compile_full_flag_skips_size_menu_entirely(kb_path: Path, monkeypatch):
+    # --full goes straight to full resynthesis -- no size-check menu, even
+    # though the scripted result is over target, and only one model call.
+    _client_queue(monkeypatch, FakeCompileClient(payloads=(OVER_TARGET_COMPILE_JSON,)))
+    runner.invoke(app, ["init", str(kb_path)])
+    _write_person(kb_path)
+
+    result = runner.invoke(
+        app, ["-w", str(kb_path), "entities", "compile", "priya-shah", "--full", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Apply as-is / Edit / Full resynthesis / Cancel" not in result.output
+    assert "Wrote people/priya-shah.md" in result.output
+    on_disk = (kb_path / "people" / "priya-shah.md").read_text()
+    assert "Extensive detail about this ongoing relationship." in on_disk
+    assert "still over" in result.output
