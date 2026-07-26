@@ -22,7 +22,7 @@ class _FakeCaptureClient:
 
     model = "fake-model"
 
-    def complete(self, system, prompt, max_tokens=8192):
+    def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
         return CAPTURE_METADATA_JSON
 
 

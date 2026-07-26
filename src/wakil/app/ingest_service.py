@@ -1124,9 +1124,13 @@ def _run_entity_updates(
     targets = [(res.target_note_path, content) for res, _, content in candidates]
     skill = load_skill("note-revision", config.root_path)
     system = build_system_prompt(skill, EntityRevisionOutput)
-    prompt = build_revision_prompt(text, proposal.summary, targets, context=proposal.context)
+    cacheable_prefix, prompt = build_revision_prompt(
+        text, proposal.summary, targets, context=proposal.context
+    )
     try:
-        result = complete_with_contract(client, system, prompt, EntityRevisionOutput)
+        result = complete_with_contract(
+            client, system, prompt, EntityRevisionOutput, cacheable_prefix=cacheable_prefix
+        )
     except ModelContractError as exc:
         count = len(candidates)
         entity_word = "entity" if count == 1 else "entities"

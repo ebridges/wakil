@@ -150,7 +150,12 @@ def validate_model_response[T: BaseModel](raw: str, schema: type[T]) -> T:
 
 
 def complete_with_contract[T: BaseModel](
-    client: ModelClient, system: str, prompt: str, schema: type[T]
+    client: ModelClient,
+    system: str,
+    prompt: str,
+    schema: type[T],
+    *,
+    cacheable_prefix: str | None = None,
 ) -> T:
     """One model call validated against `schema`, with a single retry.
 
@@ -161,11 +166,18 @@ def complete_with_contract[T: BaseModel](
     truncate again. Either way, a second failure raises ModelContractError
     with the underlying detail so the caller can surface it visibly instead
     of a bare JSON-parse error.
+
+    `cacheable_prefix` is passed straight through to the client on every
+    attempt, unchanged — only `prompt` grows (the validation-error retry
+    text is appended to it), so the prefix stays byte-identical across
+    retries and is eligible for a prompt-cache hit.
     """
     max_tokens = DEFAULT_MAX_TOKENS
     for attempt in (1, 2):
         try:
-            raw = client.complete(system, prompt, max_tokens=max_tokens)
+            raw = client.complete(
+                system, prompt, max_tokens=max_tokens, cacheable_prefix=cacheable_prefix
+            )
             return validate_model_response(raw, schema)
         except ModelTruncatedError as exc:
             if attempt == 2:

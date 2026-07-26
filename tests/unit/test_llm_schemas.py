@@ -21,9 +21,18 @@ class _ScriptedClient:
     def __init__(self, script):
         self._script = list(script)
         self.calls: list[int] = []
+        self.cacheable_prefixes: list[str | None] = []
 
-    def complete(self, system: str, prompt: str, max_tokens: int = 8192) -> str:
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        max_tokens: int = 8192,
+        *,
+        cacheable_prefix: str | None = None,
+    ) -> str:
         self.calls.append(max_tokens)
+        self.cacheable_prefixes.append(cacheable_prefix)
         step = self._script.pop(0)
         if isinstance(step, Exception):
             raise step
@@ -70,6 +79,15 @@ def test_complete_with_contract_raises_after_second_invalid_response():
     client = _ScriptedClient(["not json", "still not json"])
     with pytest.raises(ModelContractError):
         complete_with_contract(client, "sys", "prompt", _Output)
+
+
+def test_complete_with_contract_passes_cacheable_prefix_unchanged_across_retry():
+    client = _ScriptedClient(["not json", '{"value": "ok"}'])
+    result = complete_with_contract(
+        client, "sys", "prompt", _Output, cacheable_prefix="stable source text"
+    )
+    assert result.value == "ok"
+    assert client.cacheable_prefixes == ["stable source text", "stable source text"]
 
 
 def test_candidate_memory_model_accepts_opinion_type():

@@ -16,7 +16,14 @@ class FakeClient:
         self.answer = answer
         self.calls: list[tuple[str, str]] = []
 
-    def complete(self, system: str, prompt: str, max_tokens: int = 8192) -> str:
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        max_tokens: int = 8192,
+        *,
+        cacheable_prefix: str | None = None,
+    ) -> str:
         self.calls.append((system, prompt))
         return self.answer
 
@@ -70,7 +77,7 @@ def test_query_records_error_when_model_fails(kb_path: Path):
     class ExplodingClient:
         model = "fake-model"
 
-        def complete(self, system, prompt, max_tokens=8192):
+        def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
             raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="boom"):
