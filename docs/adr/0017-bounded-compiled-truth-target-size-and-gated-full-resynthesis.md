@@ -201,8 +201,7 @@ each, and how it did or didn't shape this ADR:
      a CLI offers this, not a bespoke subprocess integration), then:
      - If `click.edit()` returns `None` (the file's mtime never changed —
        Click's own signal for "nothing was saved"), treat this as a
-       cancelled edit and return to this same three-choice menu, not as an
-       empty result.
+       cancelled edit and return to this same three-choice menu.
      - If the returned text is empty or whitespace-only, that is *not*
        silently treated as "no change" the way `_merge_entity_note`
        already (correctly, for its own reason) treats an omitted
@@ -212,14 +211,27 @@ each, and how it did or didn't shape this ADR:
        original over-target text with no error shown. Instead: reject the
        empty result with a clear message ("Compiled Truth can't be
        emptied via edit — write real content, or cancel") and return to
-       the edit choice.
+       this same three-choice menu, the same recovery target as every
+       other reject-and-retry case here — **not** an automatic
+       re-invocation of `click.edit()`. An earlier version of this
+       decision distinguished "return to the menu" from "return straight
+       to editing" for this case; implementing that distinction literally
+       produces a genuine, demonstrated infinite loop, because
+       `click.edit()` can return the exact same invalid content on every
+       call (a misconfigured `$EDITOR`, or a user re-saving the same
+       mistake) and an automatic retry has no bound and no way out short
+       of eventually producing valid text. Caught by writing the actual
+       code and running the test suite, not by review of the design alone
+       — see `docs/TROUBLESHOOTING.md`. One extra keystroke to reselect
+       "Edit" is a small cost for removing a real hang risk.
      - If the returned text itself contains a line matching
        `_TIMELINE_HEADING_RE` (e.g. the user pastes or writes their own
        "## Timeline" subheading), reject it before it's ever written — a
        future `_split_note_sections` call on this note would match that
        line instead of the real Timeline heading further down, silently
        corrupting the top/Timeline boundary for every subsequent merge or
-       compile. Report the conflict and return to the edit choice.
+       compile. Report the conflict and return to this same three-choice
+       menu, for the same reason as the empty-result case above.
      - Otherwise, re-run the same size check against the edited text. If
        it's still over target, loop back to this three-choice menu rather
        than silently proceeding — the menu fires until the size check
