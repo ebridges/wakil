@@ -353,6 +353,23 @@ def print_migration_diffs(proposals) -> None:
         )
 
 
+def print_schema_validation(results) -> bool:
+    """Print one line (or more, on error) per file; returns True if any failed."""
+    has_errors = False
+    for result in results:
+        if result.load_error is not None:
+            has_errors = True
+            console.print(f"[red]✗ {result.path}[/red]: {result.load_error}")
+        elif result.errors:
+            has_errors = True
+            console.print(f"[red]✗ {result.path}[/red]")
+            for error in result.errors:
+                console.print(f"  [red]•[/red] {error}")
+        else:
+            console.print(f"[green]✓ {result.path}[/green]")
+    return has_errors
+
+
 _STATE_STYLES = {
     "durable": "green",
     "candidate": "yellow",
