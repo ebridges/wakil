@@ -3001,12 +3001,12 @@ def test_stub_for_unrelated_subject_leaves_proposed_note_unchanged(workspace):
 
 
 # --------------------------------------------------------------------------
-# Issue #92: a bare `type:` relabel leaves the old type's frontmatter fields
-# in place and never backfills the new type's required fields, so a
-# type-correction between schemas with different required fields produced
-# frontmatter that failed validate_proposal's schema check -- reproducing
-# the "0 files written" symptom via _correct_proposed_note_type instead of
-# validate_proposal ever getting a chance to run.
+# Issue #92: Changing only the `type` field left fields from the old schema
+# in place and did not add fields required by the new schema. As a result,
+# correcting a proposal from one type to another produced invalid
+# frontmatter. `_correct_proposed_note_type` rejected the proposal before
+# `validate_proposal` ran, resulting in the observed "0 files written"
+# behavior.
 
 
 def test_stub_match_with_different_type_backfills_required_field_from_proposed_frontmatter(

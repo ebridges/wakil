@@ -990,19 +990,28 @@ def _populate_type_frontmatter(
     fallback_label: str,
     today: str,
 ) -> dict:
-    """Field population shared by every path that writes a note under
-    `schema` for the first time: fresh stub creation (`_build_stub_entities`)
-    and type-correction (`_correct_proposed_note_type`, issue #92).
+    """Build frontmatter for a note being written under a schema for the first time.
 
-    Picks the label field by `schema.category` (`title` for `document`,
-    `name` otherwise), merges `proposed_frontmatter` on top (entity
-    resolution's own field-value guesses for the type it's proposing --
-    the model fills these to satisfy that type's schema), and backfills
-    `created`/`updated` with `today` when the schema defines them and
-    nothing already supplied a value. `fallback_label` is used for the
-    label field only when `proposed_frontmatter` doesn't supply one --
-    a fresh stub falls back to `resolution.name`; a type-correction falls
-    back to the existing note's own `name`/`title` value.
+    Used both when creating a new stub in `_build_stub_entities` and when
+    changing an existing proposal's type in `_correct_proposed_note_type`
+    (issue #92).
+
+    The returned frontmatter:
+
+    - sets `type` to `entity_type`;
+    - uses `title` as the label field for document schemas and `name` for
+      all other schemas;
+    - uses the proposed label when it is present and truthy, otherwise
+      uses `fallback_label`;
+    - copies the remaining fields from `proposed_frontmatter`; and
+    - sets `created` and `updated` to `today` when those fields are defined
+      by the schema but do not already have a value.
+
+    Any `type` value in `proposed_frontmatter` is ignored so that it cannot
+    override `entity_type`.
+
+    For a new stub, `fallback_label` is typically `resolution.name`. During
+    type correction, it is typically the existing note's `name` or `title`.
     """
     proposed = dict(proposed_frontmatter or {})
     proposed.pop("type", None)
