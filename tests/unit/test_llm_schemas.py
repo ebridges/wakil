@@ -7,7 +7,9 @@ from wakil.llm.schemas import (
     EntityCompileOutput,
     EntityResolution,
     EntityRevision,
+    ExtractionOutput,
     ModelContractError,
+    ProposedNoteModel,
     complete_with_contract,
 )
 
@@ -178,6 +180,55 @@ def test_entity_resolution_rejects_out_of_range_proposed_frontmatter_confidence(
         EntityResolution(
             name="X", entity_type="book", action="create", proposed_frontmatter_confidence=-0.1
         )
+
+
+def test_proposed_note_model_frontmatter_confidence_defaults_to_none():
+    note = ProposedNoteModel(path="books/some-book.md", markdown="# Some Book\n")
+    assert note.frontmatter_confidence is None
+
+
+def test_proposed_note_model_accepts_valid_frontmatter_confidence():
+    note = ProposedNoteModel(
+        path="books/some-book.md", markdown="# Some Book\n", frontmatter_confidence=0.2
+    )
+    assert note.frontmatter_confidence == 0.2
+
+
+def test_proposed_note_model_accepts_boundary_frontmatter_confidence():
+    assert (
+        ProposedNoteModel(
+            path="books/some-book.md", markdown="# Some Book\n", frontmatter_confidence=0.0
+        ).frontmatter_confidence
+        == 0.0
+    )
+    assert (
+        ProposedNoteModel(
+            path="books/some-book.md", markdown="# Some Book\n", frontmatter_confidence=1.0
+        ).frontmatter_confidence
+        == 1.0
+    )
+
+
+def test_proposed_note_model_rejects_out_of_range_frontmatter_confidence():
+    with pytest.raises(ValidationError):
+        ProposedNoteModel(
+            path="books/some-book.md", markdown="# Some Book\n", frontmatter_confidence=1.5
+        )
+    with pytest.raises(ValidationError):
+        ProposedNoteModel(
+            path="books/some-book.md", markdown="# Some Book\n", frontmatter_confidence=-0.1
+        )
+
+
+def test_extraction_output_carries_proposed_note_frontmatter_confidence():
+    output = ExtractionOutput(
+        proposed_note=ProposedNoteModel(
+            path="books/some-book.md",
+            markdown="# Some Book\n",
+            frontmatter_confidence=0.3,
+        )
+    )
+    assert output.proposed_note.frontmatter_confidence == 0.3
 
 
 def test_candidate_memory_model_accepts_valid_stance_values():

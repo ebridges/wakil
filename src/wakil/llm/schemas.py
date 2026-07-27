@@ -68,6 +68,21 @@ class CandidateRelationshipModel(BaseModel):
 class ProposedNoteModel(BaseModel):
     path: str = Field(description="Workspace-relative Markdown path for the new note.")
     markdown: str = Field(description="Full note content including YAML frontmatter.")
+    frontmatter_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="How well-supported markdown's frontmatter field values are by "
+        "the source, not whether creating the note at all was warranted (this is "
+        "extraction's own proposed_note, not an entity-resolution create, so the "
+        "concept mirrors `EntityResolution.proposed_frontmatter_confidence` here). "
+        "A field asserted from thin or ambiguous evidence (e.g. a book's `status: "
+        "finished` inferred from a single early highlight with no explicit "
+        "completion signal) gets low confidence even though the note clearly "
+        "merits creation; a clearly-stated field gets high confidence. Omit or "
+        "leave null when the source's support is unambiguous enough that a "
+        "confidence figure wouldn't add information.",
+    )
 
 
 class ExtractionOutput(BaseModel):

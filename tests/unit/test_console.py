@@ -145,3 +145,43 @@ def test_high_confidence_new_entity_page_is_not_flagged(capsys):
     assert "LOW-CONFIDENCE" not in out
     assert "Flagged for review" not in out
     assert "confidence 0.90" in out
+
+
+def test_low_confidence_proposed_note_is_flagged_for_review(capsys):
+    # Fresh-primary-entity counterpart of #72/#39: extraction's own
+    # proposed_note (a brand-new book/article page, not a stub built from
+    # entity-resolution) must be flagged the same way when its frontmatter
+    # was inferred from thin evidence (issue #93).
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Test",
+        proposed_note=ProposedFile(
+            path="books/some-book.md",
+            content="---\ntype: book\n---\n",
+            confidence=0.2,
+        ),
+    )
+    console.width = 200
+    print_enrichment_proposal(proposal)
+    out = capsys.readouterr().out
+    assert "LOW-CONFIDENCE" in out
+    assert "Flagged for review" in out
+    assert "books/some-book.md" in out
+
+
+def test_high_confidence_proposed_note_is_not_flagged(capsys):
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Test",
+        proposed_note=ProposedFile(
+            path="books/some-book.md",
+            content="---\ntype: book\n---\n",
+            confidence=0.9,
+        ),
+    )
+    console.width = 200
+    print_enrichment_proposal(proposal)
+    out = capsys.readouterr().out
+    assert "LOW-CONFIDENCE" not in out
+    assert "Flagged for review" not in out
+    assert "confidence 0.90" in out
