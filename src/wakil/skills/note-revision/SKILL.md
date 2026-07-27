@@ -109,6 +109,16 @@ the text itself never mentions is a known, out-of-scope gap for now (see
 `content-synthesis`'s own note on this boundary) — this step preserves what
 was already referenced, it does not scan folders for what wasn't.
 
+Write a newly-introduced `![[target|alias]]` embed's target as whatever
+path is available — a bare filename is fine. The engine itself (not this
+skill) normalizes any embed target this revision newly introduces to the
+destination entity's own sibling attachment folder, vault-root-absolute,
+before writing (issue #76); a pre-existing embed already on the page is
+left exactly as it was. This does not copy the referenced file anywhere —
+only the reference's path is corrected. Until a file is actually placed at
+the normalized path, the link still resolves to nothing on disk; that gap
+is tracked separately, not by this skill.
+
 ## The three-tier dedup heuristic
 
 Before merging a new fact into an existing note (especially a

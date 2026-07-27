@@ -34,7 +34,7 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import frontmatter as frontmatter_lib
 import yaml
@@ -1296,6 +1296,65 @@ def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
 
 _TRAILING_HR_RE = re.compile(r"\n*-{3,}\s*$")
 
+# Embed form per note-conformance/SKILL.md: `![[target|alias]]` — target
+# first, alias second, same order as a plain wikilink but with the leading
+# `!`. Deliberately distinct from `_WIKILINK_RE` (wakil.knowledge.wikilinks):
+# reusing that regex here would also rewrite plain `[[wikilink]]` references,
+# which aren't attachments and must never be re-pathed by this logic.
+_EMBED_RE = re.compile(r"!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
+
+
+def _entity_attachment_dir(target_note_path: str) -> str:
+    """Vault-root-absolute sibling attachment folder for an entity note,
+    named exactly after the note's own filename — RESOLVER.md rule 5's
+    convention (issue #76): `projects/pencil-box.md` -> `projects/pencil-box`.
+    """
+    note_path = PurePosixPath(target_note_path)
+    return str(note_path.parent / note_path.stem)
+
+
+def _normalize_new_embed_paths(old_content: str, text: str, target_note_path: str) -> str:
+    """Rewrite embed targets this revision newly introduces to a
+    vault-root-absolute path under the destination entity's own sibling
+    attachment folder (issue #76), instead of leaving whatever bare-filename
+    or source-relative path the model wrote verbatim — which never resolves
+    from the vault root and leaves the link permanently dangling.
+
+    Conservative by design:
+    - An embed whose exact `![[...]]` text already appears anywhere in
+      `old_content` is left untouched — this only normalizes references the
+      merge is newly adding, never something already on the page (which may
+      have been placed there deliberately, by a human edit or a prior pass).
+    - An embed target that's an external URL (`http://`/`https://`) is left
+      alone; the sibling-attachment convention only applies to local files.
+    - This never copies or touches any file on disk. wakil has no existing
+      mechanism, on any path (create or update), for locating or copying an
+      attachment file into the vault — the capture pipeline stores only
+      extracted text, never a source's original binary attachments, and raw
+      captures share a common bucket directory rather than an isolated
+      per-source one. Building that is a materially larger, separate
+      problem (issue #76's PR notes it as follow-up, not fixed here); this
+      function only makes the resulting reference point at the right place
+      once a file *is* dropped there by hand.
+    """
+    attachment_dir = _entity_attachment_dir(target_note_path)
+
+    def _replace(match: re.Match) -> str:
+        whole = match.group(0)
+        if whole in old_content:
+            return whole  # pre-existing embed, carried forward verbatim
+        target = match.group(1).strip()
+        alias = match.group(2)
+        if target.lower().startswith(("http://", "https://")):
+            return whole
+        basename = target.rsplit("/", 1)[-1]
+        expected = f"{attachment_dir}/{basename}"
+        if target == expected:
+            return whole
+        return f"![[{expected}|{alias}]]" if alias is not None else f"![[{expected}]]"
+
+    return _EMBED_RE.sub(_replace, text)
+
 
 def _split_note_sections(content: str) -> tuple[str, str, str] | None:
     """Locate an entity note body's three load-bearing pieces: the H1 line,
@@ -1357,8 +1416,18 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
     # model didn't re-send it is the exact clobbering bug this merge exists
     # to prevent (docs/TROUBLESHOOTING.md).
     compiled_truth = (revision.compiled_truth or "").strip() or old_top
+    target_note_path = revision.target_note_path
+    # Issue #76: any embed this revision newly introduces gets its target
+    # normalized to the destination entity's own sibling attachment folder,
+    # vault-root-absolute, rather than whatever bare/relative path the
+    # model wrote. Pre-existing embeds (already in old_content) are left
+    # untouched by this call — see _normalize_new_embed_paths.
+    compiled_truth = _normalize_new_embed_paths(old_content, compiled_truth, target_note_path)
+    timeline_entry = _normalize_new_embed_paths(
+        old_content, revision.timeline_entry or "", target_note_path
+    )
     new_top = f"{h1_line}\n\n{compiled_truth}\n\n---" if compiled_truth else h1_line
-    new_timeline = _insert_timeline_entry(timeline_section, revision.timeline_entry or "")
+    new_timeline = _insert_timeline_entry(timeline_section, timeline_entry)
 
     new_body = f"{new_top}\n\n{new_timeline}".rstrip("\n") + "\n"
     frontmatter_yaml = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)

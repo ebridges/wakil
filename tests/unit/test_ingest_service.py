@@ -15,9 +15,11 @@ from wakil.app.ingest_service import (
     IngestError,
     ProposedFile,
     _candidate_entity_notes,
+    _entity_attachment_dir,
     _is_noise_candidate,
     _is_unpopulated_stub,
     _merge_entity_note,
+    _normalize_new_embed_paths,
     _require_workspace_ids,
     _split_candidates_by_content_length,
     _split_note_sections,
@@ -932,6 +934,144 @@ def test_merge_entity_note_returns_none_for_unexpected_shape(workspace):
         timeline_entry="### 2026-07-16 — x\n- y",
     )
     assert _merge_entity_note(minimal, revision, "2026-07-16") is None
+
+
+# --------------------------------------------------------------------------
+# Issue #76: embed path normalization on the update/merge path
+
+
+def test_entity_attachment_dir_is_sibling_named_after_note_file():
+    assert _entity_attachment_dir("projects/pencil-box.md") == "projects/pencil-box"
+    # No parent directory: still just the bare stem, no leading "./" cruft.
+    assert _entity_attachment_dir("pencil-box.md") == "pencil-box"
+
+
+def test_merge_entity_note_normalizes_new_bare_filename_embed_to_vault_root_absolute(workspace):
+    # The reproduction in issue #76: the model writes a newly-introduced
+    # embed as a bare filename (or some other verbatim, non-vault-rooted
+    # path) rather than an absolute path from the vault root.
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth. ![[box-1.jpg|Build photo]]",
+        timeline_entry="### 2026-07-16 — new photos\n- New build photo.",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16")
+
+    assert new_content is not None
+    assert "![[people/priya-shah/box-1.jpg|Build photo]]" in new_content
+    assert "![[box-1.jpg|Build photo]]" not in new_content
+
+
+def test_merge_entity_note_normalizes_new_embed_introduced_via_timeline_entry(workspace):
+    # Same defect, but the new reference lands via the Timeline entry rather
+    # than the re-synthesized Compiled Truth -- both must be normalized.
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth=None,
+        timeline_entry="### 2026-07-16 — new photos\n- See ![[photos/box-2.jpg]].",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16")
+
+    assert new_content is not None
+    assert "![[people/priya-shah/box-2.jpg]]" in new_content
+    assert "![[photos/box-2.jpg]]" not in new_content
+
+
+def test_merge_entity_note_leaves_preexisting_embed_untouched(workspace):
+    # An embed already on the page (carried forward verbatim per
+    # note-revision/SKILL.md's attachment-fidelity duty) is left exactly as
+    # it was -- only a genuinely *new* reference gets normalized. Also
+    # covers the case where the pre-existing embed is deliberately NOT
+    # already vault-root-absolute: this function's job is only to fix
+    # newly-introduced references, not to retroactively repair old ones.
+    existing = REAL_SHAPED_PERSON.replace(
+        "**Recruiter** at [[companies/acme|Acme]].",
+        "**Recruiter** at [[companies/acme|Acme]]. ![[legacy/odd-path.jpg|Old photo]]",
+    )
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        # The model re-sends the pre-existing embed verbatim (as it must)
+        # alongside one genuinely new reference.
+        compiled_truth="**Recruiter** at [[companies/acme|Acme]]. "
+        "![[legacy/odd-path.jpg|Old photo]] ![[box-1.jpg|New photo]]",
+        timeline_entry="### 2026-07-16 — update\n- detail",
+    )
+    new_content = _merge_entity_note(existing, revision, "2026-07-16")
+
+    assert new_content is not None
+    # Pre-existing embed: untouched, not "fixed" to the sibling convention.
+    assert "![[legacy/odd-path.jpg|Old photo]]" in new_content
+    # Newly-introduced embed: normalized.
+    assert "![[people/priya-shah/box-1.jpg|New photo]]" in new_content
+    assert "![[box-1.jpg|New photo]]" not in new_content
+
+
+def test_merge_entity_note_no_attachment_references_is_unaffected(workspace):
+    # No-regression case: an update with no `![[...]]` embeds at all
+    # (the common case) merges exactly as before -- and, notably, a plain
+    # `[[wikilink]]` (no leading "!") is never mistaken for an embed and
+    # rewritten into the attachment folder.
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="**Recruiter** at [[companies/acme|Acme]]. Now running a second search.",
+        timeline_entry="### 2026-07-16 — second search kicked off\n- New role, same recruiter.",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16")
+
+    assert new_content is not None
+    # Plain wikilink survives verbatim -- never rewritten into the
+    # attachment-folder convention, which only applies to `![[...]]` embeds.
+    assert "[[companies/acme|Acme]]" in new_content
+    assert "priya-shah/" not in new_content
+
+
+def test_normalize_new_embed_paths_ignores_external_urls():
+    old_content = "no embeds here"
+    text = "See ![[https://example.com/photo.jpg|External]] for context."
+    result = _normalize_new_embed_paths(old_content, text, "people/priya-shah.md")
+    assert result == text
+
+
+def test_entity_update_normalizes_new_embed_path_end_to_end(workspace, transcript, kb_path):
+    # Full prepare_enrichment path (issue #76's actual reproduction shape):
+    # a merge introduces a new attachment reference and the resulting
+    # EntityUpdate.new_content must carry the vault-root-absolute form, not
+    # whatever verbatim path the model wrote.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth. ![[box-1.jpg|Build photo]]",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    update = proposal.entity_updates[0]
+    assert "![[people/priya-shah/box-1.jpg|Build photo]]" in update.new_content
+    assert "![[box-1.jpg|Build photo]]" not in update.new_content
 
 
 def test_is_unpopulated_stub_true_for_fresh_stub_content():
