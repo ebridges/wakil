@@ -49,6 +49,20 @@ nature go unrecorded. An index that gets no resolution of its own
 vanishes from the output with no visible trace that anything was
 skipped.
 
+Resolving that index entity as `entity_type: index` is not automatic,
+though — check first whether it even needs the cross-cutting MOC/
+navigation type at all. A list confined to one category (a woodworking
+project-list, a single project's own task index) is category content,
+not vault-wide navigation, and belongs to that category's own type —
+project, reference, whichever sibling notes filed under the same
+directory already use — by the same category-context and sibling-
+precedent signal the Rules section below applies to reference material.
+`index` has `directory: null`: no canonical destination, a deliberate
+design choice for genuine cross-category navigation, and a dead end for
+anything else. Reserve it for a list that truly spans multiple
+categories; don't let it become the default landing type for every
+source that merely happens to be list-shaped.
+
 Notability gate — apply before every create, not after: a missing page
 costs nothing (it can be created the next time the entity actually
 matters); a junk page costs real attention and degrades search for
