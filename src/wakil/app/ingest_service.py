@@ -280,6 +280,10 @@ def prepare_capture(
                 text = clean_transcript(text)
                 meeting_date = infer_meeting_date(file, text)
         origin = _relative_origin(config, file)
+        # Strip a leading date off the origin filename's own stem (falling
+        # back to the unstripped stem when the filename is nothing *but* a
+        # date, e.g. "2014-02-17.md" -- see _build_raw_file, which must not
+        # repeat this strip, for why that fallback matters).
         stem = _LEADING_DATE_RE.sub("", file.stem) or file.stem
         # Deterministic basis for the raw file's slug only -- see below,
         # this is intentionally never overwritten by the model's title.
@@ -2665,9 +2669,14 @@ def _build_raw_file(
     """
     created = datetime.now(UTC).date().isoformat()
     directory = Path(config.ingest_directory) / RAW_DIRS.get(proposal.source_type, "clippings")
+    # slug_source already had any leading date stripped (for file-derived
+    # captures, in prepare_capture; article titles never carry one to begin
+    # with) -- re-stripping here would double-apply _LEADING_DATE_RE and, for
+    # a source filename that was itself nothing but a date, collapse an
+    # already-empty-then-restored stem to "untitled" a second time (#79).
+    # slugify() itself still falls back to "untitled" for genuinely
+    # content-free input (e.g. an all-punctuation title).
     slug = slugify(slug_source)
-    # Avoid a doubled date when the source filename already carried one.
-    slug = _LEADING_DATE_RE.sub("", slug) or "untitled"
     base = f"{proposal.meeting_date or created}-{slug}"
     path = _unused_path(config.root_path, directory, base)
 
