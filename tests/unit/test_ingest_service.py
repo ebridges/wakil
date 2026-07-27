@@ -1320,6 +1320,139 @@ def test_stub_kept_when_create_subject_differs_from_update_target(
     )
 
 
+# --------------------------------------------------------------------------
+# Issue #60: dated journal/meeting stubs are redundant once this same
+# source has already merged into an existing accumulating entity via an
+# update in this same proposal -- even though the dated record's own
+# name/slug (a date/topic) never matches the update target's slug, so
+# _suppress_stubs_matching_updates's own slug-matching can't catch it.
+
+
+def test_dated_record_stub_suppressed_when_source_already_merged_via_update(
+    workspace, transcript, kb_path
+):
+    # Priya Shah's page gets a real Timeline update, but entity resolution
+    # ALSO independently proposes a `journal` create whose name/slug is a
+    # date+topic entirely unrelated to "priya-shah" -- exactly the shape
+    # _suppress_stubs_matching_updates cannot catch (issue #60). It must
+    # still be suppressed, because this same source already has a home.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "2014-05-17 Elektrum VPC Subnet Layout Finalized",
+                "entity_type": "journal",
+                "action": "create",
+                "confidence": 0.7,
+            },
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.stub_entities == []
+    assert any(
+        "journal/2014-05-17-elektrum-vpc-subnet-layout-finalized.md" in warning
+        and "already merged into an existing entity" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_dated_record_stub_kept_when_no_entity_updates_applied(workspace, transcript, kb_path):
+    # No regression: a `journal` create with no entity_updates at all in
+    # this proposal (a genuinely new, unrelated record) must still get its
+    # stub -- the new suppression only fires alongside an applied update.
+    resolution = {
+        "entities": [
+            {
+                "name": "2014-05-17 Elektrum VPC Subnet Layout Finalized",
+                "entity_type": "journal",
+                "action": "create",
+                "confidence": 0.7,
+            },
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution])  # no update actions -> no 3rd call
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.entity_updates == []
+    assert [stub.path for stub in proposal.stub_entities] == [
+        "journal/2014-05-17-elektrum-vpc-subnet-layout-finalized.md"
+    ]
+    assert not any(
+        "already merged into an existing entity" in warning for warning in proposal.warnings
+    )
+
+
+def test_stub_kept_for_type_outside_narrow_dated_record_scope(workspace, transcript, kb_path):
+    # No over-suppression: a create for a type NOT in the narrow
+    # journal/meeting scope (a legitimate new hobby-project, say) must keep
+    # its stub even when this same proposal also applies an unrelated
+    # entity update -- the fix is deliberately scoped to journal/meeting,
+    # not every type that could share a source with an update.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "Elektrum",
+                "entity_type": "project",
+                "action": "create",
+                "confidence": 0.8,
+            },
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert [stub.path for stub in proposal.stub_entities] == ["projects/elektrum.md"]
+    assert not any(
+        "already merged into an existing entity" in warning for warning in proposal.warnings
+    )
+
+
 @pytest.mark.parametrize("relevance", ["minor", "peripheral"])
 def test_entity_update_excluded_when_relevance_below_threshold(
     workspace, transcript, kb_path, relevance
