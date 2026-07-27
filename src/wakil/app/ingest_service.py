@@ -69,7 +69,7 @@ from wakil.llm.schemas import (
     complete_with_contract,
 )
 from wakil.llm.skill_loader import SkillLoadError, build_system_prompt, load_skill
-from wakil.schema.loader import load_entity_schemas, resolve_page_shape_template
+from wakil.schema.loader import EntitySchema, load_entity_schemas, resolve_page_shape_template
 from wakil.schema.validate import validate_frontmatter
 from wakil.storage.schema import (
     IngestRun,
@@ -953,6 +953,52 @@ def _proposed_note_subject_slug(proposed_note: ProposedFile | None) -> str | Non
     return slugify(subject)
 
 
+def _correct_proposed_note_type(
+    proposed_note: ProposedFile,
+    resolution: EntityResolution,
+    schema: EntitySchema,
+    proposal: "EnrichmentProposal",
+) -> ProposedFile:
+    """When a create-resolution's subject matches proposed_note's own
+    subject (see `_proposed_note_subject_slug`) but entity-resolution
+    disagrees with proposed_note's own `type:`, entity-resolution's decision
+    wins: it runs after extraction and gets to see sibling precedents and
+    the full entity catalog that extraction never had (issue #73).
+    Previously only the redundant stub was suppressed in this case, leaving
+    extraction's earlier, less-informed type on disk uncorrected.
+
+    Only the frontmatter `type:` and the file's directory move; the
+    synthesized markdown body (and its own filename slug, already
+    normalized by `_sanitize_note`) is left untouched -- mirrors
+    `_reslug_proposed_note`'s "record the correction, never apply it
+    invisibly" pattern. Returns `proposed_note` unchanged when the types
+    already agree (including when the note's own frontmatter doesn't parse,
+    or carries no `type:` at all -- validate_proposal's own type check
+    catches that separately).
+    """
+    try:
+        post = frontmatter_lib.loads(proposed_note.content)
+    except Exception:
+        return proposed_note
+    metadata = post.metadata if isinstance(post.metadata, dict) else {}
+    old_type = metadata.get("type")
+    if old_type == resolution.entity_type:
+        return proposed_note
+
+    new_metadata = dict(metadata)
+    new_metadata["type"] = resolution.entity_type
+    frontmatter_yaml = yaml.safe_dump(new_metadata, sort_keys=False, allow_unicode=True)
+    new_content = f"---\n{frontmatter_yaml}---\n\n{post.content}"
+    new_path = f"{schema.directory}/{Path(proposed_note.path).name}"
+
+    proposal.warnings.append(
+        f"Corrected the proposed note's type from '{old_type}' to "
+        f"'{resolution.entity_type}' (moving it from {proposed_note.path} to {new_path}) "
+        "to match entity-resolution's decision for the same subject"
+    )
+    return ProposedFile(path=new_path, content=new_content)
+
+
 def _is_source_self_mirror(resolution: EntityResolution, proposal: EnrichmentProposal) -> bool:
     """Would this `entity_type: source` create just mirror the very source
     being enriched (see issue #58)?
@@ -1052,6 +1098,14 @@ def _build_stub_entities(
             continue
         resolution_slug = slugify(resolution.name)
         if proposed_note_slug is not None and resolution_slug == proposed_note_slug:
+            if proposal.proposed_note is not None:
+                old_path = proposal.proposed_note.path
+                proposal.proposed_note = _correct_proposed_note_type(
+                    proposal.proposed_note, resolution, schema, proposal
+                )
+                if proposal.proposed_note.path != old_path:
+                    taken.discard(old_path)
+                    taken.add(proposal.proposed_note.path)
             proposal.warnings.append(
                 f"{resolution.name}: already represented by the proposed note "
                 f"({proposal.proposed_note.path}) — not creating a duplicate page"
