@@ -38,7 +38,10 @@ synthesis.
   URL, from the article into the proposed note — as an embed or link where
   the page shape supports one, otherwise in an explicit attachments list.
   Never mention an attachment in prose without preserving its actual
-  reference, and never drop one silently.
+  reference, and never drop one silently. This covers only what the
+  article's own text references inline; a sibling file sitting in the
+  capture's folder that the article text never mentions is a known,
+  out-of-scope gap, not something to hunt for.
 - Memories must be grounded in the article; never invent facts. Mark
   uncertainty explicitly. This covers the proposed note's body too, not just
   memories: a page-shape section like Open threads must reflect what the

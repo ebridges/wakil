@@ -75,7 +75,10 @@ attachments, and to raw URLs (a YouTube link, a shopping link, a reference
 link) present in the source: carry each one into the note as an embed or
 link where the page shape supports one, otherwise list it explicitly (e.g.
 an "Attachments" section), rather than replacing it with a prose-only
-description or dropping it without mention.
+description or dropping it without mention. This covers only what the
+source's own text references inline; a sibling file sitting in the
+source's folder that its text never mentions is a known, out-of-scope gap
+for now, not something this step scans for.
 
 ## "Why it matters" ties to specific knowledge, never a generic statement
 

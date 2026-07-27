@@ -220,11 +220,17 @@ relative" rule itself is non-negotiable regardless of workspace.
 links" below.
 
 **Embeds** use `![[target|alias]]` — target first, alias second, the same
-order as a plain wikilink. `![[diagram.png|Sapwood diagram]]` embeds
-`diagram.png` and displays it captioned "Sapwood diagram." The reversed
-order, `![[Sapwood diagram|diagram.png]]`, is wrong: it embeds a file
-literally named `Sapwood diagram` and captions it `diagram.png` — a broken
-embed, not a captioned one. The alias is always optional and always second.
+order as a plain wikilink. The target follows the same path rule as
+`[[wikilinks]]` in Links above: an absolute path from the vault root, never
+a bare filename and never a path resolved relative to the note's own
+directory. `![[attachments/Sapwood/diagram.png|Sapwood diagram]]` embeds
+that file and displays it captioned "Sapwood diagram." The reversed order,
+`![[Sapwood diagram|attachments/Sapwood/diagram.png]]`, is wrong: it embeds
+a file literally named `Sapwood diagram` and captions it with the path — a
+broken embed, not a captioned one. A bare-filename target such as
+`![[diagram.png|Sapwood diagram]]` is a conformance failure even when the
+argument order is right, the same as an unresolvable relative wikilink. The
+alias is always optional and always second.
 
 ## No-slop output bar
 
