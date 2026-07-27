@@ -49,6 +49,7 @@ from wakil.config.settings import WorkspaceConfig
 from wakil.llm.client import ModelTruncatedError
 from wakil.llm.schemas import EntityResolution, EntityRevision, ModelContractError
 from wakil.schema.loader import load_entity_schemas
+from wakil.schema.validate import validate_frontmatter
 from wakil.storage.schema import IngestRun, Memory, Note, Relationship, Source
 
 MODEL_JSON = {
@@ -2957,6 +2958,90 @@ def test_stub_for_unrelated_subject_leaves_proposed_note_unchanged(workspace):
     assert proposal.proposed_note.path == "concepts/guns-germs.md"
     assert proposal.proposed_note.content == original_content
     assert not any("Corrected the proposed note's type" in warning for warning in proposal.warnings)
+
+
+# --------------------------------------------------------------------------
+# Issue #92: a bare `type:` relabel leaves the old type's frontmatter fields
+# in place and never backfills the new type's required fields, so a
+# type-correction between schemas with different required fields produced
+# frontmatter that failed validate_proposal's schema check -- reproducing
+# the "0 files written" symptom via _correct_proposed_note_type instead of
+# validate_proposal ever getting a chance to run.
+
+
+def test_stub_match_with_different_type_backfills_required_field_from_proposed_frontmatter(
+    workspace,
+):
+    # concept has no equivalent of person's required `status` -- a bare
+    # relabel would leave it missing entirely. entity-resolution's own
+    # proposed_frontmatter (the model's guess to satisfy the type it's
+    # proposing) is what supplies it.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Dana Prieto",
+        entity_resolutions=[
+            EntityResolution(
+                name="Dana Prieto",
+                entity_type="person",
+                action="create",
+                proposed_frontmatter={"status": "contact"},
+            ),
+        ],
+    )
+    proposal.proposed_note = ProposedFile(
+        path="concepts/dana-prieto.md",
+        content=(
+            "---\ntype: concept\nname: Dana Prieto\ncreated: 2026-07-09\n---\n\n"
+            "# Dana Prieto\n\nSynthesized body prose that must survive untouched.\n"
+        ),
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert stubs == []
+    assert proposal.proposed_note.path == "people/dana-prieto.md"
+    metadata = frontmatter.loads(proposal.proposed_note.content).metadata
+    assert metadata["type"] == "person"
+    assert metadata["name"] == "Dana Prieto"
+    assert metadata["status"] == "contact"
+    errors = validate_frontmatter("person", metadata, workspace.root_path)
+    assert errors == []
+    assert "Synthesized body prose that must survive untouched." in proposal.proposed_note.content
+
+
+def test_stub_match_with_disjoint_required_fields_validates_after_correction(workspace):
+    # index (title/tags/created) -> project (name/created/updated): no
+    # required field in common except created. The label fallback (index's
+    # own title, since proposed_frontmatter supplies no name) and the
+    # created/updated backfill must both kick in for the result to validate.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Reading List",
+        entity_resolutions=[
+            EntityResolution(name="Reading List", entity_type="project", action="create"),
+        ],
+    )
+    proposal.proposed_note = ProposedFile(
+        path="drafts/reading-list.md",
+        content=(
+            "---\ntype: index\ntitle: Reading List\ntags: [books]\ncreated: 2026-07-09\n---\n\n"
+            "# Reading List\n\nSynthesized body prose that must survive untouched.\n"
+        ),
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert stubs == []
+    assert proposal.proposed_note.path == "projects/reading-list.md"
+    metadata = frontmatter.loads(proposal.proposed_note.content).metadata
+    assert metadata["type"] == "project"
+    # index's `title` becomes project's `name` fallback.
+    assert metadata["name"] == "Reading List"
+    assert "created" in metadata
+    assert "updated" in metadata
+    errors = validate_frontmatter("project", metadata, workspace.root_path)
+    assert errors == []
+    assert "Synthesized body prose that must survive untouched." in proposal.proposed_note.content
 
 
 def test_index_source_create_does_not_block_apply(workspace, transcript):

@@ -975,6 +975,41 @@ def _proposed_note_subject_slug(proposed_note: ProposedFile | None) -> str | Non
     return slugify(subject)
 
 
+def _populate_type_frontmatter(
+    schema: EntitySchema,
+    entity_type: str,
+    proposed_frontmatter: dict | None,
+    fallback_label: str,
+    today: str,
+) -> dict:
+    """Field population shared by every path that writes a note under
+    `schema` for the first time: fresh stub creation (`_build_stub_entities`)
+    and type-correction (`_correct_proposed_note_type`, issue #92).
+
+    Picks the label field by `schema.category` (`title` for `document`,
+    `name` otherwise), merges `proposed_frontmatter` on top (entity
+    resolution's own field-value guesses for the type it's proposing --
+    the model fills these to satisfy that type's schema), and backfills
+    `created`/`updated` with `today` when the schema defines them and
+    nothing already supplied a value. `fallback_label` is used for the
+    label field only when `proposed_frontmatter` doesn't supply one --
+    a fresh stub falls back to `resolution.name`; a type-correction falls
+    back to the existing note's own `name`/`title` value.
+    """
+    proposed = dict(proposed_frontmatter or {})
+    proposed.pop("type", None)
+    label_field = "title" if schema.category == "document" else "name"
+    metadata: dict = {
+        "type": entity_type,
+        label_field: proposed.pop(label_field, None) or fallback_label,
+    }
+    metadata.update(proposed)
+    for date_field in ("created", "updated"):
+        if date_field in schema.fields and not metadata.get(date_field):
+            metadata[date_field] = today
+    return metadata
+
+
 def _correct_proposed_note_type(
     proposed_note: ProposedFile,
     resolution: EntityResolution,
@@ -989,9 +1024,17 @@ def _correct_proposed_note_type(
     Previously only the redundant stub was suppressed in this case, leaving
     extraction's earlier, less-informed type on disk uncorrected.
 
-    Only the frontmatter `type:` and the file's directory move; the
-    synthesized markdown body (and its own filename slug, already
-    normalized by `_sanitize_note`) is left untouched -- mirrors
+    A bare `type:` relabel isn't enough (issue #92): the old and new types
+    can have entirely different required fields (e.g. an `index`'s
+    title/tags/created vs. a `project`'s name/created/updated), so the
+    frontmatter is rebuilt via the same `_populate_type_frontmatter` helper
+    `_build_stub_entities` uses for a fresh stub -- falling back to the
+    note's own existing `name`/`title` value for the label field (rather
+    than `resolution.name`, since the note's own subject wording is already
+    reviewed content) and backfilling `created`/`updated` when the new
+    schema requires them. Only the frontmatter and the file's directory
+    change; the synthesized markdown body (and its own filename slug,
+    already normalized by `_sanitize_note`) is left untouched -- mirrors
     `_reslug_proposed_note`'s "record the correction, never apply it
     invisibly" pattern. Returns `proposed_note` unchanged when the types
     already agree (including when the note's own frontmatter doesn't parse,
@@ -1007,8 +1050,11 @@ def _correct_proposed_note_type(
     if old_type == resolution.entity_type:
         return proposed_note
 
-    new_metadata = dict(metadata)
-    new_metadata["type"] = resolution.entity_type
+    existing_label = metadata.get("name") or metadata.get("title") or resolution.name
+    today = datetime.now(UTC).date().isoformat()
+    new_metadata = _populate_type_frontmatter(
+        schema, resolution.entity_type, resolution.proposed_frontmatter, existing_label, today
+    )
     frontmatter_yaml = yaml.safe_dump(new_metadata, sort_keys=False, allow_unicode=True)
     new_content = f"---\n{frontmatter_yaml}---\n\n{post.content}"
     new_path = f"{schema.directory}/{Path(proposed_note.path).name}"
@@ -1155,17 +1201,9 @@ def _build_stub_entities(
         taken.add(path)
         kept_resolutions.append(resolution)
 
-        proposed = dict(resolution.proposed_frontmatter or {})
-        proposed.pop("type", None)
-        label_field = "title" if schema.category == "document" else "name"
-        metadata: dict = {
-            "type": resolution.entity_type,
-            label_field: proposed.pop(label_field, None) or resolution.name,
-        }
-        metadata.update(proposed)
-        for date_field in ("created", "updated"):
-            if date_field in schema.fields and not metadata.get(date_field):
-                metadata[date_field] = today
+        metadata = _populate_type_frontmatter(
+            schema, resolution.entity_type, resolution.proposed_frontmatter, resolution.name, today
+        )
         stubs.append(
             ProposedFile(
                 path=path,
