@@ -884,8 +884,31 @@ def _run_entity_resolution(
         return
     proposal.entity_resolutions = list(resolution.entities)
     proposal.stub_entities = _build_stub_entities(config, proposal)
-    _reconcile_entity_links(config, proposal)
+    # Entity updates (DAG node 3) must run before link reconciliation: it can
+    # further prune stub_entities (see _suppress_stubs_matching_updates), and
+    # reconciliation needs the final stub set to correct links against.
     _run_entity_updates(config, client, text, proposal)
+    _suppress_stubs_matching_updates(proposal)
+    _reconcile_entity_links(config, proposal)
+
+
+def _proposed_note_subject_slug(proposed_note: ProposedFile | None) -> str | None:
+    """The slugified name/title a proposed_note's own frontmatter claims —
+    its identity, for comparison against entity-resolution's create
+    proposals. Returns None if there's no proposed_note or its frontmatter
+    doesn't parse/carry a usable label."""
+    if proposed_note is None:
+        return None
+    try:
+        metadata = frontmatter_lib.loads(proposed_note.content).metadata
+    except Exception:
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    subject = metadata.get("name") or metadata.get("title")
+    if not isinstance(subject, str) or not subject.strip():
+        return None
+    return slugify(subject)
 
 
 def _build_stub_entities(
@@ -896,11 +919,20 @@ def _build_stub_entities(
     Unknown entity types and types without a canonical directory build no
     stub here — validate_proposal() reports them as hard stops instead of
     best-guessing a location or frontmatter shape.
+
+    Extraction (proposed_note) and entity resolution are independent model
+    calls, and both can independently decide to represent the *same*
+    real-world subject — usually under a different entity type, so the
+    proposed path never collides with proposed_note.path even though it's a
+    duplicate in substance. A create-resolution whose slugified name matches
+    proposed_note's own name/title is suppressed here rather than written as
+    a second, always-empty page for the same subject (see issue #36).
     """
     schemas = load_entity_schemas(config.root_path)
     today = datetime.now(UTC).date().isoformat()
     stubs: list[ProposedFile] = []
     taken = {proposal.proposed_note.path} if proposal.proposed_note else set()
+    proposed_note_slug = _proposed_note_subject_slug(proposal.proposed_note)
 
     for resolution in proposal.entity_resolutions:
         if resolution.action != "create":
@@ -908,6 +940,13 @@ def _build_stub_entities(
         schema = schemas.get(resolution.entity_type)
         if schema is None or schema.directory is None:
             continue  # surfaced by validate_proposal
+        resolution_slug = slugify(resolution.name)
+        if proposed_note_slug is not None and resolution_slug == proposed_note_slug:
+            proposal.warnings.append(
+                f"{resolution.name}: already represented by the proposed note "
+                f"({proposal.proposed_note.path}) — not creating a duplicate page"
+            )
+            continue
         path = f"{schema.directory}/{slugify(resolution.name)}.md"
         if (config.root_path / path).exists():
             proposal.warnings.append(
@@ -931,6 +970,44 @@ def _build_stub_entities(
                 metadata[date_field] = today
         stubs.append(ProposedFile(path=path, content=_stub_content(metadata, resolution.name)))
     return stubs
+
+
+def _suppress_stubs_matching_updates(proposal: EnrichmentProposal) -> None:
+    """Drop a create-resolution's stub when its subject already has a home
+    via an entity update (DAG node 3) computed in this same proposal.
+
+    Extraction/entity-resolution proposing a create is independent of
+    entity-resolution's own update resolutions — a source can correctly
+    merge into an existing long-lived entity's Timeline (entity_updates) and
+    *also* independently propose a "create" for the same subject under a
+    different (often builtin) type, e.g. journal/meeting. Matching against
+    the applied entity_updates (rather than every action=update resolution)
+    keeps this conservative: an update that entity-resolution proposed but
+    that turned out to warrant no real content change is not treated as
+    "already has a home."
+    """
+    if not proposal.entity_updates or not proposal.stub_entities:
+        return
+
+    updated_paths = {update.target_note_path for update in proposal.entity_updates}
+    # Subject identity for each applied update: the update target's own file
+    # stem, plus the name entity-resolution used for the matching resolution
+    # (they can differ, e.g. a display name vs. an already-slugified path).
+    updated_slugs = {slugify(Path(path).stem) for path in updated_paths}
+    for resolution in proposal.entity_resolutions:
+        if resolution.action == "update" and resolution.target_note_path in updated_paths:
+            updated_slugs.add(slugify(resolution.name))
+
+    kept: list[ProposedFile] = []
+    for stub in proposal.stub_entities:
+        if slugify(Path(stub.path).stem) in updated_slugs:
+            proposal.warnings.append(
+                f"{stub.path}: subject already updated via an existing entity in this "
+                "same proposal — not creating a duplicate page"
+            )
+            continue
+        kept.append(stub)
+    proposal.stub_entities = kept
 
 
 # Wikilink parsing/normalization live in wakil.knowledge.wikilinks (shared
