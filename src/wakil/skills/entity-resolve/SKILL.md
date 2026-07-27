@@ -191,3 +191,20 @@ relevance. A distinctly-named, unambiguous entity resolves with high
 confidence even when it's barely mentioned (peripheral + high confidence
 is a normal combination, not a contradiction); a common or ambiguous name
 gets lower confidence even when it's central to the source.
+
+## Whose content is this: first-person reflection vs. what it references
+
+A source written in the first person — the author's own reaction,
+opinion, or reflection, as opposed to a factual record, a build log, or
+reference material — is about its author. Resolve that reflective content
+as its own journal entry (or whichever dated-record type fits) regardless
+of how many other works, articles, or projects it discusses along the
+way. Don't let the entities merely referenced substitute for capturing
+the reflection itself: an article stub or a book stub, created and left
+empty, is not a replacement for the first-person entry that should have
+been proposed alongside them. This is both/and, not either/or — resolve
+the source's own reflective content as journal, and separately resolve
+each referenced work as an ordinary entity mention subject to the
+notability gate above. The bug this guards against is the reflection
+being dropped entirely in favor of only the secondary references, not
+the references being resolved at all.
