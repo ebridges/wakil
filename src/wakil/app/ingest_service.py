@@ -679,7 +679,7 @@ def prepare_enrichment(
                 path=extraction.proposed_note.path,
                 content=extraction.proposed_note.markdown,
             ),
-            proposal.title,
+            proposal,
         )
 
     # DAG node 2: entity resolution — always invoked, never optional.
@@ -1317,6 +1317,26 @@ def validate_proposal(
             continue
         for error in validate_frontmatter(entity_type, metadata, kb_root):
             issues.append(ProposalIssue(proposed.path, str(error)))
+
+        # Placement: a new page's directory must sit under its own type's
+        # schema.directory (a subdirectory is fine, e.g. "meetings/2026/...")
+        # — `_build_stub_entities` already routes stubs this way by
+        # construction; the model-chosen primary note gets no such
+        # guarantee, so it's checked here instead. A real routing bug, not
+        # cosmetic drift, so this is a hard stop rather than an
+        # auto-correction — unlike a filename/H1 slug mismatch.
+        schema = schemas.get(entity_type)
+        if schema is not None and schema.directory is not None:
+            schema_dir = schema.directory.rstrip("/")
+            proposed_dir = Path(proposed.path).parent.as_posix()
+            if proposed_dir != schema_dir and not proposed_dir.startswith(f"{schema_dir}/"):
+                issues.append(
+                    ProposalIssue(
+                        proposed.path,
+                        f"type '{entity_type}' pages belong under {schema_dir}/, "
+                        f"not {proposed_dir}/",
+                    )
+                )
 
     # Edits to existing notes must still satisfy their type's schema —
     # frontmatter_updates could otherwise merge in a value that breaks it.
@@ -2039,8 +2059,35 @@ def _load_source_text(config: WorkspaceConfig, source: Source) -> str:
         return raw
 
 
-def _sanitize_note(config: WorkspaceConfig, note: ProposedFile, title: str) -> ProposedFile:
-    """Keep model-proposed note paths inside the workspace and collision-free."""
+def _sanitize_note(
+    config: WorkspaceConfig, note: ProposedFile, proposal: "EnrichmentProposal"
+) -> ProposedFile:
+    """Keep the model-proposed primary note inside the workspace,
+    collision-free, and slug-consistent with itself.
+
+    The path-safety checks below are unchanged; what's new is slug drift
+    correction, matching the invariant `_build_stub_entities` already gets
+    right for stub pages: a page's filename is `slugify()` of its own
+    displayed name, never the model's freehand choice. `title`/`name`
+    frontmatter and the H1 heading stay exactly as authored (both are
+    legitimate human-cased display text, per note-conformance/SKILL.md) --
+    only the filename is re-derived when it disagrees with slugify(H1), or,
+    absent an H1, when it isn't already slugify()-equivalent to itself. Any
+    leading date prefix (`_LEADING_DATE_RE`, the same convention capture's
+    own dated filenames use) is preserved rather than folded into that
+    comparison -- a single-occurrence note like a meeting legitimately
+    carries a date the H1 doesn't, and that's not drift. Auto-correcting is
+    chosen over a hard ProposalIssue stop (mirrors how
+    `_reconcile_entity_links` already silently repairs proposed-note
+    wikilink drift): a filename typo/verbosity from the model is exactly
+    the kind of mechanical drift this codebase already auto-fixes rather
+    than bouncing the whole enrichment back to the user for. Every
+    correction is still recorded in proposal.warnings, never applied
+    invisibly. Directory placement (is this path even under its type's
+    schema.directory) is a real routing bug, not cosmetic drift, so that
+    stays a hard stop in validate_proposal() instead of being silently
+    moved here.
+    """
     root = config.root_path.resolve()
     candidate = Path(note.path)
 
@@ -2052,8 +2099,48 @@ def _sanitize_note(config: WorkspaceConfig, note: ProposedFile, title: str) -> P
     if not valid or (root / candidate).exists():
         # Routing unclear or collision: propose into the drafts directory instead.
         directory = Path(config.generated_directory)
-        candidate = _unused_path(root, directory, slugify(title))
-    return ProposedFile(path=str(candidate), content=note.content)
+        candidate = _unused_path(root, directory, slugify(proposal.title))
+        return ProposedFile(path=str(candidate), content=note.content)
+
+    return _reslug_proposed_note(candidate, note.content, proposal)
+
+
+def _reslug_proposed_note(
+    candidate: Path, content: str, proposal: "EnrichmentProposal"
+) -> ProposedFile:
+    try:
+        body = frontmatter_lib.loads(content).content
+    except Exception:
+        body = content
+
+    stem = candidate.stem
+    prefix_match = _LEADING_DATE_RE.match(stem)
+    prefix = prefix_match.group(0) if prefix_match else ""
+    rest = stem[len(prefix) :] or stem  # never strip a date-only stem down to nothing
+
+    h1_match = _H1_RE.search(body)
+    h1_text = h1_match.group(0).lstrip("#").strip() if h1_match else None
+    target_rest = slugify(h1_text) if h1_text else slugify(rest)
+    if target_rest == rest:
+        return ProposedFile(path=str(candidate), content=content)
+
+    old_path = str(candidate)
+    new_candidate = candidate.with_name(f"{prefix}{target_rest}{candidate.suffix}")
+    new_path = str(new_candidate)
+
+    def _replace(match: re.Match) -> str:
+        link_path = match.group(1).strip()
+        display = match.group(2)
+        if _normalize_link_path(link_path) != _normalize_link_path(old_path):
+            return match.group(0)
+        return f"[[{new_path}|{display}]]" if display is not None else f"[[{new_path}]]"
+
+    new_content = _WIKILINK_RE.sub(_replace, content)
+    proposal.warnings.append(
+        f"Corrected the proposed note's filename from {old_path} to {new_path} "
+        "to match slugify() (the same convention new entity stub pages already use)"
+    )
+    return ProposedFile(path=new_path, content=new_content)
 
 
 def _unused_path(root: Path, directory: Path, base: str) -> Path:

@@ -13,6 +13,7 @@ from wakil.app.ingest_service import (
     EnrichmentProposal,
     EntityUpdate,
     IngestError,
+    ProposedFile,
     _candidate_entity_notes,
     _is_noise_candidate,
     _merge_entity_note,
@@ -1722,6 +1723,79 @@ def test_enrichment_unsafe_note_path_falls_back_to_drafts(workspace, transcript)
         workspace, source_id, FakeClient([payload, RESOLUTION_JSON, REVISION_JSON])
     )
     assert proposal.proposed_note.path.startswith("drafts/")
+
+
+def test_sanitize_note_leaves_well_formed_dated_path_unchanged(workspace, transcript):
+    # Regression: a meeting-type primary note legitimately keeps a leading
+    # date prefix the H1 doesn't carry (e.g. "2026-07-09-claims-kickoff.md"
+    # / "# Claims Kickoff") -- that's not slug drift and must not be "fixed."
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, RESOLUTION_JSON, REVISION_JSON])
+    )
+    assert proposal.proposed_note.path == "meetings/2026/2026-07-09-claims-kickoff.md"
+    assert proposal.warnings == []
+    assert validate_proposal(proposal) == []
+
+
+def test_sanitize_note_corrects_unslugified_filename_and_self_link(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={
+            "path": "concepts/Guns Germs.md",
+            "markdown": (
+                "---\ntype: concept\nname: Guns Germs\n"
+                "created: 2026-07-09\nupdated: 2026-07-09\n---\n\n"
+                "# Guns Germs\n\nSee also [[concepts/Guns Germs.md]] for background.\n"
+            ),
+        },
+    )
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, RESOLUTION_JSON, REVISION_JSON])
+    )
+
+    assert proposal.proposed_note.path == "concepts/guns-germs.md"
+    # The H1 and `name:` frontmatter stay exactly as authored -- only the
+    # filename (and a self-link that pointed at the old, unslugged filename)
+    # are corrected.
+    assert "# Guns Germs" in proposal.proposed_note.content
+    assert "name: Guns Germs" in proposal.proposed_note.content
+    assert "[[concepts/guns-germs.md]]" in proposal.proposed_note.content
+    assert "Guns Germs.md]]" not in proposal.proposed_note.content
+    assert any("Corrected the proposed note's filename" in w for w in proposal.warnings)
+    assert validate_proposal(proposal) == []
+
+
+def test_validate_proposal_rejects_proposed_note_outside_its_type_schema_directory(workspace):
+    # `_build_stub_entities` always routes a new page under its type's own
+    # schema.directory; the model-chosen primary note path gets no such
+    # guarantee, so this is a hard stop rather than a best-guess move.
+    proposal = EnrichmentProposal(source_id=1, title="t")
+    proposal.proposed_note = ProposedFile(
+        path="concepts/misplaced.md",
+        content=(
+            "---\ntype: person\nname: Misplaced Person\n"
+            "created: 2026-07-09\n---\n\n# Misplaced Person\n"
+        ),
+    )
+    issues = validate_proposal(proposal)
+    assert any("belong under people/" in str(issue) for issue in issues)
+
+
+def test_validate_proposal_allows_proposed_note_in_a_subdirectory_of_its_schema_directory(
+    workspace,
+):
+    # "meetings/2026/..." is a subdirectory of "meetings", not a mismatch.
+    proposal = EnrichmentProposal(source_id=1, title="t")
+    proposal.proposed_note = ProposedFile(
+        path="meetings/2026/2026-07-09-claims-kickoff.md",
+        content=(
+            "---\ntype: meeting\ntitle: Claims Kickoff\ndate: 2026-07-09\n"
+            "created: 2026-07-09\n---\n\n# Claims Kickoff\n"
+        ),
+    )
+    assert validate_proposal(proposal) == []
 
 
 def test_extraction_retry_then_success(workspace, transcript):
