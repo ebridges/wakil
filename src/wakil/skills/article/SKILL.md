@@ -34,5 +34,10 @@ synthesis.
   stated position. Wakil's default is a parenthetical tag at the point of the
   claim (`(reported: <author>)`), overridden by the workspace's own citation
   format when SCHEMA.md defines one.
+- Carry every inline image, PDF, or other attachment reference, and every raw
+  URL, from the article into the proposed note — as an embed or link where
+  the page shape supports one, otherwise in an explicit attachments list.
+  Never mention an attachment in prose without preserving its actual
+  reference, and never drop one silently.
 - Memories must be grounded in the article; never invent facts. Mark
   uncertainty explicitly.
