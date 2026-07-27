@@ -77,6 +77,16 @@ Rules:
   not create a duplicate page for a spelling variant of an existing note.
 - Names in proposed frontmatter carry the authored, human casing — never
   slugs.
+- The same identity check applies across word forms, not just spelling: a
+  candidate concept that is really just the abstract-noun or adjective form
+  of a subject this proposal already treats as primary — the concept a book
+  is about, when that book is this source's own proposed_note or an entity
+  it's also updating — is one idea wearing two names, not two entities.
+  Skip the redundant create; the primary entity's own content is where that
+  idea belongs. This is a judgment call about what the source is actually
+  about, not a spelling or substring match — two entities that merely share
+  a word root (two similarly-named companies, say) are still two entities,
+  and nothing here licenses skipping either of them.
 
 ## Relevance: how much does the source actually concern this entity?
 
