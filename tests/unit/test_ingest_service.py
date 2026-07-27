@@ -106,6 +106,13 @@ RESOLUTION_JSON = {
 
 REVISION_JSON = {"revisions": []}  # no-op: no entity update warrants a content change
 
+# Same shape as REVISION_JSON, given its own name for the create-path's
+# stub-content-synthesis call (issue #70): a no-op response here means the
+# call declines to synthesize anything, leaving `_stub_content`'s plain
+# placeholder in place -- the honest-degradation default for tests that
+# don't care about synthesized stub content one way or the other.
+STUB_SYNTHESIS_JSON = {"revisions": []}
+
 CAPTURE_METADATA_JSON = {
     "title": "2026-07-09 Fake Capture Title",
     "abstract": "A fake, dense abstract used across capture tests -- roughly the length a real "
@@ -114,14 +121,16 @@ CAPTURE_METADATA_JSON = {
 
 
 class FakeClient:
-    """Scripted responses, one per model call (extraction, resolution, then
-    entity-updates whenever a resolution's `update` target exists on disk)."""
+    """Scripted responses, one per model call (extraction, resolution,
+    entity-updates whenever a resolution's `update` target exists on disk,
+    then stub-content synthesis whenever a create-resolution's stub
+    survives suppression, issue #70)."""
 
     model = "fake-model"
 
     def __init__(self, payloads=None):
         if payloads is None:
-            payloads = [MODEL_JSON, RESOLUTION_JSON, REVISION_JSON]
+            payloads = [MODEL_JSON, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON]
         self.queue = [json.dumps(p) if isinstance(p, dict) else p for p in payloads]
         self.calls: list[tuple[str, str]] = []
 
@@ -510,13 +519,16 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
 
     proposal = prepare_enrichment(workspace, source_id, client)
 
-    # Three model calls: extraction, entity resolution (always invoked),
-    # then entity-updates — triggered here because RESOLUTION_JSON resolves
-    # Jane Doe to action=update against the fixture's real people/jane-doe.md.
-    assert len(client.calls) == 3
+    # Four model calls: extraction, entity resolution (always invoked), then
+    # entity-updates — triggered here because RESOLUTION_JSON resolves Jane
+    # Doe to action=update against the fixture's real people/jane-doe.md —
+    # then stub-content synthesis for the surviving Dana Prieto create
+    # (issue #70).
+    assert len(client.calls) == 4
     extraction_system, extraction_prompt = client.calls[0]
     resolution_system, resolution_prompt = client.calls[1]
     revision_system, revision_prompt = client.calls[2]
+    synthesis_system, synthesis_prompt = client.calls[3]
     assert "Find the resolution, not the first option" in extraction_system
     assert '"ExtractionOutput"' in extraction_system  # contract schema injected
     assert "Jane Doe (Acme)" in extraction_prompt
@@ -527,6 +539,12 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
     # existing note in full before writing anything."
     assert "note-revision" in revision_system
     assert "Works on claims automation" in revision_prompt  # jane-doe.md's own body
+    # The stub-synthesis call reuses that exact same machinery — same
+    # note-revision system prompt, but given the freshly-built placeholder
+    # for the new Dana Prieto stub as its "current content" instead.
+    assert "note-revision" in synthesis_system
+    assert "people/dana-prieto.md" in synthesis_prompt
+    assert "_Synthesized current state" in synthesis_prompt
 
     # The full field catalog (required + optional) for every entity type is
     # in the extraction prompt unconditionally — it's rendered structurally
@@ -621,7 +639,7 @@ def test_reconcile_corrects_note_link_to_match_entity_resolution(workspace, tran
     }
 
     proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON])
+        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON, STUB_SYNTHESIS_JSON])
     )
 
     assert "[[companies/mosaic-private-markets.md|Mosaic]]" in proposal.proposed_note.content
@@ -659,7 +677,7 @@ def test_reconcile_leaves_already_matching_link_untouched(workspace, transcript)
     }
 
     proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON])
+        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON, STUB_SYNTHESIS_JSON])
     )
 
     assert proposal.proposed_note.content == markdown
@@ -695,7 +713,7 @@ def test_reconcile_ignores_md_suffix_when_comparing_the_same_target(workspace, t
     }
 
     proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON])
+        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON, STUB_SYNTHESIS_JSON])
     )
 
     assert proposal.proposed_note.content == markdown
@@ -730,7 +748,7 @@ def test_reconcile_does_not_touch_unresolved_display_text(workspace, transcript)
     }
 
     proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON])
+        workspace, source_id, FakeClient([payload, resolution, REVISION_JSON, STUB_SYNTHESIS_JSON])
     )
 
     assert proposal.proposed_note.content == markdown
@@ -1443,7 +1461,9 @@ def test_stub_suppressed_when_matches_proposed_note_subject(workspace, transcrip
         ]
     }
     source_id = _capture(workspace, transcript)
-    client = FakeClient([MODEL_JSON, resolution])  # no update actions -> no 3rd call
+    # No update actions -> no entity-updates call; Dana Prieto's stub
+    # survives suppression, so a 3rd call (stub-content synthesis) happens.
+    client = FakeClient([MODEL_JSON, resolution, STUB_SYNTHESIS_JSON])
     proposal = prepare_enrichment(workspace, source_id, client)
 
     assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
@@ -1451,7 +1471,7 @@ def test_stub_suppressed_when_matches_proposed_note_subject(workspace, transcrip
         "Claims Kickoff" in warning and "already represented by the proposed note" in warning
         for warning in proposal.warnings
     )
-    assert len(client.calls) == 2
+    assert len(client.calls) == 3
 
 
 def test_stub_suppressed_when_matches_applied_entity_update_target(
@@ -1541,8 +1561,12 @@ def test_stub_kept_when_create_subject_differs_from_update_target(
         ]
     }
     source_id = _capture(workspace, transcript)
+    # Dana Prieto's stub survives suppression -> a 4th call (stub-content
+    # synthesis) happens after the entity-updates call.
     proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+        workspace,
+        source_id,
+        FakeClient([MODEL_JSON, resolution, revisions, STUB_SYNTHESIS_JSON]),
     )
 
     assert len(proposal.entity_updates) == 1
@@ -1627,7 +1651,10 @@ def test_dated_record_stub_kept_when_no_entity_updates_applied(workspace, transc
         ]
     }
     source_id = _capture(workspace, transcript)
-    client = FakeClient([MODEL_JSON, resolution])  # no update actions -> no 3rd call
+    # No update actions -> no entity-updates call; the journal stub survives
+    # (no entity_updates to suppress against), so a 3rd call (stub-content
+    # synthesis) happens.
+    client = FakeClient([MODEL_JSON, resolution, STUB_SYNTHESIS_JSON])
     proposal = prepare_enrichment(workspace, source_id, client)
 
     assert proposal.entity_updates == []
@@ -1692,8 +1719,12 @@ def test_stub_kept_for_type_outside_narrow_dated_record_scope(workspace, transcr
         ]
     }
     source_id = _capture(workspace, transcript)
+    # Elektrum's stub survives suppression -> a 4th call (stub-content
+    # synthesis) happens after the entity-updates call.
     proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([payload, resolution, revisions])
+        workspace,
+        source_id,
+        FakeClient([payload, resolution, revisions, STUB_SYNTHESIS_JSON]),
     )
 
     assert len(proposal.entity_updates) == 1
@@ -2526,9 +2557,8 @@ def test_enrichment_refuses_double_run_without_force(workspace, transcript):
 def test_enrichment_unsafe_note_path_falls_back_to_drafts(workspace, transcript):
     source_id = _capture(workspace, transcript)
     payload = dict(MODEL_JSON, proposed_note={"path": "../escape.md", "markdown": "# Escape\n"})
-    proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([payload, RESOLUTION_JSON, REVISION_JSON])
-    )
+    client = FakeClient([payload, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON])
+    proposal = prepare_enrichment(workspace, source_id, client)
     assert proposal.proposed_note.path.startswith("drafts/")
 
 
@@ -2537,9 +2567,8 @@ def test_sanitize_note_leaves_well_formed_dated_path_unchanged(workspace, transc
     # date prefix the H1 doesn't carry (e.g. "2026-07-09-claims-kickoff.md"
     # / "# Claims Kickoff") -- that's not slug drift and must not be "fixed."
     source_id = _capture(workspace, transcript)
-    proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([MODEL_JSON, RESOLUTION_JSON, REVISION_JSON])
-    )
+    client = FakeClient([MODEL_JSON, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON])
+    proposal = prepare_enrichment(workspace, source_id, client)
     assert proposal.proposed_note.path == "meetings/2026/2026-07-09-claims-kickoff.md"
     assert proposal.warnings == []
     assert validate_proposal(proposal) == []
@@ -2558,9 +2587,8 @@ def test_sanitize_note_corrects_unslugified_filename_and_self_link(workspace, tr
             ),
         },
     )
-    proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([payload, RESOLUTION_JSON, REVISION_JSON])
-    )
+    client = FakeClient([payload, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON])
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert proposal.proposed_note.path == "concepts/guns-germs.md"
     # The H1 and `name:` frontmatter stay exactly as authored -- only the
@@ -2607,12 +2635,14 @@ def test_validate_proposal_allows_proposed_note_in_a_subdirectory_of_its_schema_
 
 def test_extraction_retry_then_success(workspace, transcript):
     source_id = _capture(workspace, transcript)
-    client = FakeClient(["not json at all", MODEL_JSON, RESOLUTION_JSON, REVISION_JSON])
+    client = FakeClient(
+        ["not json at all", MODEL_JSON, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON]
+    )
 
     proposal = prepare_enrichment(workspace, source_id, client)
 
     # Call 2 is the retry: same extraction system prompt, error appended.
-    assert len(client.calls) == 4
+    assert len(client.calls) == 5
     assert client.calls[1][0] == client.calls[0][0]
     assert "was not valid" in client.calls[1][1]
     assert proposal.summary == MODEL_JSON["summary"]
@@ -3050,11 +3080,151 @@ def test_prepare_enrichment_no_false_positive_warning_when_stub_produced(
         ]
     }
     source_id = _capture(workspace, transcript)
-    client = FakeClient([extraction, resolution])
+    client = FakeClient([extraction, resolution, STUB_SYNTHESIS_JSON])
     proposal = prepare_enrichment(workspace, source_id, client)
 
     assert proposal.stub_entities != []
     assert not any("nothing will be written" in warning for warning in proposal.warnings)
+
+
+# --------------------------------------------------------------------------
+# Stub-content synthesis on create (issue #70): `_stub_content` used to
+# always write a hardcoded, empty placeholder regardless of how much the
+# source actually said about the new entity. `_synthesize_stub_content`
+# reuses the same EntityRevision/note-revision/`_merge_entity_note`
+# machinery `_run_entity_updates` uses for existing notes, treating the
+# freshly-built placeholder as the "current content" of a note that just
+# happens not to be unpopulated yet.
+
+
+def test_stub_synthesizes_real_content_from_exploitable_source(workspace, transcript):
+    # A source with real, exploitable content about the new entity (e.g. a
+    # set of Kindle-style highlights) must produce a populated stub -- the
+    # actual synthesized Compiled Truth and a first Timeline entry -- not
+    # the bare placeholder. This is issue #70's core complaint.
+    transcript.write_text(
+        "Highlight: Deep work is the ability to focus without distraction on "
+        "a cognitively demanding task.\n"
+        "Highlight: Shallow work is non-cognitively-demanding, logistical-style "
+        "work, often done while distracted, and produces little new value.\n"
+        "Highlight: To produce at your peak level, you need to work for "
+        "extended, uninterrupted stretches on a single hard task.\n"
+    )
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {"name": "Deep Work", "entity_type": "concept", "action": "create", "confidence": 0.9}
+        ]
+    }
+    synthesis = {
+        "revisions": [
+            {
+                "target_note_path": "concepts/deep-work.md",
+                "has_update": True,
+                "compiled_truth": (
+                    "## Compiled Truth\n\nDeep work is the ability to focus without "
+                    "distraction on a cognitively demanding task; its opposite, "
+                    "shallow work, is logistical, distracted, and low-value.\n\n"
+                    "## Open Threads\n"
+                ),
+                "timeline_entry": (
+                    "### 2026-07-09 — introduced via highlights\n"
+                    "- Defined in contrast to shallow work; peak output needs "
+                    "extended, uninterrupted focus."
+                ),
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution, synthesis])
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert [stub.path for stub in proposal.stub_entities] == ["concepts/deep-work.md"]
+    stub = proposal.stub_entities[0]
+    assert "Deep work is the ability to focus without distraction" in stub.content
+    assert "introduced via highlights" in stub.content
+    # The hardcoded placeholder is gone, not merely appended alongside it.
+    assert "_Synthesized current state — rewrite when facts change._" not in stub.content
+    assert not any("empty stub" in w for w in proposal.warnings)
+    assert validate_proposal(proposal, workspace.root_path) == []
+
+
+def test_stub_stays_honest_placeholder_when_source_has_nothing_to_synthesize(
+    workspace, transcript
+):
+    # The source barely mentions the new entity by name -- the synthesis
+    # call correctly declines (has_update=False) rather than fabricating
+    # texture, and the stub is left exactly as `_build_stub_entities` wrote
+    # it: a minimal, honest placeholder, not a fabrication.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+                "proposed_frontmatter": {"status": "active"},
+            }
+        ]
+    }
+    synthesis = {
+        "revisions": [{"target_note_path": "people/dana-prieto.md", "has_update": False}]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution, synthesis])
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
+    stub = proposal.stub_entities[0]
+    assert "_Synthesized current state — rewrite when facts change._" in stub.content
+    assert _is_unpopulated_stub(stub.content) is True
+    assert validate_proposal(proposal, workspace.root_path) == []
+
+
+def test_stub_synthesis_failure_falls_back_to_placeholder_with_warning(workspace, transcript):
+    # A failed synthesis call must degrade visibly -- fall back to the plain
+    # placeholder and warn -- never crash the rest of enrichment (matching
+    # `_run_entity_resolution`'s own ModelContractError handling).
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+                "proposed_frontmatter": {"status": "active"},
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution, "not json", "still not json"])
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
+    stub = proposal.stub_entities[0]
+    assert "_Synthesized current state — rewrite when facts change._" in stub.content
+    assert any(
+        "people/dana-prieto.md" in w and "synthesis failed" in w for w in proposal.warnings
+    )
+    # The rest of the proposal is untouched -- a failed synthesis call is a
+    # visible degradation, not a crash.
+    assert validate_proposal(proposal, workspace.root_path) == []
+    apply_enrichment(workspace, proposal)
+
+
+def test_synthesize_stub_content_skips_call_when_no_stubs_survive(workspace):
+    # No surviving create-stub -> no model call at all, not even an empty one.
+    proposal = EnrichmentProposal(source_id=1, title="t")
+    client = FakeClient([])
+
+    ingest_service._synthesize_stub_content(workspace, client, "some source text", proposal)
+
+    assert client.calls == []
 
 
 def test_enrichment_guides_reach_prompt(workspace, transcript):

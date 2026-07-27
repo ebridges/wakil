@@ -42,6 +42,11 @@ BAD_RESOLUTION_JSON = json.dumps(
     {"entities": [{"name": "The Guild", "entity_type": "guild", "action": "create"}]}
 )
 
+# Dana Prieto's stub survives entity-resolution's create -> a stub-content
+# synthesis call happens (issue #70); a no-op response keeps the plain
+# `_stub_content` placeholder, which is all these CLI-level tests care about.
+STUB_SYNTHESIS_JSON = json.dumps({"revisions": []})
+
 CAPTURE_METADATA_JSON = json.dumps(
     {
         "title": "2026-07-09 Fake Capture Title",
@@ -56,7 +61,7 @@ class FakeClient:
 
     model = "fake-model"
 
-    def __init__(self, payloads=(EXTRACTION_JSON, RESOLUTION_JSON)):
+    def __init__(self, payloads=(EXTRACTION_JSON, RESOLUTION_JSON, STUB_SYNTHESIS_JSON)):
         self.queue = list(payloads)
 
     def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
