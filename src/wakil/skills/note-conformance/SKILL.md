@@ -219,6 +219,13 @@ relative" rule itself is non-negotiable regardless of workspace.
 **External links** are copied verbatim from their source — see "Deterministic
 links" below.
 
+**Embeds** use `![[target|alias]]` — target first, alias second, the same
+order as a plain wikilink. `![[diagram.png|Sapwood diagram]]` embeds
+`diagram.png` and displays it captioned "Sapwood diagram." The reversed
+order, `![[Sapwood diagram|diagram.png]]`, is wrong: it embeds a file
+literally named `Sapwood diagram` and captions it `diagram.png` — a broken
+embed, not a captioned one. The alias is always optional and always second.
+
 ## No-slop output bar
 
 Notes are durable artifacts, not chat output:
