@@ -13,12 +13,15 @@ from wakil.app.ingest_service import (
     EnrichmentProposal,
     EntityUpdate,
     IngestError,
+    ProposedFile,
     _candidate_entity_notes,
     _is_noise_candidate,
+    _is_unpopulated_stub,
     _merge_entity_note,
     _require_workspace_ids,
     _split_candidates_by_content_length,
     _split_note_sections,
+    _stub_content,
     _title_terms,
     apply_abstract_backfill,
     apply_capture,
@@ -931,10 +934,39 @@ def test_merge_entity_note_returns_none_for_unexpected_shape(workspace):
     assert _merge_entity_note(minimal, revision, "2026-07-16") is None
 
 
+def test_is_unpopulated_stub_true_for_fresh_stub_content():
+    stub = _stub_content({"type": "person", "name": "Priya Shah"}, "Priya Shah")
+    assert _is_unpopulated_stub(stub) is True
+
+
+def test_is_unpopulated_stub_false_for_real_shaped_person():
+    assert _is_unpopulated_stub(REAL_SHAPED_PERSON) is False
+
+
+def test_is_unpopulated_stub_false_for_malformed_content():
+    assert _is_unpopulated_stub("not a note at all") is False
+
+
 def _write_person(kb_path: Path, slug: str, content: str = REAL_SHAPED_PERSON) -> None:
     people = kb_path / "people"
     people.mkdir(exist_ok=True)
     (people / f"{slug}.md").write_text(content.replace("priya-shah", slug))
+
+
+def _write_stub_person(kb_path: Path, slug: str, name: str = "Priya Shah") -> None:
+    """Write a person page using the actual `_stub_content` skeleton —
+    i.e. an entity that's never had real content synthesized into it,
+    exactly as `_build_stub_entities` leaves it at creation time."""
+    people = kb_path / "people"
+    people.mkdir(exist_ok=True)
+    metadata = {
+        "type": "person",
+        "name": name,
+        "status": "active",
+        "created": "2026-06-01",
+        "updated": "2026-06-01",
+    }
+    (people / f"{slug}.md").write_text(ingest_service._stub_content(metadata, name))
 
 
 def test_entity_update_applies_when_model_says_has_update(workspace, transcript, kb_path):
@@ -977,6 +1009,43 @@ def test_entity_update_applies_when_model_says_has_update(workspace, transcript,
     assert "New synthesized truth." in on_disk
 
 
+def test_entity_update_carries_low_confidence_through_to_proposal(workspace, transcript, kb_path):
+    # A field value inferred from thin evidence (issue #39) must be
+    # distinguishable downstream, not merged in looking exactly as
+    # confident as a well-supported one.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "Tentative truth from a single thin mention.",
+                "frontmatter_updates": {"status": "former"},
+                "confidence": 0.2,
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    update = proposal.entity_updates[0]
+    assert update.confidence == 0.2
+
+
 def test_entity_update_skipped_when_model_says_has_update_false(workspace, transcript, kb_path):
     _write_person(kb_path, "priya-shah")
     resolution = {
@@ -997,6 +1066,70 @@ def test_entity_update_skipped_when_model_says_has_update_false(workspace, trans
     )
 
     assert proposal.entity_updates == []
+    # REAL_SHAPED_PERSON already has real content — declining to touch it
+    # further is unremarkable, not a founding-content-loss signal.
+    assert not any("empty stub" in warning for warning in proposal.warnings)
+
+
+def test_entity_update_declined_on_still_stub_entity_warns_founding_content_may_be_lost(
+    workspace, transcript, kb_path
+):
+    # Issue #45: the entity was created as a bare _stub_content skeleton and
+    # has never been populated. This update pass looks at it and declines to
+    # add anything (has_update=False) — same as any other declined update,
+    # except here it means the entity's founding facts may never land.
+    _write_stub_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    revisions = {"revisions": [{"target_note_path": "people/priya-shah.md", "has_update": False}]}
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert proposal.entity_updates == []
+    assert any(
+        "Priya Shah" in warning and "empty stub" in warning and "permanently missing" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_entity_update_below_relevance_threshold_on_still_stub_entity_also_warns(
+    workspace, transcript, kb_path
+):
+    # Same failure shape as above, but the entity never even reaches the
+    # revision call because it's filtered out by the relevance gate first.
+    _write_stub_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "minor",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution])  # no 3rd response needed/consumed
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.entity_updates == []
+    assert any(
+        "Priya Shah" in warning and "empty stub" in warning and "permanently missing" in warning
+        for warning in proposal.warnings
+    )
 
 
 def test_entity_update_skipped_for_single_occurrence_shape_type(workspace, transcript, kb_path):
@@ -1047,6 +1180,144 @@ def test_entity_update_warns_when_target_missing_on_disk(workspace, transcript):
     assert proposal.entity_updates == []
     assert any("doesn't exist on disk" in warning for warning in proposal.warnings)
     assert len(client.calls) == 2
+
+
+# --------------------------------------------------------------------------
+# Issue #36: duplicate entity stubs (create-resolutions whose subject
+# already has a home in this same proposal).
+
+
+def test_stub_suppressed_when_matches_proposed_note_subject(workspace, transcript):
+    # MODEL_JSON's proposed_note is a `meeting` page titled "Claims Kickoff".
+    # Entity resolution independently proposing a `create` for the exact
+    # same subject under a different type (here `project`) must not produce
+    # a second, always-empty page for it — but a genuinely distinct new
+    # entity (Dana Prieto) in the same resolution call still gets its stub.
+    resolution = {
+        "entities": [
+            {
+                "name": "Claims Kickoff",
+                "entity_type": "project",
+                "action": "create",
+                "confidence": 0.8,
+            },
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+            },
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution])  # no update actions -> no 3rd call
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
+    assert any(
+        "Claims Kickoff" in warning and "already represented by the proposed note" in warning
+        for warning in proposal.warnings
+    )
+    assert len(client.calls) == 2
+
+
+def test_stub_suppressed_when_matches_applied_entity_update_target(
+    workspace, transcript, kb_path
+):
+    # Entity resolution proposes both a real update to an existing long-lived
+    # entity (people/priya-shah.md) AND, independently, a `create` for the
+    # same subject under a different (builtin) type -- the worst-cases in
+    # issue #36 look like journal/meeting duplicates alongside a project
+    # entity's own correct Timeline update. The create must be suppressed
+    # once the update is confirmed to actually change content.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "Priya Shah",
+                "entity_type": "journal",
+                "action": "create",
+                "confidence": 0.7,
+            },
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.stub_entities == []
+    assert any(
+        "subject already updated via an existing entity" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_stub_kept_when_create_subject_differs_from_update_target(
+    workspace, transcript, kb_path
+):
+    # No over-suppression: a create-resolution for a genuinely distinct
+    # entity must still get its stub even when the same proposal also
+    # updates an unrelated existing entity.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+            },
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
+    assert not any(
+        "subject already updated via an existing entity" in warning
+        for warning in proposal.warnings
+    )
 
 
 @pytest.mark.parametrize("relevance", ["minor", "peripheral"])
@@ -1724,6 +1995,79 @@ def test_enrichment_unsafe_note_path_falls_back_to_drafts(workspace, transcript)
     assert proposal.proposed_note.path.startswith("drafts/")
 
 
+def test_sanitize_note_leaves_well_formed_dated_path_unchanged(workspace, transcript):
+    # Regression: a meeting-type primary note legitimately keeps a leading
+    # date prefix the H1 doesn't carry (e.g. "2026-07-09-claims-kickoff.md"
+    # / "# Claims Kickoff") -- that's not slug drift and must not be "fixed."
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, RESOLUTION_JSON, REVISION_JSON])
+    )
+    assert proposal.proposed_note.path == "meetings/2026/2026-07-09-claims-kickoff.md"
+    assert proposal.warnings == []
+    assert validate_proposal(proposal) == []
+
+
+def test_sanitize_note_corrects_unslugified_filename_and_self_link(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={
+            "path": "concepts/Guns Germs.md",
+            "markdown": (
+                "---\ntype: concept\nname: Guns Germs\n"
+                "created: 2026-07-09\nupdated: 2026-07-09\n---\n\n"
+                "# Guns Germs\n\nSee also [[concepts/Guns Germs.md]] for background.\n"
+            ),
+        },
+    )
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, RESOLUTION_JSON, REVISION_JSON])
+    )
+
+    assert proposal.proposed_note.path == "concepts/guns-germs.md"
+    # The H1 and `name:` frontmatter stay exactly as authored -- only the
+    # filename (and a self-link that pointed at the old, unslugged filename)
+    # are corrected.
+    assert "# Guns Germs" in proposal.proposed_note.content
+    assert "name: Guns Germs" in proposal.proposed_note.content
+    assert "[[concepts/guns-germs.md]]" in proposal.proposed_note.content
+    assert "Guns Germs.md]]" not in proposal.proposed_note.content
+    assert any("Corrected the proposed note's filename" in w for w in proposal.warnings)
+    assert validate_proposal(proposal) == []
+
+
+def test_validate_proposal_rejects_proposed_note_outside_its_type_schema_directory(workspace):
+    # `_build_stub_entities` always routes a new page under its type's own
+    # schema.directory; the model-chosen primary note path gets no such
+    # guarantee, so this is a hard stop rather than a best-guess move.
+    proposal = EnrichmentProposal(source_id=1, title="t")
+    proposal.proposed_note = ProposedFile(
+        path="concepts/misplaced.md",
+        content=(
+            "---\ntype: person\nname: Misplaced Person\n"
+            "created: 2026-07-09\n---\n\n# Misplaced Person\n"
+        ),
+    )
+    issues = validate_proposal(proposal)
+    assert any("belong under people/" in str(issue) for issue in issues)
+
+
+def test_validate_proposal_allows_proposed_note_in_a_subdirectory_of_its_schema_directory(
+    workspace,
+):
+    # "meetings/2026/..." is a subdirectory of "meetings", not a mismatch.
+    proposal = EnrichmentProposal(source_id=1, title="t")
+    proposal.proposed_note = ProposedFile(
+        path="meetings/2026/2026-07-09-claims-kickoff.md",
+        content=(
+            "---\ntype: meeting\ntitle: Claims Kickoff\ndate: 2026-07-09\n"
+            "created: 2026-07-09\n---\n\n# Claims Kickoff\n"
+        ),
+    )
+    assert validate_proposal(proposal) == []
+
+
 def test_extraction_retry_then_success(workspace, transcript):
     source_id = _capture(workspace, transcript)
     client = FakeClient(["not json at all", MODEL_JSON, RESOLUTION_JSON, REVISION_JSON])
@@ -1869,6 +2213,65 @@ def test_validate_proposal_still_hard_stops_on_unknown_type(workspace):
     issues = validate_proposal(proposal)
     assert len(issues) == 1
     assert "no entity schema defines type" in issues[0].message
+
+
+def test_prepare_enrichment_warns_when_nothing_produced(workspace, transcript):
+    # Issue #44: no proposed_note, no stub (create was skipped), no entity
+    # update -- a source that resolves to a complete no-op must say so
+    # explicitly, naming the source, rather than staying silent.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {"name": "Acme", "entity_type": "company", "action": "skip", "confidence": 0.4}
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution])
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.proposed_note is None
+    assert proposal.stub_entities == []
+    assert proposal.entity_updates == []
+    assert any(
+        str(source_id) in warning and "nothing will be written" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_prepare_enrichment_no_false_positive_warning_when_note_produced(workspace, transcript):
+    # Regression guard: a source that does produce a proposed note must not
+    # also get the "nothing will be written" warning.
+    source_id = _capture(workspace, transcript)
+    client = FakeClient()  # default MODEL_JSON has a proposed_note
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.proposed_note is not None
+    assert not any("nothing will be written" in warning for warning in proposal.warnings)
+
+
+def test_prepare_enrichment_no_false_positive_warning_when_stub_produced(
+    workspace, transcript
+):
+    # A create-only source (no proposed_note, but a stub entity) also must
+    # not get the no-op warning.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+                "proposed_frontmatter": {"status": "active", "role": "Claims platform lead"},
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution])
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.stub_entities != []
+    assert not any("nothing will be written" in warning for warning in proposal.warnings)
 
 
 def test_enrichment_guides_reach_prompt(workspace, transcript):

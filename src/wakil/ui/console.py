@@ -162,6 +162,15 @@ def print_entity_update_preview(update: EntityUpdate) -> None:
     _print_entity_update(update)
 
 
+# Below this, an update's compiled_truth/frontmatter_updates are treated as
+# thinly-supported enough to flag for human review rather than rendered
+# identically to a well-supported one (issue #39) — the same bar
+# CandidateMemoryModel/EntityResolution confidence values are shown at, but
+# with a visible distinction here since an entity update touches an
+# existing page's content.
+_LOW_CONFIDENCE_THRESHOLD = 0.5
+
+
 def _print_entity_update(update: EntityUpdate) -> None:
     diff_lines = list(
         difflib.unified_diff(
@@ -174,11 +183,19 @@ def _print_entity_update(update: EntityUpdate) -> None:
     diff_text = "".join(diff_lines) or "(no textual difference)"
     if len(diff_text) > 2000:
         diff_text = diff_text[:2000] + "\n…"
+    low_confidence = update.confidence is not None and update.confidence < _LOW_CONFIDENCE_THRESHOLD
+    title = f"UPDATE {update.target_note_path}"
+    border_style = "yellow"
+    if update.confidence is not None:
+        title += f" (confidence {update.confidence:.2f})"
+    if low_confidence:
+        title = f"⚠ LOW-CONFIDENCE {title} — review before applying"
+        border_style = "red"
     console.print(
         Panel(
             Syntax(diff_text, "diff", background_color="default"),
-            title=f"UPDATE {update.target_note_path}",
-            border_style="yellow",
+            title=title,
+            border_style=border_style,
         )
     )
 
@@ -283,6 +300,16 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
         console.print(f"[bold]Updates to existing pages ({len(proposal.entity_updates)}):[/bold]")
         for update in proposal.entity_updates:
             _print_entity_update(update)
+        low_confidence_paths = [
+            update.target_note_path
+            for update in proposal.entity_updates
+            if update.confidence is not None and update.confidence < _LOW_CONFIDENCE_THRESHOLD
+        ]
+        if low_confidence_paths:
+            console.print(
+                f"[red]Flagged for review ({len(low_confidence_paths)} low-confidence "
+                f"update(s)):[/red] {', '.join(low_confidence_paths)}"
+            )
     if proposal.proposed_note is not None:
         console.print("[bold]Proposed note:[/bold]")
         _print_file_preview(proposal.proposed_note)
@@ -351,6 +378,23 @@ def print_migration_diffs(proposals) -> None:
                 border_style="cyan",
             )
         )
+
+
+def print_schema_validation(results) -> bool:
+    """Print one line (or more, on error) per file; returns True if any failed."""
+    has_errors = False
+    for result in results:
+        if result.load_error is not None:
+            has_errors = True
+            console.print(f"[red]✗ {result.path}[/red]: {result.load_error}")
+        elif result.errors:
+            has_errors = True
+            console.print(f"[red]✗ {result.path}[/red]")
+            for error in result.errors:
+                console.print(f"  [red]•[/red] {error}")
+        else:
+            console.print(f"[green]✓ {result.path}[/green]")
+    return has_errors
 
 
 _STATE_STYLES = {

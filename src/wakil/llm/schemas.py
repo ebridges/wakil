@@ -143,6 +143,19 @@ class EntityRevision(BaseModel):
         description="False when the mention is too light to change the page — "
         "no compiled_truth/timeline_entry/frontmatter_updates needed."
     )
+    confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="For has_update=True only: how well-supported this revision's "
+        "content is by the source, not whether an update was warranted at all — "
+        "that's `has_update`. A compiled_truth/frontmatter_updates value inferred "
+        "from thin or ambiguous evidence (e.g. a single early highlight implying a "
+        "book's `status` without an explicit completion signal) gets low confidence "
+        "even though has_update is true; a clearly-stated fact gets high confidence. "
+        "Omit or leave null when the source's support is unambiguous enough that a "
+        "confidence figure wouldn't add information.",
+    )
     compiled_truth: str | None = Field(
         default=None,
         description="For has_update=True: the full re-synthesized top section — "

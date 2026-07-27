@@ -23,7 +23,10 @@ Skeleton:
 - {state fields relevant to this subject}
 
 ### Open threads
-- {what's unresolved}
+- {what's unresolved — only if the source actually supports it; if the
+  source describes work already done or in progress, say so instead of
+  defaulting to a generic "not started" framing. Omit this section, or
+  write "none currently open," rather than inventing an open thread}
 
 Cross-references: [[other-entity]]
 

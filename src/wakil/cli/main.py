@@ -21,6 +21,7 @@ from wakil.ui.console import (
     print_query_result,
     print_root_issues,
     print_schema_list,
+    print_schema_validation,
     print_schema_which,
     print_search_hits,
     print_skill_description,
@@ -1156,6 +1157,39 @@ def schema_migrate(
                 console.print(f"[red]Commit failed:[/red] {exc}")
                 raise typer.Exit(code=1) from exc
             console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]")
+
+
+@schema_app.command("validate")
+def schema_validate(
+    ctx: typer.Context,
+    paths: Annotated[
+        list[str],
+        typer.Argument(help="Files, directories, or glob patterns to validate."),
+    ],
+) -> None:
+    """Check files' frontmatter against the entity schemas; exit non-zero on any error.
+
+    This is the same `validate_frontmatter` check `wakil enrich`'s DAG already
+    runs before writing — run it here against files that reached disk via a
+    skill-driven manual write (entity-enrichment, note-routing,
+    content-synthesis), which have no Python-level schema enforcement of
+    their own. Complements `wakil schema migrate`'s mechanical-only fixes;
+    it does not rename or rewrite anything.
+    """
+    from wakil.app.schema_validate_service import collect_markdown_files, validate_file
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+
+    files = collect_markdown_files(paths)
+    if not files:
+        console.print("[yellow]No files matched.[/yellow]")
+        raise typer.Exit(code=0)
+
+    results = [validate_file(path, config.root_path) for path in files]
+    has_errors = print_schema_validation(results)
+    if has_errors:
+        raise typer.Exit(code=1)
 
 
 @schema_app.command("list")

@@ -168,11 +168,19 @@ class EntityUpdate:
     """A proposed, deterministic edit to an *existing* note — DAG node 3's
     output. `old_content` is what was read during prepare; apply_enrichment
     re-reads and refuses to apply if the file changed since (mirrors
-    schema_migrate_service's stale-file guard)."""
+    schema_migrate_service's stale-file guard).
+
+    `confidence` mirrors `EntityRevision.confidence` (how well-supported the
+    revision's content is, not whether it was warranted at all) — carried
+    through so the enrichment preview can flag a thinly-supported update
+    instead of rendering it identically to a well-supported one. None for
+    updates produced outside a model revision call (e.g. `wakil entities
+    compile`), where the concept doesn't apply."""
 
     target_note_path: str
     old_content: str
     new_content: str
+    confidence: float | None = None
 
 
 @dataclass
@@ -679,12 +687,34 @@ def prepare_enrichment(
                 path=extraction.proposed_note.path,
                 content=extraction.proposed_note.markdown,
             ),
-            proposal.title,
+            proposal,
         )
 
     # DAG node 2: entity resolution — always invoked, never optional.
     _run_entity_resolution(config, client, source_text, related_pairs, proposal, guides)
+    _warn_if_nothing_produced(source_id, proposal)
     return proposal
+
+
+def _warn_if_nothing_produced(source_id: int, proposal: EnrichmentProposal) -> None:
+    """Whole-proposal visibility check (issue #44): every skip along the way
+    (a notability judgment in entity-resolve/SKILL.md, a below-relevance
+    update, a has_update=False revision, a failed model call) already
+    degrades visibly on its own, but none of them know whether *every other*
+    path for this source also came up empty. If proposed_note, stub_entities,
+    and entity_updates are all empty here, the source is about to be applied
+    (or previewed) as a complete no-op — say so once, naming the source,
+    rather than leaving that silent."""
+    nothing_produced = (
+        proposal.proposed_note is None
+        and not proposal.stub_entities
+        and not proposal.entity_updates
+    )
+    if nothing_produced:
+        proposal.warnings.append(
+            f"Source {source_id} ('{proposal.title}'): enrichment produced no new page, "
+            "stub, or update for any entity — nothing will be written for this source."
+        )
 
 
 # A run of 1-4 capitalized words: "Mosaic", "Ian Gutwinski", "Riviera Partners".
@@ -884,8 +914,31 @@ def _run_entity_resolution(
         return
     proposal.entity_resolutions = list(resolution.entities)
     proposal.stub_entities = _build_stub_entities(config, proposal)
-    _reconcile_entity_links(config, proposal)
+    # Entity updates (DAG node 3) must run before link reconciliation: it can
+    # further prune stub_entities (see _suppress_stubs_matching_updates), and
+    # reconciliation needs the final stub set to correct links against.
     _run_entity_updates(config, client, text, proposal)
+    _suppress_stubs_matching_updates(proposal)
+    _reconcile_entity_links(config, proposal)
+
+
+def _proposed_note_subject_slug(proposed_note: ProposedFile | None) -> str | None:
+    """The slugified name/title a proposed_note's own frontmatter claims —
+    its identity, for comparison against entity-resolution's create
+    proposals. Returns None if there's no proposed_note or its frontmatter
+    doesn't parse/carry a usable label."""
+    if proposed_note is None:
+        return None
+    try:
+        metadata = frontmatter_lib.loads(proposed_note.content).metadata
+    except Exception:
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    subject = metadata.get("name") or metadata.get("title")
+    if not isinstance(subject, str) or not subject.strip():
+        return None
+    return slugify(subject)
 
 
 def _build_stub_entities(
@@ -906,12 +959,21 @@ def _build_stub_entities(
     hard stop would abort the entire apply (including this proposal's
     unrelated proposed_note and other stubs/updates) over a case that's
     already been surfaced as a warning, not an error.
+
+    Extraction (proposed_note) and entity resolution are independent model
+    calls, and both can independently decide to represent the *same*
+    real-world subject — usually under a different entity type, so the
+    proposed path never collides with proposed_note.path even though it's a
+    duplicate in substance. A create-resolution whose slugified name matches
+    proposed_note's own name/title is suppressed here rather than written as
+    a second, always-empty page for the same subject (see issue #36).
     """
     schemas = load_entity_schemas(config.root_path)
     today = datetime.now(UTC).date().isoformat()
     stubs: list[ProposedFile] = []
     taken = {proposal.proposed_note.path} if proposal.proposed_note else set()
     kept_resolutions: list[EntityResolution] = []
+    proposed_note_slug = _proposed_note_subject_slug(proposal.proposed_note)
 
     for resolution in proposal.entity_resolutions:
         if resolution.action != "create":
@@ -934,6 +996,14 @@ def _build_stub_entities(
                 f"{resolution.name}: type '{resolution.entity_type}' has no canonical "
                 "directory to route into — needs manual placement"
             )
+            continue
+        resolution_slug = slugify(resolution.name)
+        if proposed_note_slug is not None and resolution_slug == proposed_note_slug:
+            proposal.warnings.append(
+                f"{resolution.name}: already represented by the proposed note "
+                f"({proposal.proposed_note.path}) — not creating a duplicate page"
+            )
+            kept_resolutions.append(resolution)
             continue
         path = f"{schema.directory}/{slugify(resolution.name)}.md"
         if (config.root_path / path).exists():
@@ -963,6 +1033,44 @@ def _build_stub_entities(
 
     proposal.entity_resolutions = kept_resolutions
     return stubs
+
+
+def _suppress_stubs_matching_updates(proposal: EnrichmentProposal) -> None:
+    """Drop a create-resolution's stub when its subject already has a home
+    via an entity update (DAG node 3) computed in this same proposal.
+
+    Extraction/entity-resolution proposing a create is independent of
+    entity-resolution's own update resolutions — a source can correctly
+    merge into an existing long-lived entity's Timeline (entity_updates) and
+    *also* independently propose a "create" for the same subject under a
+    different (often builtin) type, e.g. journal/meeting. Matching against
+    the applied entity_updates (rather than every action=update resolution)
+    keeps this conservative: an update that entity-resolution proposed but
+    that turned out to warrant no real content change is not treated as
+    "already has a home."
+    """
+    if not proposal.entity_updates or not proposal.stub_entities:
+        return
+
+    updated_paths = {update.target_note_path for update in proposal.entity_updates}
+    # Subject identity for each applied update: the update target's own file
+    # stem, plus the name entity-resolution used for the matching resolution
+    # (they can differ, e.g. a display name vs. an already-slugified path).
+    updated_slugs = {slugify(Path(path).stem) for path in updated_paths}
+    for resolution in proposal.entity_resolutions:
+        if resolution.action == "update" and resolution.target_note_path in updated_paths:
+            updated_slugs.add(slugify(resolution.name))
+
+    kept: list[ProposedFile] = []
+    for stub in proposal.stub_entities:
+        if slugify(Path(stub.path).stem) in updated_slugs:
+            proposal.warnings.append(
+                f"{stub.path}: subject already updated via an existing entity in this "
+                "same proposal — not creating a duplicate page"
+            )
+            continue
+        kept.append(stub)
+    proposal.stub_entities = kept
 
 
 # Wikilink parsing/normalization live in wakil.knowledge.wikilinks (shared
@@ -1172,6 +1280,17 @@ def _run_entity_updates(
             continue
         if resolution.relevance in _LOW_RELEVANCE:
             below_threshold.append((resolution.name, resolution.relevance))
+            target = config.root_path / resolution.target_note_path
+            if target.is_file():
+                with contextlib.suppress(OSError):
+                    existing = target.read_text(encoding="utf-8")
+                    if _is_unpopulated_stub(existing):
+                        proposal.warnings.append(
+                            f"{resolution.name} is still an empty stub and this update "
+                            "didn't populate it either (left below the relevance "
+                            "threshold) — its founding content may be permanently "
+                            "missing."
+                        )
             continue
         target = config.root_path / resolution.target_note_path
         if not target.is_file():
@@ -1234,9 +1353,24 @@ def _apply_entity_revisions(
 ) -> None:
     today = datetime.now(UTC).date().isoformat()
     by_path = {res.target_note_path: content for res, _, content in candidates}
+    name_by_path = {res.target_note_path: res.name for res, _, _ in candidates}
     for revision in revisions:
         old_content = by_path.get(revision.target_note_path)
-        if old_content is None or not revision.has_update:
+        if old_content is None:
+            continue
+        if not revision.has_update:
+            # This update was declined outright — a much higher-severity case
+            # than the below-relevance-threshold skip above if the entity has
+            # NEVER been populated: the stub _stub_content wrote at creation
+            # time is still exactly what's on disk, and this pass — like
+            # every one before it — didn't fold in real content either
+            # (issue #45).
+            if _is_unpopulated_stub(old_content):
+                name = name_by_path.get(revision.target_note_path, revision.target_note_path)
+                proposal.warnings.append(
+                    f"{name} is still an empty stub and this update didn't populate "
+                    "it either — its founding content may be permanently missing."
+                )
             continue
         new_content = _merge_entity_note(old_content, revision, today)
         if new_content is None:
@@ -1252,6 +1386,7 @@ def _apply_entity_revisions(
                 target_note_path=revision.target_note_path,
                 old_content=old_content,
                 new_content=new_content,
+                confidence=revision.confidence,
             )
         )
 
@@ -1311,6 +1446,35 @@ def _stub_content(metadata: dict, name: str) -> str:
     )
 
 
+# The Compiled Truth / Open Threads span _stub_content writes at creation
+# time, independent of entity name or frontmatter (both live outside this
+# span) — derived from _stub_content itself rather than duplicated as a
+# second literal, so the two can never silently drift apart. Used to detect
+# an entity that has NEVER been populated, so a declined update against it
+# can be flagged with a much higher-severity warning than "this particular
+# update was skipped" (issue #45).
+_stub_sections = _split_note_sections(frontmatter_lib.loads(_stub_content({}, "_")).content)
+assert _stub_sections is not None
+_STUB_TOP_SECTION = _stub_sections[1]
+del _stub_sections
+
+
+def _is_unpopulated_stub(content: str) -> bool:
+    """True if `content` (a full note file, frontmatter included) still has
+    exactly the Compiled Truth placeholder `_stub_content` writes at
+    creation time — i.e. nothing has ever synthesized real content into it,
+    across however many enrich passes have touched the entity since."""
+    try:
+        post = frontmatter_lib.loads(content)
+    except Exception:
+        return False
+    sections = _split_note_sections(post.content)
+    if sections is None:
+        return False
+    _, top_section, _ = sections
+    return top_section.strip() == _STUB_TOP_SECTION
+
+
 def validate_proposal(
     proposal: EnrichmentProposal, kb_root: Path | None = None
 ) -> list[ProposalIssue]:
@@ -1352,6 +1516,26 @@ def validate_proposal(
             continue
         for error in validate_frontmatter(entity_type, metadata, kb_root):
             issues.append(ProposalIssue(proposed.path, str(error)))
+
+        # Placement: a new page's directory must sit under its own type's
+        # schema.directory (a subdirectory is fine, e.g. "meetings/2026/...")
+        # — `_build_stub_entities` already routes stubs this way by
+        # construction; the model-chosen primary note gets no such
+        # guarantee, so it's checked here instead. A real routing bug, not
+        # cosmetic drift, so this is a hard stop rather than an
+        # auto-correction — unlike a filename/H1 slug mismatch.
+        schema = schemas.get(entity_type)
+        if schema is not None and schema.directory is not None:
+            schema_dir = schema.directory.rstrip("/")
+            proposed_dir = Path(proposed.path).parent.as_posix()
+            if proposed_dir != schema_dir and not proposed_dir.startswith(f"{schema_dir}/"):
+                issues.append(
+                    ProposalIssue(
+                        proposed.path,
+                        f"type '{entity_type}' pages belong under {schema_dir}/, "
+                        f"not {proposed_dir}/",
+                    )
+                )
 
     # Edits to existing notes must still satisfy their type's schema —
     # frontmatter_updates could otherwise merge in a value that breaks it.
@@ -2074,8 +2258,35 @@ def _load_source_text(config: WorkspaceConfig, source: Source) -> str:
         return raw
 
 
-def _sanitize_note(config: WorkspaceConfig, note: ProposedFile, title: str) -> ProposedFile:
-    """Keep model-proposed note paths inside the workspace and collision-free."""
+def _sanitize_note(
+    config: WorkspaceConfig, note: ProposedFile, proposal: "EnrichmentProposal"
+) -> ProposedFile:
+    """Keep the model-proposed primary note inside the workspace,
+    collision-free, and slug-consistent with itself.
+
+    The path-safety checks below are unchanged; what's new is slug drift
+    correction, matching the invariant `_build_stub_entities` already gets
+    right for stub pages: a page's filename is `slugify()` of its own
+    displayed name, never the model's freehand choice. `title`/`name`
+    frontmatter and the H1 heading stay exactly as authored (both are
+    legitimate human-cased display text, per note-conformance/SKILL.md) --
+    only the filename is re-derived when it disagrees with slugify(H1), or,
+    absent an H1, when it isn't already slugify()-equivalent to itself. Any
+    leading date prefix (`_LEADING_DATE_RE`, the same convention capture's
+    own dated filenames use) is preserved rather than folded into that
+    comparison -- a single-occurrence note like a meeting legitimately
+    carries a date the H1 doesn't, and that's not drift. Auto-correcting is
+    chosen over a hard ProposalIssue stop (mirrors how
+    `_reconcile_entity_links` already silently repairs proposed-note
+    wikilink drift): a filename typo/verbosity from the model is exactly
+    the kind of mechanical drift this codebase already auto-fixes rather
+    than bouncing the whole enrichment back to the user for. Every
+    correction is still recorded in proposal.warnings, never applied
+    invisibly. Directory placement (is this path even under its type's
+    schema.directory) is a real routing bug, not cosmetic drift, so that
+    stays a hard stop in validate_proposal() instead of being silently
+    moved here.
+    """
     root = config.root_path.resolve()
     candidate = Path(note.path)
 
@@ -2087,8 +2298,48 @@ def _sanitize_note(config: WorkspaceConfig, note: ProposedFile, title: str) -> P
     if not valid or (root / candidate).exists():
         # Routing unclear or collision: propose into the drafts directory instead.
         directory = Path(config.generated_directory)
-        candidate = _unused_path(root, directory, slugify(title))
-    return ProposedFile(path=str(candidate), content=note.content)
+        candidate = _unused_path(root, directory, slugify(proposal.title))
+        return ProposedFile(path=str(candidate), content=note.content)
+
+    return _reslug_proposed_note(candidate, note.content, proposal)
+
+
+def _reslug_proposed_note(
+    candidate: Path, content: str, proposal: "EnrichmentProposal"
+) -> ProposedFile:
+    try:
+        body = frontmatter_lib.loads(content).content
+    except Exception:
+        body = content
+
+    stem = candidate.stem
+    prefix_match = _LEADING_DATE_RE.match(stem)
+    prefix = prefix_match.group(0) if prefix_match else ""
+    rest = stem[len(prefix) :] or stem  # never strip a date-only stem down to nothing
+
+    h1_match = _H1_RE.search(body)
+    h1_text = h1_match.group(0).lstrip("#").strip() if h1_match else None
+    target_rest = slugify(h1_text) if h1_text else slugify(rest)
+    if target_rest == rest:
+        return ProposedFile(path=str(candidate), content=content)
+
+    old_path = str(candidate)
+    new_candidate = candidate.with_name(f"{prefix}{target_rest}{candidate.suffix}")
+    new_path = str(new_candidate)
+
+    def _replace(match: re.Match) -> str:
+        link_path = match.group(1).strip()
+        display = match.group(2)
+        if _normalize_link_path(link_path) != _normalize_link_path(old_path):
+            return match.group(0)
+        return f"[[{new_path}|{display}]]" if display is not None else f"[[{new_path}]]"
+
+    new_content = _WIKILINK_RE.sub(_replace, content)
+    proposal.warnings.append(
+        f"Corrected the proposed note's filename from {old_path} to {new_path} "
+        "to match slugify() (the same convention new entity stub pages already use)"
+    )
+    return ProposedFile(path=new_path, content=new_content)
 
 
 def _unused_path(root: Path, directory: Path, base: str) -> Path:

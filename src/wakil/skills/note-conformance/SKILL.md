@@ -33,11 +33,17 @@ mechanical part, and reserve this skill's judgment for what it can't cover.
 
 ## Procedure
 
-- [ ] Step 1: **Run the mechanical pass first.** For the note's entity type,
-      run `wakil schema migrate --dry-run --type <type>` and read the diff.
-      Apply it (`--yes` or per-file confirm) before doing anything by hand —
-      see "Mechanical fixes" below for exactly what this does and doesn't
-      cover.
+- [ ] Step 1: **Run the mechanical pass, then the real schema check.** For
+      the note's entity type, run `wakil schema migrate --dry-run --type
+      <type>` and read the diff; apply it (`--yes` or per-file confirm)
+      before doing anything by hand — see "Mechanical fixes" below for
+      exactly what this does and doesn't cover. Then, after any manual write
+      via `entity-enrichment`, `note-routing`, or `content-synthesis`, run
+      `wakil schema validate <file>` — this is the real `validate_frontmatter`
+      conformance check (required fields, enum values), not another
+      mechanical rename; a skill-driven write has no other Python-level
+      enforcement of it. Run both — they check different things, and neither
+      substitutes for the other.
 - [ ] Step 2: **Check the category rule.** Confirm `name:` vs `title:`
       matches the entity's schema category — see "Category rule" below. This
       is a hard schema error, not a style preference.
@@ -95,6 +101,13 @@ overwriting it blind. Use `--type <type>` to scope a run to one entity type,
 `--yes` to apply without per-file confirmation once you've reviewed the plan,
 and `--commit` to have each type's fixes land as its own `wakil chore: ...`
 commit.
+
+`wakil schema validate <path>...` (`src/wakil/app/schema_validate_service.py`)
+is the complementary, non-mechanical check: it parses each file's
+frontmatter and runs it through the same `validate_frontmatter` gate
+`wakil enrich` already applies before every write, reporting required-field
+and enum-value errors and exiting non-zero if any file fails. It renames or
+rewrites nothing — run it after `wakil schema migrate`, not instead of it.
 
 ## Category rule: `name:` vs `title:`
 
@@ -205,6 +218,13 @@ relative" rule itself is non-negotiable regardless of workspace.
 
 **External links** are copied verbatim from their source — see "Deterministic
 links" below.
+
+**Embeds** use `![[target|alias]]` — target first, alias second, the same
+order as a plain wikilink. `![[diagram.png|Sapwood diagram]]` embeds
+`diagram.png` and displays it captioned "Sapwood diagram." The reversed
+order, `![[Sapwood diagram|diagram.png]]`, is wrong: it embeds a file
+literally named `Sapwood diagram` and captions it `diagram.png` — a broken
+embed, not a captioned one. The alias is always optional and always second.
 
 ## No-slop output bar
 

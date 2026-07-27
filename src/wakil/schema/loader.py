@@ -57,8 +57,17 @@ class FieldSpec(BaseModel):
 
 class EntitySchema(BaseModel):
     type: str
+    # A higher-priority root (kb-local/user/override) can set this to
+    # suppress a type entirely from the effective catalog — e.g. a vault
+    # that wants to route what would be a built-in `concept`/`project`/etc.
+    # to its own kb-local type instead, rather than merely redefining the
+    # built-in one (see `_load_cached`). A disabled marker file only needs
+    # `type` + `disabled`; the other fields are meaningless for a type that
+    # won't appear in the catalog, so `_check_category_conventions` skips
+    # its checks below when this is set.
+    disabled: bool = False
     directory: str | None = None  # canonical directory, None = no single home
-    category: Category
+    category: Category | None = None
     # Which body-shape template this type's proposed notes should follow
     # (a name, resolved to actual template prose by
     # `resolve_page_shape_template` — see that function's docstring for why
@@ -67,14 +76,23 @@ class EntitySchema(BaseModel):
     # and they don't always agree — `organization` and `project` are both
     # "hybrid" category but one is single-occurrence and the other
     # accumulates).
-    page_shape: str
-    fields: dict[str, FieldSpec]
+    page_shape: str | None = None
+    fields: dict[str, FieldSpec] = Field(default_factory=dict)
     # Per-origin additive sub-schemas (source only), keyed by the base
     # `origin` enum value.
     origins: dict[str, dict[str, FieldSpec]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_category_conventions(self) -> "EntitySchema":
+        # A disabled-marker file exists only to suppress a type from the
+        # effective catalog — it never gets validated as a usable schema,
+        # so none of the category/page_shape/fields conventions apply.
+        if self.disabled:
+            return self
+        if self.category is None:
+            raise ValueError(f"{self.type}: `category` is required unless `disabled: true`")
+        if self.page_shape is None:
+            raise ValueError(f"{self.type}: `page_shape` is required unless `disabled: true`")
         # The identity/document/hybrid split *is* the name/title rule
         # (entity-metadata.md, cross-cutting findings): a schema that
         # contradicts its own category is a transcription bug.
@@ -185,9 +203,22 @@ def resolve_entity_schema(
 @lru_cache(maxsize=32)
 def _load_cached(roots: tuple[tuple[Path, str], ...]) -> dict[str, EntitySchema]:
     by_type: dict[str, EntitySchema] = {}
+    # Types disabled by a higher-priority root stay excluded even if a
+    # lower-priority root (typically built-in) defines them later — a
+    # kb-local `disabled: true` marker suppresses the type outright rather
+    # than just redefining it (issue #38).
+    suppressed: set[str] = set()
     for path, _source in roots:
         for schema in _load_root(path).values():
-            by_type.setdefault(schema.type, schema)
+            # Whole-file, first-root-wins for this type, whichever way
+            # (enabled or disabled) an earlier, higher-priority root already
+            # decided it.
+            if schema.type in by_type or schema.type in suppressed:
+                continue
+            if schema.disabled:
+                suppressed.add(schema.type)
+                continue
+            by_type[schema.type] = schema
     if not by_type:
         searched = ", ".join(str(path) for path, _ in roots) or "(no roots found)"
         raise SchemaLoadError(f"No entity schemas found in any of: {searched}")
