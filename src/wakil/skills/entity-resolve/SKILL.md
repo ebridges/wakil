@@ -72,6 +72,15 @@ Rules:
 - When an entity genuinely fits two types and nothing in the source settles
   it, skip it rather than picking whichever matched first — an ambiguous
   case surfaced to the user beats a silently wrong page.
+- Category context and sibling-note precedent often do settle it, though,
+  before you reach for skip. Reference material — a bare excerpt, a
+  third-party instructional piece — that lives within a specific
+  craft/project category, with no personal reading record attached, belongs
+  to that category's own reference type, not the general reading-category
+  type it superficially resembles. Check whether sibling notes already
+  filed under the same source directory or category were resolved a
+  particular way; existing precedent there is a strong signal, and matching
+  it beats re-deriving the type from content shape alone.
 - Match against existing notes by identity, not string equality: "Jane",
   "Jane Doe", and "jane-doe" are the same person if the context says so. Do
   not create a duplicate page for a spelling variant of an existing note.
