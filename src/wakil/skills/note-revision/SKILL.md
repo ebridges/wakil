@@ -50,7 +50,9 @@ is the single worst failure mode this skill exists to prevent.
       three-tier dedup heuristic" below.
 - [ ] Step 4: **Apply the region-specific update discipline**:
       re-synthesize State, append to Timeline. Never regenerate the whole
-      page from only the new source. See "State vs. Timeline" below.
+      page from only the new source. See "State vs. Timeline" below. Carry
+      forward every attachment/URL reference the same way — see "Attachment
+      and raw URL fidelity" below.
 - [ ] Step 5: **Diff your draft against the current page before saving.**
       If the new version is shorter, or drops a fact/frontmatter key that
       was there before, stop — you are very likely clobbering, not
@@ -91,6 +93,21 @@ clobbering. Prefer surgical edits — append a Timeline entry, edit the State
 block — over rewriting an existing page wholesale. Treat "my new version is
 shorter than the old one" as a stop-and-check signal, not something to wave
 through.
+
+## Attachment and raw URL fidelity
+
+Re-synthesizing State must carry forward every inline image, PDF, or other
+attachment reference, and every raw URL — whether it's already on the note
+or newly present in the source being merged — the same as it carries
+forward any other fact. Collapsing an existing `![[...]]` embed, or a
+source's inline attachment, into a prose sentence while writing the new
+State is the clobbering bug in miniature: the result reads as "cleaner" and
+is in fact a regression. As with any other fact, only attachments and URLs
+referenced inline in the source's own text are in scope for this
+carrying-forward duty; a sibling file sitting in the source's folder that
+the text itself never mentions is a known, out-of-scope gap for now (see
+`content-synthesis`'s own note on this boundary) — this step preserves what
+was already referenced, it does not scan folders for what wasn't.
 
 ## The three-tier dedup heuristic
 
