@@ -68,6 +68,15 @@ at 12 people."
 - Good (verbatim quote): Per the source, "Revenue grew 340% in Q3 while
   headcount stayed flat at 12 people."
 
+## Attachment and raw URL fidelity
+
+The same verbatim discipline above extends to inline images, PDFs, and other
+attachments, and to raw URLs (a YouTube link, a shopping link, a reference
+link) present in the source: carry each one into the note as an embed or
+link where the page shape supports one, otherwise list it explicitly (e.g.
+an "Attachments" section), rather than replacing it with a prose-only
+description or dropping it without mention.
+
 ## "Why it matters" ties to specific knowledge, never a generic statement
 
 A synthesized note that says content is "relevant to the user's interests"
