@@ -344,6 +344,22 @@ def test_capture_slug_strips_leading_date_from_filename(workspace, kb_path):
     assert proposal.title == CAPTURE_METADATA_JSON["title"]
 
 
+def test_capture_slug_bare_date_filename_does_not_fall_back_to_untitled(workspace, kb_path):
+    # Regression test for #79: a source whose own filename is nothing but a
+    # date (no descriptive text at all) used to have _LEADING_DATE_RE applied
+    # twice -- once against the filename's own stem, once again against the
+    # already-slugified result -- collapsing it to the literal "untitled"
+    # even though a perfectly good, model-generated title exists in the
+    # frontmatter. The raw capture's filename basis must stay independent of
+    # that model title (docs/adr/0010), but it must not degrade to a generic
+    # placeholder either.
+    bare_date = kb_path / "2014-02-17.md"
+    bare_date.write_text("Some text with no descriptive filename.\n")
+    proposal = prepare_capture(workspace, "text", _capture_client(), file=bare_date)
+    assert "untitled" not in proposal.raw_file.path
+    assert proposal.title == CAPTURE_METADATA_JSON["title"]
+
+
 def test_capture_adds_h1_matching_the_destination_filename(workspace, transcript):
     proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
     body = proposal.raw_file.content.split("---", 2)[2].lstrip("\n")
