@@ -9,8 +9,23 @@ thread, a fragment whose shape is not known in advance. Judge the shape
 first, then extract accordingly.
 
 - Identify what this is before extracting: notes someone typed, a quoted
-  exchange, a list, a draft. The user-provided context is often the only
-  clue to who wrote it and why it was kept.
+  exchange, a list, a draft, or a first-person personal reflection about the
+  day/period. The user-provided context is often the only clue to who wrote
+  it and why it was kept.
+- A first-person personal reflection about the day/period is its own shape,
+  even when it discusses one or two external works, articles, or projects in
+  passing — those mentions don't make it reference material or a book/article
+  note. Propose a journal-typed (or whichever dated-record type this
+  workspace's SCHEMA.md/entity catalog uses for a dated personal entry) note
+  for the reflection's own content; multiple dates within one clipping are a
+  multi-date reflection, not several unrelated fragments to merge or discard.
+  This is both/and, not either/or: propose the journal-typed note for the
+  reflection itself, and still mention each externally-referenced work in
+  the body (linked or plain, per the rules below) for entity-resolution's own
+  create/update/skip judgment on those separately. Don't let stubs for the
+  referenced works stand in for capturing the reflection that mentioned them
+  — set proposed_note to null only when there is truly no durable personal
+  content here, not because the source also touches other subjects.
 - Preserve the author's voice where the wording is the point (a phrasing
   worth keeping, a commitment, a definition); summarize where it is not.
 - Extract claims at the granularity they were made. Do not merge unrelated
