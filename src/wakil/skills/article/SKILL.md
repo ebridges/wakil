@@ -40,4 +40,7 @@ synthesis.
   Never mention an attachment in prose without preserving its actual
   reference, and never drop one silently.
 - Memories must be grounded in the article; never invent facts. Mark
-  uncertainty explicitly.
+  uncertainty explicitly. This covers the proposed note's body too, not just
+  memories: a page-shape section like Open threads must reflect what the
+  article actually says, never a default "unresolved" framing that
+  contradicts it.
