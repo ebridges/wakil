@@ -941,6 +941,40 @@ def _proposed_note_subject_slug(proposed_note: ProposedFile | None) -> str | Non
     return slugify(subject)
 
 
+def _is_source_self_mirror(resolution: EntityResolution, proposal: EnrichmentProposal) -> bool:
+    """Would this `entity_type: source` create just mirror the very source
+    being enriched (see issue #58)?
+
+    The source's own raw capture already exists on disk (that's what
+    prepare_enrichment was called on); a create-resolution proposing
+    `entity_type: source` for the same subject is inherently redundant, not
+    a legitimate new page. A source citing some *other*, distinct source is
+    rare and stays out of scope — the ability to distinguish the two cases
+    is limited to what's already in the proposal, so the signal used is
+    slug overlap between the resolution's name and the source's own title:
+    exact matches ("Deep Work" == "Deep Work"), decorated variants ("Deep
+    Work Highlights" over "Deep Work"), and cases with substantial shared
+    wording all count; a name sharing no real wording with the source's own
+    title (a distinctly-named book or article it merely cites) does not.
+    """
+    if resolution.entity_type != "source":
+        return False
+    name_slug = slugify(resolution.name)
+    title_slug = slugify(proposal.title)
+    if not name_slug or not title_slug or name_slug == "untitled" or title_slug == "untitled":
+        return False
+    if name_slug == title_slug or name_slug.startswith(title_slug) or title_slug.startswith(
+        name_slug
+    ):
+        return True
+    name_words = {w for w in name_slug.split("-") if len(w) > 2}
+    title_words = {w for w in title_slug.split("-") if len(w) > 2}
+    if not name_words or not title_words:
+        return False
+    overlap = name_words & title_words
+    return len(overlap) / min(len(name_words), len(title_words)) >= 0.5
+
+
 def _build_stub_entities(
     config: WorkspaceConfig, proposal: EnrichmentProposal
 ) -> list[ProposedFile]:
@@ -967,6 +1001,13 @@ def _build_stub_entities(
     duplicate in substance. A create-resolution whose slugified name matches
     proposed_note's own name/title is suppressed here rather than written as
     a second, always-empty page for the same subject (see issue #36).
+
+    A create-resolution of `entity_type: source` that just mirrors the
+    source currently being enriched is suppressed the same way (issue #58):
+    the raw source is already captured on disk, so re-proposing it as its
+    own entity is a structural no-op that satisfies "don't skip the
+    source's own subject" (issue #44) without ever creating the actual
+    domain entity that guidance was meant to produce.
     """
     schemas = load_entity_schemas(config.root_path)
     today = datetime.now(UTC).date().isoformat()
@@ -1002,6 +1043,14 @@ def _build_stub_entities(
             proposal.warnings.append(
                 f"{resolution.name}: already represented by the proposed note "
                 f"({proposal.proposed_note.path}) — not creating a duplicate page"
+            )
+            kept_resolutions.append(resolution)
+            continue
+        if _is_source_self_mirror(resolution, proposal):
+            proposal.warnings.append(
+                f"{resolution.name}: entity_type 'source' would just mirror the source "
+                "already being enriched — not creating a redundant self-page; the actual "
+                "domain entity for this subject was likely never decided"
             )
             kept_resolutions.append(resolution)
             continue

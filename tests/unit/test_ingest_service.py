@@ -2147,6 +2147,97 @@ def test_build_stub_entities_routable_type_unaffected(workspace):
     assert proposal.warnings == []
 
 
+def test_stub_suppressed_for_source_self_mirror_create(workspace):
+    # Issue #58: entity-resolution satisfying "create a minimal stub rather
+    # than skip it" (issue #44) by proposing `entity_type: source` for the
+    # very source being enriched is a structural no-op -- that source is
+    # already captured as the raw file. The exact-name case (a bare-link
+    # bookmark whose title becomes both the source's own title and the
+    # resolution's proposed name).
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Building a Router Table",
+        entity_resolutions=[
+            EntityResolution(
+                name="Building a Router Table", entity_type="source", action="create"
+            ),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert stubs == []
+    assert any(
+        "Building a Router Table" in warning
+        and "source" in warning
+        and "mirror" in warning
+        for warning in proposal.warnings
+    )
+    # Kept in entity_resolutions (like the proposed_note-subject suppression)
+    # rather than dropped -- `source` has a real schema and directory, so
+    # validate_proposal's hard-stop loop never sees it as an error either way.
+    assert [r.entity_type for r in proposal.entity_resolutions] == ["source"]
+
+
+def test_stub_suppressed_for_source_self_mirror_create_with_decorated_name(workspace):
+    # The redundant create's proposed name is often a decorated variant of
+    # the source's own title ("<title> Highlights", "Notes on <title>"), not
+    # an exact match -- the suppression must still catch it.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Deep Work",
+        entity_resolutions=[
+            EntityResolution(
+                name="Deep Work Highlights", entity_type="source", action="create"
+            ),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert stubs == []
+    assert any("mirror" in warning for warning in proposal.warnings)
+
+
+def test_stub_kept_for_source_create_of_a_different_cited_source(workspace):
+    # Not a blanket rejection of type=source creates: a source citing some
+    # other, distinctly-named source it references is out of scope for this
+    # suppression and must still get its stub.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Weeknotes: July",
+        entity_resolutions=[
+            EntityResolution(
+                name="Atomic Habits", entity_type="source", action="create"
+            ),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert [stub.path for stub in stubs] == ["sources/atomic-habits.md"]
+    assert proposal.warnings == []
+
+
+def test_stub_kept_for_legitimate_domain_type_create_alongside_own_subject(workspace):
+    # No regression: a create-resolution for the source's actual subject,
+    # under a real (non-`source`) domain type, is unaffected.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Building a Router Table",
+        entity_resolutions=[
+            EntityResolution(
+                name="Building a Router Table", entity_type="project", action="create"
+            ),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert [stub.path for stub in stubs] == ["projects/building-a-router-table.md"]
+    assert proposal.warnings == []
+
+
 def test_index_source_create_does_not_block_apply(workspace, transcript):
     # Regression: entity-resolve/SKILL.md now steers the model toward
     # proposing entity_type: index, action: create for index/list-shaped

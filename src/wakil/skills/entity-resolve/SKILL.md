@@ -44,7 +44,12 @@ subject: a source with real, attributable content about a single entity —
 a single-URL bookmark, a short reference link, a sparse build-plan note —
 clears the bar even when the content is thin. Create a minimal stub
 rather than skip it; a stub can always be filled in later, but a skip
-leaves no trace at all.
+leaves no trace at all. That stub is never `entity_type: source` for the
+source you're resolving right now — it's already captured as the raw file
+being enriched, so proposing it again as its own entity just mirrors what
+already exists rather than creating anything. Name the actual best-fit
+domain type for the subject (project, concept, person, whatever the
+content is really about) and create that instead.
 
 - Person: will the user plausibly interact with them again, or are they
   otherwise relevant to ongoing work? A name surfaced once with no
