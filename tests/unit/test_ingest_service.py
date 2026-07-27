@@ -2280,6 +2280,45 @@ def test_build_stub_entities_routable_type_unaffected(workspace):
     assert proposal.warnings == []
 
 
+def test_build_stub_entities_carries_proposed_frontmatter_confidence(workspace):
+    # A create-time frontmatter value inferred from thin evidence (issue #72,
+    # the create-path counterpart of #39's EntityRevision.confidence) must be
+    # distinguishable downstream, not merged in looking exactly as confident
+    # as a well-supported one.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Some Source",
+        entity_resolutions=[
+            EntityResolution(
+                name="Dana Prieto",
+                entity_type="person",
+                action="create",
+                proposed_frontmatter_confidence=0.2,
+            ),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert len(stubs) == 1
+    assert stubs[0].confidence == 0.2
+
+
+def test_build_stub_entities_confidence_defaults_to_none(workspace):
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Some Source",
+        entity_resolutions=[
+            EntityResolution(name="Dana Prieto", entity_type="person", action="create"),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert len(stubs) == 1
+    assert stubs[0].confidence is None
+
+
 def test_stub_suppressed_for_source_self_mirror_create(workspace):
     # Issue #58: entity-resolution satisfying "create a minimal stub rather
     # than skip it" (issue #44) by proposing `entity_type: source` for the

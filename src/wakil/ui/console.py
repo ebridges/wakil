@@ -146,11 +146,21 @@ def _print_file_preview(proposed: ProposedFile) -> None:
     preview = proposed.content[:1500]
     if len(proposed.content) > 1500:
         preview += "\n…"
+    low_confidence = (
+        proposed.confidence is not None and proposed.confidence < _LOW_CONFIDENCE_THRESHOLD
+    )
+    title = f"NEW {proposed.path}"
+    border_style = "green"
+    if proposed.confidence is not None:
+        title += f" (confidence {proposed.confidence:.2f})"
+    if low_confidence:
+        title = f"⚠ LOW-CONFIDENCE {title} — review before applying"
+        border_style = "red"
     console.print(
         Panel(
             Syntax(preview, "markdown", background_color="default"),
-            title=f"NEW {proposed.path}",
-            border_style="green",
+            title=title,
+            border_style=border_style,
         )
     )
 
@@ -162,12 +172,12 @@ def print_entity_update_preview(update: EntityUpdate) -> None:
     _print_entity_update(update)
 
 
-# Below this, an update's compiled_truth/frontmatter_updates are treated as
-# thinly-supported enough to flag for human review rather than rendered
-# identically to a well-supported one (issue #39) — the same bar
-# CandidateMemoryModel/EntityResolution confidence values are shown at, but
-# with a visible distinction here since an entity update touches an
-# existing page's content.
+# Below this, an update's compiled_truth/frontmatter_updates (issue #39), or
+# a create's proposed_frontmatter (issue #72), are treated as thinly-
+# supported enough to flag for human review rather than rendered identically
+# to a well-supported one — the same bar CandidateMemoryModel/EntityResolution
+# confidence values are shown at, but with a visible distinction here since
+# these touch a page's actual content.
 _LOW_CONFIDENCE_THRESHOLD = 0.5
 
 
@@ -296,6 +306,16 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
         console.print(f"[bold]New entity pages ({len(proposal.stub_entities)}):[/bold]")
         for stub in proposal.stub_entities:
             _print_file_preview(stub)
+        low_confidence_stubs = [
+            stub.path
+            for stub in proposal.stub_entities
+            if stub.confidence is not None and stub.confidence < _LOW_CONFIDENCE_THRESHOLD
+        ]
+        if low_confidence_stubs:
+            console.print(
+                f"[red]Flagged for review ({len(low_confidence_stubs)} low-confidence "
+                f"new page(s)):[/red] {', '.join(low_confidence_stubs)}"
+            )
     if proposal.entity_updates:
         console.print(f"[bold]Updates to existing pages ({len(proposal.entity_updates)}):[/bold]")
         for update in proposal.entity_updates:

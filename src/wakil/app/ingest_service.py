@@ -102,8 +102,18 @@ class IngestError(RuntimeError):
 
 @dataclass
 class ProposedFile:
+    """A new file to write. `confidence` mirrors `EntityUpdate.confidence` —
+    populated only for a stub built from an action=create entity resolution
+    (`EntityResolution.proposed_frontmatter_confidence`), so a thinly-
+    supported frontmatter guess (e.g. a book's `status` inferred from one
+    early highlight) can be flagged in the enrich preview instead of
+    rendering identically to a well-supported create. None everywhere else
+    (raw captures, extraction's own proposed_note), where the concept
+    doesn't apply."""
+
     path: str  # workspace-relative
     content: str
+    confidence: float | None = None
 
 
 @dataclass
@@ -1079,7 +1089,13 @@ def _build_stub_entities(
         for date_field in ("created", "updated"):
             if date_field in schema.fields and not metadata.get(date_field):
                 metadata[date_field] = today
-        stubs.append(ProposedFile(path=path, content=_stub_content(metadata, resolution.name)))
+        stubs.append(
+            ProposedFile(
+                path=path,
+                content=_stub_content(metadata, resolution.name),
+                confidence=resolution.proposed_frontmatter_confidence,
+            )
+        )
 
     proposal.entity_resolutions = kept_resolutions
     return stubs
