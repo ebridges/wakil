@@ -1762,6 +1762,65 @@ def test_resolution_double_failure_degrades_visibly(workspace, transcript):
     apply_enrichment(workspace, proposal)
 
 
+def test_prepare_enrichment_warns_when_nothing_produced(workspace, transcript):
+    # Issue #44: no proposed_note, no stub (create was skipped), no entity
+    # update -- a source that resolves to a complete no-op must say so
+    # explicitly, naming the source, rather than staying silent.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {"name": "Acme", "entity_type": "company", "action": "skip", "confidence": 0.4}
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution])
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.proposed_note is None
+    assert proposal.stub_entities == []
+    assert proposal.entity_updates == []
+    assert any(
+        str(source_id) in warning and "nothing will be written" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_prepare_enrichment_no_false_positive_warning_when_note_produced(workspace, transcript):
+    # Regression guard: a source that does produce a proposed note must not
+    # also get the "nothing will be written" warning.
+    source_id = _capture(workspace, transcript)
+    client = FakeClient()  # default MODEL_JSON has a proposed_note
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.proposed_note is not None
+    assert not any("nothing will be written" in warning for warning in proposal.warnings)
+
+
+def test_prepare_enrichment_no_false_positive_warning_when_stub_produced(
+    workspace, transcript
+):
+    # A create-only source (no proposed_note, but a stub entity) also must
+    # not get the no-op warning.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+                "proposed_frontmatter": {"status": "active", "role": "Claims platform lead"},
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution])
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.stub_entities != []
+    assert not any("nothing will be written" in warning for warning in proposal.warnings)
+
+
 def test_enrichment_guides_reach_prompt(workspace, transcript):
     (workspace.root_path / "RESOLVER.md").write_text("# Resolver\n\nMeetings go in meetings/.\n")
     source_id = _capture(workspace, transcript)

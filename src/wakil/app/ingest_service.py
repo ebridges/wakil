@@ -684,7 +684,29 @@ def prepare_enrichment(
 
     # DAG node 2: entity resolution — always invoked, never optional.
     _run_entity_resolution(config, client, source_text, related_pairs, proposal, guides)
+    _warn_if_nothing_produced(source_id, proposal)
     return proposal
+
+
+def _warn_if_nothing_produced(source_id: int, proposal: EnrichmentProposal) -> None:
+    """Whole-proposal visibility check (issue #44): every skip along the way
+    (a notability judgment in entity-resolve/SKILL.md, a below-relevance
+    update, a has_update=False revision, a failed model call) already
+    degrades visibly on its own, but none of them know whether *every other*
+    path for this source also came up empty. If proposed_note, stub_entities,
+    and entity_updates are all empty here, the source is about to be applied
+    (or previewed) as a complete no-op — say so once, naming the source,
+    rather than leaving that silent."""
+    nothing_produced = (
+        proposal.proposed_note is None
+        and not proposal.stub_entities
+        and not proposal.entity_updates
+    )
+    if nothing_produced:
+        proposal.warnings.append(
+            f"Source {source_id} ('{proposal.title}'): enrichment produced no new page, "
+            "stub, or update for any entity — nothing will be written for this source."
+        )
 
 
 # A run of 1-4 capitalized words: "Mosaic", "Ian Gutwinski", "Riviera Partners".
