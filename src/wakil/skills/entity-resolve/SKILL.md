@@ -38,6 +38,22 @@ company it's really about. If the source's content is already merged
 somewhere else, that's a reason to skip the dated record, not a coincidence
 to ignore.
 
+That same check runs the other way too, across proposals rather than
+within one: when the source itself describes a dated occurrence — a
+call, a meeting, an advisor or provider conversation — check the
+existing notes provided for one that already covers that same date and
+subject, not just an entity whose name matches a participant. An earlier
+proposal may already have recorded this occurrence as a journal entry or
+meeting note, even though nothing about it shares a name with the person
+or company this source also touches. When one does, defer to it —
+propose update against that existing note, or skip if it's already
+fully captured — instead of creating a new entity of whatever type this
+source would otherwise suggest. Confirmation rounds on this failure have
+landed on a different wrong destination type each time (a meeting page,
+then a project, then a person); that instability is itself the tell that
+the miss is "never checked for an existing record of this occurrence,"
+not "picked the wrong type once checking was done."
+
 Some sources are not really about one primary entity at all — they're
 themselves an index or list spanning many (a reading tracker, a running
 project list, a reflective entry that's really two separate dated
