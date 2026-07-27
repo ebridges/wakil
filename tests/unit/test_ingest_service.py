@@ -1803,6 +1803,74 @@ def test_build_stub_entities_routable_type_unaffected(workspace):
     assert proposal.warnings == []
 
 
+def test_index_source_create_does_not_block_apply(workspace, transcript):
+    # Regression: entity-resolve/SKILL.md now steers the model toward
+    # proposing entity_type: index, action: create for index/list-shaped
+    # sources (issue #40). That resolution can't get a stub (directory:
+    # null), and validate_proposal() hard-stops on any pending create whose
+    # type has no canonical directory — so if _build_stub_entities left it
+    # in proposal.entity_resolutions, the whole apply would be aborted
+    # (nothing written, not even this source's own unrelated proposed_note)
+    # every time this newly-encouraged shape came up. It must not be.
+    source_id = _capture(workspace, transcript)
+    index_resolution_json = {
+        "entities": [
+            {
+                "name": "Reading List",
+                "entity_type": "index",
+                "action": "create",
+                "confidence": 0.8,
+            },
+        ]
+    }
+    client = FakeClient([MODEL_JSON, index_resolution_json])
+
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    # No stub could be built and the resolution is gone from
+    # entity_resolutions -- validate_proposal's create-scanning loop never
+    # sees it, so it can no longer trigger a hard stop.
+    assert proposal.stub_entities == []
+    assert proposal.entity_resolutions == []
+    assert any(
+        "Reading List" in warning
+        and "index" in warning
+        and "no canonical directory" in warning
+        for warning in proposal.warnings
+    )
+    assert validate_proposal(proposal) == []
+
+    # The rest of the proposal (unrelated proposed_note) still applies.
+    result = apply_enrichment(workspace, proposal)
+    assert (workspace.root_path / "meetings/2026/2026-07-09-claims-kickoff.md").exists()
+    assert result.files_written == ["meetings/2026/2026-07-09-claims-kickoff.md"]
+
+
+def test_validate_proposal_still_hard_stops_on_unknown_type(workspace):
+    # The index/no-directory case above must be neutralized narrowly -- a
+    # create for a type with no schema at all is a genuinely different,
+    # real error and must still hard-stop validate_proposal.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Some Source",
+        entity_resolutions=[
+            EntityResolution(
+                name="Mystery Thing", entity_type="not-a-real-type", action="create"
+            ),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert stubs == []
+    # Still kept in entity_resolutions -- unlike the index/no-directory case.
+    assert [r.entity_type for r in proposal.entity_resolutions] == ["not-a-real-type"]
+
+    issues = validate_proposal(proposal)
+    assert len(issues) == 1
+    assert "no entity schema defines type" in issues[0].message
+
+
 def test_enrichment_guides_reach_prompt(workspace, transcript):
     (workspace.root_path / "RESOLVER.md").write_text("# Resolver\n\nMeetings go in meetings/.\n")
     source_id = _capture(workspace, transcript)
