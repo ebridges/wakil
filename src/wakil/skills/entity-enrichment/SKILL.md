@@ -41,16 +41,31 @@ re-derive it.
 (`_build_stub_entities`, `src/wakil/app/ingest_service.py`): frontmatter
 carrying only what the CLI's internal resolution DAG step proposed plus
 `created`/`updated`, and a body skeleton of `## Compiled Truth`,
-`## Open Threads`, and `## Timeline / Log` (`_stub_content`) — empty,
-waiting to be filled. That's identity resolution and page scaffolding, not
-enrichment. The CLI path does not decide which of the source's *other*
-mentions deserve a back-link, does not write anything into State (Compiled
-Truth), and does not add Timeline entries beyond what extraction directly
-proposed.
+`## Open Threads`, and `## Timeline / Log` (`_stub_content`). A follow-up
+model call in the same DAG pass (`_synthesize_stub_content`, issue #70)
+then tries to replace that skeleton with a first Compiled Truth and
+Timeline entry grounded in *this one source* — reusing the exact
+`EntityRevision`/note-revision machinery `_run_entity_updates` uses for
+existing notes, since a from-scratch stub and a still-unpopulated one
+(`_is_unpopulated_stub`) are the same problem. When the source genuinely
+doesn't support real content for that entity, or the synthesis call itself
+fails, the plain placeholder is left in place — never a fabrication — with
+a visible warning in the enrich preview.
 
-That judgment is this skill's job — applied to a freshly-stubbed page, an
-existing page being updated with new signal, or a mention encountered during
-`note-revision` or manual editing, anywhere outside the CLI's fixed DAG.
+That's still identity resolution and single-source scaffolding, not full
+enrichment. The CLI path does not decide which of the source's *other*
+mentions deserve a back-link, does not draw on any *other* existing
+knowledge about the entity (no cross-referencing `related_notes`, no
+research beyond this one source), and does not add Timeline entries beyond
+what this one source supports.
+
+That broader judgment — cross-referencing what the knowledge base already
+knows, deciding which other mentions earn a link, building out texture
+beyond what a single source can support — is this skill's job. Applied to
+a freshly-stubbed page (whether or not the CLI's own pass already
+populated it), an existing page being updated with new signal, or a
+mention encountered during `note-revision` or manual editing, anywhere
+outside the CLI's fixed DAG.
 
 ## Procedure
 

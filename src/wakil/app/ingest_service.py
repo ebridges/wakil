@@ -945,6 +945,10 @@ def _run_entity_resolution(
     _suppress_stubs_matching_updates(proposal)
     _suppress_dated_record_stubs_matching_updates(config, proposal)
     _suppress_proposed_note_matching_updates(proposal)
+    # Only now synthesize initial content for whichever stubs actually
+    # survive suppression (issue #70) — anything dropped above never needs
+    # its own model call.
+    _synthesize_stub_content(config, client, text, proposal)
     _reconcile_entity_links(config, proposal)
 
 
@@ -1338,6 +1342,71 @@ def _suppress_proposed_note_matching_updates(proposal: EnrichmentProposal) -> No
             f"separate {entity_type} record for the same source"
         )
         proposal.proposed_note = None
+
+
+def _synthesize_stub_content(
+    config: WorkspaceConfig, client: ModelClient, text: str, proposal: EnrichmentProposal
+) -> None:
+    """Fourth model call: populate each surviving create-stub's Compiled
+    Truth / Timeline from this source, instead of leaving `_stub_content`'s
+    hardcoded placeholder on disk forever (issue #70) — every fresh-create
+    note used to reach disk empty regardless of how much the source actually
+    said about it.
+
+    Deliberately reuses `_run_entity_updates`'s own machinery rather than
+    inventing a parallel one: the same `EntityRevision` contract, the same
+    `note-revision` skill and `build_revision_prompt`, and the same
+    `_merge_entity_note` surgical merge. The trick is that a from-scratch
+    create and a revision of a still-unpopulated stub are structurally the
+    same problem — `_is_unpopulated_stub` (issue #45) already treats
+    `_stub_content`'s exact placeholder text as "nothing has ever been
+    synthesized here yet," so passing that same about-to-be-written
+    placeholder in as `old_content` and asking the same "does this source
+    warrant an update" question the update path asks is a faithful call, not
+    a repurposed one: the note's actual current content on disk *is* that
+    placeholder. `has_update=False` (the source doesn't actually support any
+    synthesizable content for this entity) leaves the stub exactly as
+    `_build_stub_entities` wrote it — a minimal, honest placeholder, never a
+    fabrication.
+
+    Degrades visibly: a failed call leaves every stub with its plain
+    placeholder content plus a warning, never a crash — mirrors
+    `_run_entity_resolution`'s own `ModelContractError` handling.
+    """
+    if not proposal.stub_entities:
+        return
+
+    targets = [(stub.path, stub.content) for stub in proposal.stub_entities]
+    skill = load_skill("note-revision", config.root_path)
+    system = build_system_prompt(skill, EntityRevisionOutput)
+    cacheable_prefix, prompt = build_revision_prompt(
+        text, proposal.summary, targets, context=proposal.context
+    )
+    try:
+        result = complete_with_contract(
+            client, system, prompt, EntityRevisionOutput, cacheable_prefix=cacheable_prefix
+        )
+    except ModelContractError as exc:
+        count = len(targets)
+        entity_word = "entity" if count == 1 else "entities"
+        names = ", ".join(path for path, _ in targets)
+        proposal.warnings.append(
+            f"Initial content synthesis failed for {count} new {entity_word} ({names}); "
+            f"created as empty placeholder stub{'s' if count != 1 else ''} instead: {exc}"
+        )
+        return
+
+    today = datetime.now(UTC).date().isoformat()
+    by_path = {stub.path: stub for stub in proposal.stub_entities}
+    for revision in result.revisions:
+        stub = by_path.get(revision.target_note_path)
+        if stub is None or not revision.has_update:
+            # has_update=False: the source doesn't support real content for
+            # this entity -- leave _build_stub_entities' placeholder as-is.
+            continue
+        merged = _merge_entity_note(stub.content, revision, today)
+        if merged is not None:
+            stub.content = merged
 
 
 # Wikilink parsing/normalization live in wakil.knowledge.wikilinks (shared
@@ -1831,7 +1900,13 @@ def _revise_candidates(
 
 
 def _stub_content(metadata: dict, name: str) -> str:
-    """Compiled Truth / Timeline skeleton per docs/entity-model.md."""
+    """Compiled Truth / Timeline skeleton per docs/entity-model.md.
+
+    Its caller, `_build_stub_entities`, always writes this placeholder
+    first; `_synthesize_stub_content` (issue #70) then tries to replace it
+    with real content synthesized from the source, and falls back to this
+    exact placeholder — never a fabrication — whenever the source doesn't
+    support that or the synthesis call itself fails."""
     frontmatter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
     return (
         f"---\n{frontmatter}---\n\n"
