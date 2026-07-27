@@ -977,6 +977,43 @@ def test_entity_update_applies_when_model_says_has_update(workspace, transcript,
     assert "New synthesized truth." in on_disk
 
 
+def test_entity_update_carries_low_confidence_through_to_proposal(workspace, transcript, kb_path):
+    # A field value inferred from thin evidence (issue #39) must be
+    # distinguishable downstream, not merged in looking exactly as
+    # confident as a well-supported one.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "Tentative truth from a single thin mention.",
+                "frontmatter_updates": {"status": "former"},
+                "confidence": 0.2,
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    update = proposal.entity_updates[0]
+    assert update.confidence == 0.2
+
+
 def test_entity_update_skipped_when_model_says_has_update_false(workspace, transcript, kb_path):
     _write_person(kb_path, "priya-shah")
     resolution = {

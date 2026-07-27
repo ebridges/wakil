@@ -6,6 +6,7 @@ from wakil.llm.schemas import (
     CandidateMemoryModel,
     EntityCompileOutput,
     EntityResolution,
+    EntityRevision,
     ModelContractError,
     complete_with_contract,
 )
@@ -159,3 +160,29 @@ def test_entity_compile_output_accepts_compiled_truth():
 def test_entity_compile_output_rejects_missing_compiled_truth():
     with pytest.raises(ValidationError):
         EntityCompileOutput()
+
+
+def test_entity_revision_confidence_defaults_to_none():
+    revision = EntityRevision(target_note_path="people/x.md", has_update=True)
+    assert revision.confidence is None
+
+
+def test_entity_revision_accepts_valid_confidence():
+    revision = EntityRevision(target_note_path="people/x.md", has_update=True, confidence=0.2)
+    assert revision.confidence == 0.2
+
+
+def test_entity_revision_accepts_boundary_confidence():
+    assert (
+        EntityRevision(target_note_path="p.md", has_update=True, confidence=0.0).confidence == 0.0
+    )
+    assert (
+        EntityRevision(target_note_path="p.md", has_update=True, confidence=1.0).confidence == 1.0
+    )
+
+
+def test_entity_revision_rejects_out_of_range_confidence():
+    with pytest.raises(ValidationError):
+        EntityRevision(target_note_path="p.md", has_update=True, confidence=1.5)
+    with pytest.raises(ValidationError):
+        EntityRevision(target_note_path="p.md", has_update=True, confidence=-0.1)

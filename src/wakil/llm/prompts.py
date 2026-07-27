@@ -216,7 +216,10 @@ def build_revision_prompt(
         "was already there plus what's new (never just the new source), and "
         "timeline_entry is one new dated entry to prepend — existing "
         "entries, including any auto-generated back-link lines, are never "
-        "restated or reordered.",
+        "restated or reordered. Also set confidence: how well-supported the "
+        "update's content is by the source (e.g. a frontmatter field inferred "
+        "from a single thin or ambiguous mention gets low confidence), not "
+        "whether an update was warranted at all.",
         "",
     ]
     for path, content in targets:

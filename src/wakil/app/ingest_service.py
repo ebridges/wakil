@@ -168,11 +168,19 @@ class EntityUpdate:
     """A proposed, deterministic edit to an *existing* note — DAG node 3's
     output. `old_content` is what was read during prepare; apply_enrichment
     re-reads and refuses to apply if the file changed since (mirrors
-    schema_migrate_service's stale-file guard)."""
+    schema_migrate_service's stale-file guard).
+
+    `confidence` mirrors `EntityRevision.confidence` (how well-supported the
+    revision's content is, not whether it was warranted at all) — carried
+    through so the enrichment preview can flag a thinly-supported update
+    instead of rendering it identically to a well-supported one. None for
+    updates produced outside a model revision call (e.g. `wakil entities
+    compile`), where the concept doesn't apply."""
 
     target_note_path: str
     old_content: str
     new_content: str
+    confidence: float | None = None
 
 
 @dataclass
@@ -1220,6 +1228,7 @@ def _apply_entity_revisions(
                 target_note_path=revision.target_note_path,
                 old_content=old_content,
                 new_content=new_content,
+                confidence=revision.confidence,
             )
         )
 
