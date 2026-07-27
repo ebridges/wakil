@@ -2769,9 +2769,78 @@ I sealed the deck today and cleaned up the site. Pretty happy with how the
 deck turned out after two weekends of work.
 """
 
+# Two counter-examples surfaced by independent verification of the original
+# backstop (issue #94 follow-up): both are genuine personal reflections that
+# the pre-fix `_has_dominant_recurring_subject` hard veto silently suppressed,
+# because it treated ANY shared content word across sections -- not just a
+# recurring project/company noun -- as proof of "not a reflection."
+
+# 1. The literal reported cardinality (exactly two dated sections, the
+#    heuristic's own _MIN_DATED_HEADERS floor) sharing one ordinary word
+#    ("outside") between its two entries. Nothing here is a project noun --
+#    "outside" is incidental, but it was still enough to make
+#    _has_dominant_recurring_subject return True (2 of 2 sections, a 100%
+#    ratio against the 60% threshold) and veto real reflection detection.
+_TP_TWO_DATE_REFLECTION_TEXT = """\
+# Reading journal
+
+## 2026-07-10
+Sat outside on the porch this evening with The Overstory. I keep circling
+back to how disconnected I feel from the people around me lately, and I'm
+not sure what to do about it. I think I need to make some real changes.
+
+## 2026-07-17
+Another quiet evening outside, still turning over the same worry from last
+week. I feel like I've been avoiding the harder conversation I need to have
+with my sister, and I'm frustrated with myself for putting it off again.
+"""
+
+# 2. A realistic three-date reflection centered on one recurring life theme
+#    (a breakup) -- arguably the more common shape of real personal
+#    reflection, since people tend to journal repeatedly about the same
+#    relationship/job/health situation rather than hopping topics entry to
+#    entry the way the original _TP_REFLECTION_TEXT fixture does. The shared
+#    word "breakup" across all three sections is exactly the kind of overlap
+#    _has_dominant_recurring_subject flags as "not a reflection," even though
+#    a recurring emotional theme is the opposite of disqualifying here.
+_TP_RECURRING_THEME_REFLECTION_TEXT = """\
+# Weekly reflection
+
+## 2026-07-06
+I still can't stop thinking about the breakup. I keep replaying our last
+conversation and wondering if I said the wrong thing. I feel like I need to
+give myself permission to grieve this properly instead of pretending I'm
+fine.
+
+## 2026-07-13
+Another week of missing her more than I expected. I talked to my therapist
+about the breakup again and she said it's normal to still feel this raw
+after a month. I'm trying to be patient with myself.
+
+## 2026-07-20
+I think I'm finally starting to feel like myself again after the breakup. I
+went for a long run this morning and didn't think about her the whole time,
+which felt like real progress.
+"""
+
 
 def test_looks_like_personal_reflection_true_positive():
     assert _looks_like_personal_reflection(_TP_REFLECTION_TEXT) is True
+
+
+def test_looks_like_personal_reflection_true_positive_two_date_shared_word():
+    # Reproduces the verifier's finding #1: a minimal two-date reflection
+    # that happens to share one ordinary word between its entries must still
+    # be recognized, not vetoed by the shared-word overlap alone.
+    assert _looks_like_personal_reflection(_TP_TWO_DATE_REFLECTION_TEXT) is True
+
+
+def test_looks_like_personal_reflection_true_positive_recurring_life_theme():
+    # Reproduces the verifier's finding #2: a reflection centered on one
+    # recurring life theme (not a topic-hopping one) must still be
+    # recognized -- a shared emotional theme is not the same signal as a
+    # shared project/company noun.
+    assert _looks_like_personal_reflection(_TP_RECURRING_THEME_REFLECTION_TEXT) is True
 
 
 @pytest.mark.parametrize(

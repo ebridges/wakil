@@ -925,8 +925,45 @@ def _candidate_entity_notes(
 # person, no dates), and — the hardest case — a personal build log, which is
 # also first-person and multi-dated but revolves around one recurring
 # subject noun ("deck", "cabinet") across its entries rather than moving
-# between different subjects the way a reflection does. All three signals
-# below must hold together; no single one fires this alone.
+# between different subjects the way a reflection does.
+#
+# _MIN_DATED_HEADERS and the pronoun-density floor are hard gates: below
+# either, this never fires, full stop. What is NOT a hard gate (anymore) is
+# "does one subject recur across sections" (_has_dominant_recurring_subject).
+# An earlier version of this heuristic used that as a third hard veto —
+# recurring subject present, no reflection — reasoning that a build log's
+# "deck" or a meeting's shared project noun recurring across every section
+# was the shape's tell. But a real personal reflection just as often
+# revolves around one recurring life theme across entries (the same breakup,
+# job, or health concern, journaled about repeatedly) as it does hop between
+# unrelated subjects entry to entry — and separately, "recurring subject" as
+# implemented is *any* shared content word, so two entries that each merely
+# mention the same ordinary word in passing ("outside", "evening") register
+# identically to a build log's genuine recurring project noun. Both failure
+# modes were confirmed against real two- and three-section reflections
+# (_TP_TWO_DATE_REFLECTION_TEXT, _TP_RECURRING_THEME_REFLECTION_TEXT): the
+# hard veto silently swallowed both, which is precisely the case this
+# backstop exists to catch (guidance already failed twice; this is the
+# second line of defense, and a silent no-op here is a no-op on the exact
+# input it was built for).
+#
+# So recurring-subject is now one signal weighed against a second, positive
+# one instead of a unilateral veto: _has_reflective_language, which looks
+# for actual introspective/evaluative phrasing ("I feel", "I think", "I
+# realized", "reflecting on", "I'm trying to be patient with myself") rather
+# than just first-person pronoun density (a meeting transcript and a build
+# log are both first-person-heavy too — that's the pronoun gate above, not
+# this signal). A recurring subject only vetoes when reflective language is
+# ALSO absent: that combination is what actually distinguishes "this source
+# revolves around one non-reflective external subject" (a build log's deck,
+# a meeting's shared project) from "this source revolves around one
+# recurring subject and evaluates/processes it in first person" (a
+# reflection about a breakup, a job, a health concern) or "this source
+# merely shares one incidental word between otherwise-unrelated entries."
+# Both existing non-reflective counter-shapes that have a recurring subject
+# (the meeting transcript, the build log) lack reflective-language phrasing
+# entirely, so this still excludes them correctly; both new reflection
+# counter-examples have it, so they're no longer excluded.
 
 _HEADER_LINE_RE = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 _MONTH_NAME_RE = (
@@ -1001,6 +1038,36 @@ def _has_dominant_recurring_subject(text: str, *, threshold: float = 0.6) -> boo
     return max(presence.values()) / len(sections) >= threshold
 
 
+# Actual introspective/evaluative phrasing, as distinct from mere first-person
+# pronoun density (_FIRST_PERSON_RE) — a meeting transcript ("I'll set up the
+# review", "I finished the schema draft") and a build log ("I sealed the deck
+# today") are both first-person-heavy without ever processing or evaluating
+# anything the way a reflection does ("I feel like I need to reprioritize my
+# time", "reflecting on my goals all week"). Deliberately phrase-based rather
+# than single-word (a lone "feel" or "think" shows up in ordinary factual
+# writing too — "I think the schema is solid") for the same reason
+# _PROPER_NOUN_RE above prefers multi-word runs: a whole reflective phrase is
+# a much stronger signal than any one of its words in isolation.
+_REFLECTIVE_LANGUAGE_RE = re.compile(
+    r"\bi\s+(?:feel|felt|think|thought|realiz(?:e|ed)|wonder(?:ed)?|keep\s+thinking|need\s+to)\b"
+    r"|\bi['’]m\s+(?:not\s+sure|trying\s+to|struggling)\b"
+    r"|\bi['’]ve\s+been\s+(?:thinking|struggling|trying)\b"
+    r"|\bmakes?\s+me\s+(?:realize|think|feel)\b"
+    r"|\bmade\s+me\s+realize\b"
+    r"|\breflecting\s+on\b"
+    r"|\bmy\s+takeaway\b",
+    re.IGNORECASE,
+)
+
+
+def _has_reflective_language(text: str) -> bool:
+    """True when the text contains at least one introspective/evaluative
+    phrase (see _REFLECTIVE_LANGUAGE_RE) — the positive signal weighed
+    against _has_dominant_recurring_subject below, rather than letting a
+    recurring subject alone veto reflection detection."""
+    return _REFLECTIVE_LANGUAGE_RE.search(text) is not None
+
+
 _MIN_REFLECTION_WORDS = 40
 _MIN_DATED_HEADERS = 2
 _MIN_PRONOUN_DENSITY_PER_100_WORDS = 3.0
@@ -1024,7 +1091,11 @@ def _looks_like_personal_reflection(text: str) -> bool:
     pronoun_density = len(_FIRST_PERSON_RE.findall(text)) / len(words) * 100
     if pronoun_density < _MIN_PRONOUN_DENSITY_PER_100_WORDS:
         return False
-    return not _has_dominant_recurring_subject(text)
+    # A recurring subject only disqualifies when reflective language is ALSO
+    # absent — see the module comment above for why a hard veto on recurring
+    # subject alone misclassified real reflections (a recurring life theme,
+    # or two entries that merely share one incidental word).
+    return not (_has_dominant_recurring_subject(text) and not _has_reflective_language(text))
 
 
 _REFLECTION_SHAPE_HINT = (
