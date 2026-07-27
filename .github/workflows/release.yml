@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version part to bump
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+        required: true
+      dry_run:
+        description: Build and preview without tagging, pushing, or publishing
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Test (pytest)
+        run: uv run pytest -q
+        env:
+          NO_COLOR: "1"
+
+      - name: Compute next version
+        run: |
+          set -euo pipefail
+          latest_tag="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0.0)"
+          version="${latest_tag#v}"
+          IFS='.' read -r major minor patch <<< "$version"
+
+          case "${{ inputs.bump }}" in
+            major)
+              major=$((major + 1)); minor=0; patch=0
+              ;;
+            minor)
+              minor=$((minor + 1)); patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+            *)
+              echo "::error::unknown bump input: ${{ inputs.bump }}"
+              exit 1
+              ;;
+          esac
+
+          new_version="${major}.${minor}.${patch}"
+          new_tag="v${new_version}"
+
+          echo "Latest tag: ${latest_tag}"
+          echo "New version: ${new_version} (${new_tag})"
+
+          echo "NEW_VERSION=${new_version}" >> "$GITHUB_ENV"
+          echo "NEW_TAG=${new_tag}" >> "$GITHUB_ENV"
+
+      - name: Generate changelog
+        run: |
+          set -euo pipefail
+          uvx git-cliff --config cliff.toml --tag "$NEW_TAG" -o CHANGELOG.md
+          uvx git-cliff --config cliff.toml --tag "$NEW_TAG" --unreleased --strip all > release-notes.md
+
+      - name: Commit changelog and tag release
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "📝 docs(changelog): ${NEW_TAG}"
+          git tag -a "$NEW_TAG" -m "$NEW_TAG"
+          git push origin HEAD:main
+          git push origin "$NEW_TAG"
+
+      - name: Build distribution
+        run: uv build
+
+      - name: Verify built wheel version
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if ! ls dist/*"${NEW_VERSION}"*.whl >/dev/null 2>&1; then
+            echo "::error::no wheel in dist/ matches expected version ${NEW_VERSION}; found: $(ls dist/ 2>/dev/null || echo '(dist/ empty)')"
+            exit 1
+          fi
+          echo "Confirmed wheel matches version ${NEW_VERSION}:"
+          ls dist/*"${NEW_VERSION}"*.whl
+
+      - name: Upload dry-run artifacts
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dry-run-${{ github.run_id }}
+          path: |
+            dist/*
+            release-notes.md
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "$NEW_TAG" dist/* --title "$NEW_TAG" --notes-file release-notes.md
