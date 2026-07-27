@@ -16,10 +16,12 @@ from wakil.app.ingest_service import (
     ProposedFile,
     _candidate_entity_notes,
     _is_noise_candidate,
+    _is_unpopulated_stub,
     _merge_entity_note,
     _require_workspace_ids,
     _split_candidates_by_content_length,
     _split_note_sections,
+    _stub_content,
     _title_terms,
     apply_abstract_backfill,
     apply_capture,
@@ -932,10 +934,39 @@ def test_merge_entity_note_returns_none_for_unexpected_shape(workspace):
     assert _merge_entity_note(minimal, revision, "2026-07-16") is None
 
 
+def test_is_unpopulated_stub_true_for_fresh_stub_content():
+    stub = _stub_content({"type": "person", "name": "Priya Shah"}, "Priya Shah")
+    assert _is_unpopulated_stub(stub) is True
+
+
+def test_is_unpopulated_stub_false_for_real_shaped_person():
+    assert _is_unpopulated_stub(REAL_SHAPED_PERSON) is False
+
+
+def test_is_unpopulated_stub_false_for_malformed_content():
+    assert _is_unpopulated_stub("not a note at all") is False
+
+
 def _write_person(kb_path: Path, slug: str, content: str = REAL_SHAPED_PERSON) -> None:
     people = kb_path / "people"
     people.mkdir(exist_ok=True)
     (people / f"{slug}.md").write_text(content.replace("priya-shah", slug))
+
+
+def _write_stub_person(kb_path: Path, slug: str, name: str = "Priya Shah") -> None:
+    """Write a person page using the actual `_stub_content` skeleton —
+    i.e. an entity that's never had real content synthesized into it,
+    exactly as `_build_stub_entities` leaves it at creation time."""
+    people = kb_path / "people"
+    people.mkdir(exist_ok=True)
+    metadata = {
+        "type": "person",
+        "name": name,
+        "status": "active",
+        "created": "2026-06-01",
+        "updated": "2026-06-01",
+    }
+    (people / f"{slug}.md").write_text(ingest_service._stub_content(metadata, name))
 
 
 def test_entity_update_applies_when_model_says_has_update(workspace, transcript, kb_path):
@@ -1035,6 +1066,70 @@ def test_entity_update_skipped_when_model_says_has_update_false(workspace, trans
     )
 
     assert proposal.entity_updates == []
+    # REAL_SHAPED_PERSON already has real content — declining to touch it
+    # further is unremarkable, not a founding-content-loss signal.
+    assert not any("empty stub" in warning for warning in proposal.warnings)
+
+
+def test_entity_update_declined_on_still_stub_entity_warns_founding_content_may_be_lost(
+    workspace, transcript, kb_path
+):
+    # Issue #45: the entity was created as a bare _stub_content skeleton and
+    # has never been populated. This update pass looks at it and declines to
+    # add anything (has_update=False) — same as any other declined update,
+    # except here it means the entity's founding facts may never land.
+    _write_stub_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    revisions = {"revisions": [{"target_note_path": "people/priya-shah.md", "has_update": False}]}
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert proposal.entity_updates == []
+    assert any(
+        "Priya Shah" in warning and "empty stub" in warning and "permanently missing" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_entity_update_below_relevance_threshold_on_still_stub_entity_also_warns(
+    workspace, transcript, kb_path
+):
+    # Same failure shape as above, but the entity never even reaches the
+    # revision call because it's filtered out by the relevance gate first.
+    _write_stub_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "minor",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution])  # no 3rd response needed/consumed
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.entity_updates == []
+    assert any(
+        "Priya Shah" in warning and "empty stub" in warning and "permanently missing" in warning
+        for warning in proposal.warnings
+    )
 
 
 def test_entity_update_skipped_for_single_occurrence_shape_type(workspace, transcript, kb_path):
