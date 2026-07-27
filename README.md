@@ -24,6 +24,23 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 uv sync
 ```
 
+## Install a release
+
+Tagged releases publish a wheel (`.whl`) and sdist (`.tar.gz`) as downloadable
+assets on the [GitHub Releases](https://github.com/ebridges/wakil/releases)
+page. The repo is currently private, so installing requires GitHub read
+access (authenticated `git`/`gh`) — there's no public PyPI package yet.
+
+```bash
+# Option A — download the wheel asset from a release, then install it
+uv tool install ./wakil-X.Y.Z-py3-none-any.whl
+pip install ./wakil-X.Y.Z-py3-none-any.whl
+
+# Option B — install straight from a tag, no manual download
+uv tool install "git+https://github.com/ebridges/wakil@vX.Y.Z"
+pip install "git+https://github.com/ebridges/wakil@vX.Y.Z"
+```
+
 ## Usage
 
 ```bash
