@@ -1349,7 +1349,14 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
     metadata = dict(post.metadata)
     if revision.frontmatter_updates:
         metadata.update(revision.frontmatter_updates)
-    metadata["updated"] = today
+    # Assign a real date object, not the isoformat string `today` actually
+    # is: yaml.safe_dump quotes a plain string that merely looks like a
+    # date (to disambiguate it from a date scalar), but dumps an actual
+    # date object unquoted. `created` survives as a date object from the
+    # frontmatter round-trip (PyYAML's implicit resolver parses unquoted
+    # `created: 2026-01-15` into a date on load), so without this cast
+    # `updated:` would be the only quoted date field in the frontmatter.
+    metadata["updated"] = date.fromisoformat(today)
 
     # An empty/absent compiled_truth means "no change to the top section",
     # never "delete the top section" — has_update=True can legitimately mean

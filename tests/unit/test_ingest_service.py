@@ -821,6 +821,32 @@ def test_merge_entity_note_replaces_top_section_preserves_h1_and_prepends_timeli
     assert "created: 2026-06-01" in new_content
 
 
+def test_merge_entity_note_dumps_created_and_updated_in_same_unquoted_form(workspace):
+    # Regression test for #78: metadata["updated"] used to be assigned as a
+    # plain str, which yaml.safe_dump quotes to disambiguate from a real
+    # date scalar (created: 2026-06-01 vs. updated: '2026-07-16'), even
+    # though both fields represent the same kind of value. Both should
+    # round-trip to the same unquoted plain-scalar form.
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="**Recruiter** at [[companies/acme|Acme]]. Now running a second search.",
+        timeline_entry="### 2026-07-16 — second search kicked off\n- New role, same recruiter.",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16")
+
+    assert new_content is not None
+    frontmatter_yaml = new_content.split("---\n", 2)[1]
+    parsed = yaml.safe_load(frontmatter_yaml)
+    assert parsed["created"] == date(2026, 6, 1)
+    assert parsed["updated"] == date(2026, 7, 16)
+    # Neither field is quoted in the dumped YAML text.
+    assert "created: '2026-06-01'" not in new_content
+    assert "updated: '2026-07-16'" not in new_content
+    assert "created: 2026-06-01" in new_content
+    assert "updated: 2026-07-16" in new_content
+
+
 def test_merge_entity_note_stamps_updated_even_when_missing_from_original(workspace):
     # people/edward-bridges.md's real shape: no "updated" key at all, only
     # "created". Required by schema on every merge target's entity type
