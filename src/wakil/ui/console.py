@@ -333,6 +333,14 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
     if proposal.proposed_note is not None:
         console.print("[bold]Proposed note:[/bold]")
         _print_file_preview(proposal.proposed_note)
+        if (
+            proposal.proposed_note.confidence is not None
+            and proposal.proposed_note.confidence < _LOW_CONFIDENCE_THRESHOLD
+        ):
+            console.print(
+                f"[red]Flagged for review (low-confidence proposed note):[/red] "
+                f"{proposal.proposed_note.path}"
+            )
     for warning in proposal.warnings:
         # Warnings can quote wikilinks (`[[path|display]]`) or other
         # bracket-heavy content a correction touched — escape it so Rich's

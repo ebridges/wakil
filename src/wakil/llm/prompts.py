@@ -116,7 +116,12 @@ def build_extraction_prompt(
         "even though `type` is never listed among that type's fields below, "
         "since it names the type rather than being one of its fields. Its "
         "body must follow that type's page_shape — match the shape name "
-        "against the templates that follow.",
+        "against the templates that follow. Also set "
+        "proposed_note.frontmatter_confidence: how well-supported the "
+        "frontmatter values you wrote into markdown are by the source (e.g. "
+        "a book's status field inferred from a single thin or ambiguous "
+        "highlight gets low confidence), not whether proposing the note at "
+        "all was warranted.",
         "When tagging a memory's `type`, distinguish observed fact from subjective "
         "judgment: a claim asserting what *is* (a number, an event, a stated position) "
         "is `fact`; a claim asserting what is good/bad/worth-it, or a causal 'because' "

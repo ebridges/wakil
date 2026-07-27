@@ -2690,6 +2690,46 @@ def test_resolution_double_failure_degrades_visibly(workspace, transcript):
     apply_enrichment(workspace, proposal)
 
 
+def test_proposed_note_carries_frontmatter_confidence_through_to_proposal(workspace, transcript):
+    # A create-time frontmatter value inferred from thin evidence in
+    # extraction's own proposed_note (issue #93, the fresh-primary-entity
+    # counterpart of #72's EntityResolution.proposed_frontmatter_confidence)
+    # must be distinguishable downstream, not merged in looking exactly as
+    # confident as a well-supported one.
+    source_id = _capture(workspace, transcript)
+    markdown = (
+        "---\ntype: meeting\ntitle: Claims Kickoff\ndate: 2026-07-09\n"
+        "created: 2026-07-09\n---\n\n"
+        "# Claims Kickoff\n\nAttended by [[people/jane-doe.md]]. "
+        "See [[concepts/claims-routing.md]].\n"
+    )
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={
+            "path": "meetings/2026/2026-07-09-claims-kickoff.md",
+            "markdown": markdown,
+            "frontmatter_confidence": 0.2,
+        },
+    )
+
+    proposal = prepare_enrichment(
+        workspace,
+        source_id,
+        FakeClient([payload, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON]),
+    )
+
+    assert proposal.proposed_note.confidence == 0.2
+
+
+def test_proposed_note_confidence_defaults_to_none(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(workspace, source_id, FakeClient())
+
+    # MODEL_JSON's proposed_note has no frontmatter_confidence — must not be
+    # coerced to a spurious value.
+    assert proposal.proposed_note.confidence is None
+
+
 def test_build_stub_entities_warns_for_directory_less_type(workspace):
     # "index" is a real schema type (MOC/navigation pages) with
     # `directory: null` — it has nowhere to be routed, so the create is

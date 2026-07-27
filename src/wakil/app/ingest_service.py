@@ -103,13 +103,13 @@ class IngestError(RuntimeError):
 @dataclass
 class ProposedFile:
     """A new file to write. `confidence` mirrors `EntityUpdate.confidence` —
-    populated only for a stub built from an action=create entity resolution
-    (`EntityResolution.proposed_frontmatter_confidence`), so a thinly-
-    supported frontmatter guess (e.g. a book's `status` inferred from one
-    early highlight) can be flagged in the enrich preview instead of
+    populated for a stub built from an action=create entity resolution
+    (`EntityResolution.proposed_frontmatter_confidence`) or for extraction's
+    own proposed_note (`ProposedNoteModel.frontmatter_confidence`), so a
+    thinly-supported frontmatter guess (e.g. a book's `status` inferred from
+    one early highlight) can be flagged in the enrich preview instead of
     rendering identically to a well-supported create. None everywhere else
-    (raw captures, extraction's own proposed_note), where the concept
-    doesn't apply."""
+    (raw captures), where the concept doesn't apply."""
 
     path: str  # workspace-relative
     content: str
@@ -716,6 +716,14 @@ def prepare_enrichment(
                 content=extraction.proposed_note.markdown,
             ),
             proposal,
+        )
+        # `_sanitize_note` may rebuild the ProposedFile (path/collision fixes),
+        # so the confidence carried on extraction's own output is applied
+        # after it settles rather than passed into the constructor above —
+        # mirrors `_build_stub_entities` setting `ProposedFile(confidence=...)`
+        # for the analogous action=create case (issue #72/#93).
+        proposal.proposed_note.confidence = _clamp01(
+            extraction.proposed_note.frontmatter_confidence
         )
 
     # DAG node 2: entity resolution — always invoked, never optional.
