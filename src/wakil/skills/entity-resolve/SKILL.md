@@ -130,6 +130,17 @@ Rules:
   filed under the same source directory or category were resolved a
   particular way; existing precedent there is a strong signal, and matching
   it beats re-deriving the type from content shape alone.
+- Before precedent can even apply, settle whose work the source is
+  describing — voice and perspective decide that, not how much build detail
+  is on the page. A source written in the third person about a build the
+  user is not personally executing — a blog post, an instructional article,
+  "the author built...", someone else's "I made this, here's how" — is
+  reference material describing someone else's work, however much
+  hands-on construction detail it contains. A personal build log is the
+  user's own account, in their own first-person voice, of their own
+  in-progress work. Don't let build-log-shaped content (steps, materials,
+  photos) stand in for this judgment; a detailed how-to about someone
+  else's project is still reference material, not the user's project.
 - Match against existing notes by identity, not string equality: "Jane",
   "Jane Doe", and "jane-doe" are the same person if the context says so. Do
   not create a duplicate page for a spelling variant of an existing note.
