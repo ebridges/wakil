@@ -15,6 +15,7 @@ from wakil.app.ingest_service import (
     IngestError,
     ProposedFile,
     _candidate_entity_notes,
+    _dated_timeline_entry,
     _entity_attachment_dir,
     _is_noise_candidate,
     _is_unpopulated_stub,
@@ -823,6 +824,32 @@ def test_merge_entity_note_replaces_top_section_preserves_h1_and_prepends_timeli
     assert "created: 2026-06-01" in new_content
 
 
+def test_merge_entity_note_dumps_created_and_updated_in_same_unquoted_form(workspace):
+    # Regression test for #78: metadata["updated"] used to be assigned as a
+    # plain str, which yaml.safe_dump quotes to disambiguate from a real
+    # date scalar (created: 2026-06-01 vs. updated: '2026-07-16'), even
+    # though both fields represent the same kind of value. Both should
+    # round-trip to the same unquoted plain-scalar form.
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="**Recruiter** at [[companies/acme|Acme]]. Now running a second search.",
+        timeline_entry="### 2026-07-16 — second search kicked off\n- New role, same recruiter.",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16")
+
+    assert new_content is not None
+    frontmatter_yaml = new_content.split("---\n", 2)[1]
+    parsed = yaml.safe_load(frontmatter_yaml)
+    assert parsed["created"] == date(2026, 6, 1)
+    assert parsed["updated"] == date(2026, 7, 16)
+    # Neither field is quoted in the dumped YAML text.
+    assert "created: '2026-06-01'" not in new_content
+    assert "updated: '2026-07-16'" not in new_content
+    assert "created: 2026-06-01" in new_content
+    assert "updated: 2026-07-16" in new_content
+
+
 def test_merge_entity_note_stamps_updated_even_when_missing_from_original(workspace):
     # people/edward-bridges.md's real shape: no "updated" key at all, only
     # "created". Required by schema on every merge target's entity type
@@ -1072,6 +1099,72 @@ def test_entity_update_normalizes_new_embed_path_end_to_end(workspace, transcrip
     update = proposal.entity_updates[0]
     assert "![[people/priya-shah/box-1.jpg|Build photo]]" in update.new_content
     assert "![[box-1.jpg|Build photo]]" not in update.new_content
+
+
+# --------------------------------------------------------------------------
+# issue #77: a placeholder Timeline heading (no real date of its own) must
+# fall back to the source's own captured/retrieved date rather than being
+# written verbatim into the append-only Timeline.
+
+
+def test_dated_timeline_entry_leaves_real_date_heading_unchanged():
+    entry = "### 2026-06-01 — recruiter screen\n- Introductory call."
+    assert _dated_timeline_entry(entry, "2026-07-20") == entry
+
+
+def test_dated_timeline_entry_is_noop_without_fallback_date():
+    entry = "### (date not recorded)\n- Something happened."
+    assert _dated_timeline_entry(entry, None) == entry
+
+
+def test_dated_timeline_entry_substitutes_fallback_for_parenthetical_placeholder():
+    entry = "### (date not recorded) — merged into existing entity\n- Something happened."
+    result = _dated_timeline_entry(entry, "2026-07-20")
+    assert result == "### 2026-07-20 — merged into existing entity\n- Something happened."
+
+
+def test_dated_timeline_entry_substitutes_fallback_for_undated_source_heading():
+    # Confirmed real-world regression: merging an unrelated follow-up
+    # source produced this exact heading.
+    entry = "### Undated -- source: clipping\n- Some detail."
+    result = _dated_timeline_entry(entry, "2026-07-20")
+    assert result == "### 2026-07-20 — source: clipping\n- Some detail."
+
+
+def test_dated_timeline_entry_substitutes_bare_placeholder_with_no_description():
+    entry = "### undated\n- Some detail."
+    result = _dated_timeline_entry(entry, "2026-07-20")
+    assert result == "### 2026-07-20\n- Some detail."
+
+
+def test_merge_entity_note_substitutes_fallback_date_for_placeholder_heading(workspace):
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### (date not recorded) — merged into existing entity\n- detail",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16", "2026-07-15")
+
+    assert new_content is not None
+    assert "(date not recorded)" not in new_content
+    assert "### 2026-07-15 — merged into existing entity" in new_content
+    # Existing, real-dated entry survives untouched.
+    assert "### 2026-06-01 — recruiter screen" in new_content
+
+
+def test_merge_entity_note_leaves_real_date_heading_unchanged_even_with_fallback(workspace):
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### 2026-07-16 — second search kicked off\n- New role.",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16", "2026-07-01")
+
+    assert new_content is not None
+    assert "### 2026-07-16 — second search kicked off" in new_content
+    assert "2026-07-01" not in new_content
 
 
 def test_is_unpopulated_stub_true_for_fresh_stub_content():
@@ -1552,7 +1645,24 @@ def test_stub_kept_for_type_outside_narrow_dated_record_scope(workspace, transcr
     # its stub even when this same proposal also applies an unrelated
     # entity update -- the fix is deliberately scoped to journal/meeting,
     # not every type that could share a source with an update.
+    #
+    # proposed_note is overridden away from MODEL_JSON's default `meeting`
+    # type so this test isolates stub suppression -- with the default
+    # `meeting` proposed_note, _suppress_proposed_note_matching_updates
+    # (issue #68) would also legitimately null it out here, which is
+    # covered by its own tests below rather than this one.
     _write_person(kb_path, "priya-shah")
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={
+            "path": "concepts/handler-assignment.md",
+            "markdown": (
+                "---\ntype: concept\nname: Handler Assignment\n"
+                "created: 2026-07-09\nupdated: 2026-07-09\n---\n\n"
+                "# Handler Assignment\n\nBackground on FNOL routing.\n"
+            ),
+        },
+    )
     resolution = {
         "entities": [
             {
@@ -1583,13 +1693,167 @@ def test_stub_kept_for_type_outside_narrow_dated_record_scope(workspace, transcr
     }
     source_id = _capture(workspace, transcript)
     proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+        workspace, source_id, FakeClient([payload, resolution, revisions])
     )
 
     assert len(proposal.entity_updates) == 1
     assert [stub.path for stub in proposal.stub_entities] == ["projects/elektrum.md"]
+    assert proposal.proposed_note is not None
     assert not any(
         "already merged into an existing entity" in warning for warning in proposal.warnings
+    )
+
+
+# --------------------------------------------------------------------------
+# Issue #68: _suppress_stubs_matching_updates and
+# _suppress_dated_record_stubs_matching_updates only ever prune
+# proposal.stub_entities -- neither ever inspects proposal.proposed_note,
+# which is set by extraction *before* entity resolution runs. A dated
+# source can correctly update an existing entity's Timeline via
+# entity_updates and *also* independently produce its own proposed_note
+# for the same source; nothing suppressed that duplicate.
+
+
+def test_proposed_note_suppressed_when_subject_matches_applied_entity_update(
+    workspace, transcript, kb_path
+):
+    # MODEL_JSON's proposed_note is titled "Claims Kickoff" (slug
+    # claims-kickoff). An existing entity at that same slug gets a real
+    # Timeline update in this same proposal -- the note is just extraction's
+    # own independent representation of a subject that already has a home.
+    _write_person(kb_path, "claims-kickoff")
+    resolution = {
+        "entities": [
+            {
+                "name": "Claims Kickoff",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/claims-kickoff.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/claims-kickoff.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.proposed_note is None
+    assert any(
+        "subject already updated via an existing entity" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_proposed_note_suppressed_when_dated_record_type_and_source_already_merged(
+    workspace, transcript, kb_path
+):
+    # MODEL_JSON's proposed_note is a `meeting` page titled "Claims Kickoff"
+    # -- a subject entirely unrelated to "priya-shah", so the subject-slug
+    # match above cannot catch it. It must still be suppressed: a
+    # journal/meeting note's whole purpose is "record what this source
+    # said," which the Priya Shah Timeline update -- from this same source,
+    # in this same proposal -- has already done.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.proposed_note is None
+    assert any(
+        "meetings/2026/2026-07-09-claims-kickoff.md" in warning
+        and "already merged into an existing entity" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_proposed_note_kept_when_unrelated_to_any_entity_update(workspace, transcript, kb_path):
+    # No over-suppression: a proposed_note whose type is outside the narrow
+    # journal/meeting scope, and whose subject doesn't match any applied
+    # update's target, must survive even though this same proposal also
+    # applies an unrelated entity update.
+    _write_person(kb_path, "priya-shah")
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={
+            "path": "concepts/handler-assignment.md",
+            "markdown": (
+                "---\ntype: concept\nname: Handler Assignment\n"
+                "created: 2026-07-09\nupdated: 2026-07-09\n---\n\n"
+                "# Handler Assignment\n\nBackground on FNOL routing.\n"
+            ),
+        },
+    )
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.proposed_note is not None
+    assert proposal.proposed_note.path == "concepts/handler-assignment.md"
+    assert not any(
+        "already updated via an existing entity" in warning
+        or "already merged into an existing entity" in warning
+        for warning in proposal.warnings
     )
 
 
@@ -2420,6 +2684,45 @@ def test_build_stub_entities_routable_type_unaffected(workspace):
     assert proposal.warnings == []
 
 
+def test_build_stub_entities_carries_proposed_frontmatter_confidence(workspace):
+    # A create-time frontmatter value inferred from thin evidence (issue #72,
+    # the create-path counterpart of #39's EntityRevision.confidence) must be
+    # distinguishable downstream, not merged in looking exactly as confident
+    # as a well-supported one.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Some Source",
+        entity_resolutions=[
+            EntityResolution(
+                name="Dana Prieto",
+                entity_type="person",
+                action="create",
+                proposed_frontmatter_confidence=0.2,
+            ),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert len(stubs) == 1
+    assert stubs[0].confidence == 0.2
+
+
+def test_build_stub_entities_confidence_defaults_to_none(workspace):
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Some Source",
+        entity_resolutions=[
+            EntityResolution(name="Dana Prieto", entity_type="person", action="create"),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert len(stubs) == 1
+    assert stubs[0].confidence is None
+
+
 def test_stub_suppressed_for_source_self_mirror_create(workspace):
     # Issue #58: entity-resolution satisfying "create a minimal stub rather
     # than skip it" (issue #44) by proposing `entity_type: source` for the
@@ -2511,6 +2814,105 @@ def test_stub_kept_for_legitimate_domain_type_create_alongside_own_subject(works
     assert proposal.warnings == []
 
 
+# --------------------------------------------------------------------------
+# Issue #73: when a create-resolution matching proposed_note's own subject
+# disagrees with proposed_note's own `type:`, entity-resolution's decision
+# must correct proposed_note's frontmatter type and path, not just suppress
+# the redundant stub.
+
+
+def test_stub_match_with_different_type_corrects_proposed_note(workspace):
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Guns Germs",
+        entity_resolutions=[
+            EntityResolution(name="Guns Germs", entity_type="project", action="create"),
+        ],
+    )
+    proposal.proposed_note = ProposedFile(
+        path="concepts/guns-germs.md",
+        content=(
+            "---\ntype: concept\nname: Guns Germs\ncreated: 2026-07-09\n---\n\n"
+            "# Guns Germs\n\nSynthesized body prose that must survive untouched.\n"
+        ),
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    # No duplicate stub — same suppression as issue #36.
+    assert stubs == []
+    # But unlike #36's original fix, proposed_note itself is now corrected
+    # to entity-resolution's (better-informed) type and path.
+    assert proposal.proposed_note.path == "projects/guns-germs.md"
+    metadata = frontmatter.loads(proposal.proposed_note.content).metadata
+    assert metadata["type"] == "project"
+    assert metadata["name"] == "Guns Germs"
+    # The synthesized markdown body is preserved verbatim — only frontmatter
+    # `type:` and the file path moved.
+    assert "Synthesized body prose that must survive untouched." in proposal.proposed_note.content
+    assert "# Guns Germs" in proposal.proposed_note.content
+    assert any(
+        "Corrected the proposed note's type from 'concept' to 'project'" in warning
+        for warning in proposal.warnings
+    )
+    assert any(
+        "Guns Germs" in warning and "already represented by the proposed note" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_stub_match_with_same_type_leaves_proposed_note_unchanged(workspace):
+    original_content = (
+        "---\ntype: concept\nname: Guns Germs\ncreated: 2026-07-09\n---\n\n"
+        "# Guns Germs\n\nSynthesized body prose.\n"
+    )
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Guns Germs",
+        entity_resolutions=[
+            EntityResolution(name="Guns Germs", entity_type="concept", action="create"),
+        ],
+    )
+    proposal.proposed_note = ProposedFile(path="concepts/guns-germs.md", content=original_content)
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert stubs == []
+    # Matches #36's existing behavior exactly: suppressed, but no spurious
+    # correction since the types already agree.
+    assert proposal.proposed_note.path == "concepts/guns-germs.md"
+    assert proposal.proposed_note.content == original_content
+    assert not any("Corrected the proposed note's type" in warning for warning in proposal.warnings)
+    assert any(
+        "Guns Germs" in warning and "already represented by the proposed note" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_stub_for_unrelated_subject_leaves_proposed_note_unchanged(workspace):
+    original_content = (
+        "---\ntype: concept\nname: Guns Germs\ncreated: 2026-07-09\n---\n\n"
+        "# Guns Germs\n\nSynthesized body prose.\n"
+    )
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Guns Germs",
+        entity_resolutions=[
+            EntityResolution(name="Dana Prieto", entity_type="person", action="create"),
+        ],
+    )
+    proposal.proposed_note = ProposedFile(path="concepts/guns-germs.md", content=original_content)
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    # A genuinely different, unrelated subject still gets its own stub, and
+    # proposed_note is completely untouched — no regression.
+    assert [stub.path for stub in stubs] == ["people/dana-prieto.md"]
+    assert proposal.proposed_note.path == "concepts/guns-germs.md"
+    assert proposal.proposed_note.content == original_content
+    assert not any("Corrected the proposed note's type" in warning for warning in proposal.warnings)
+
+
 def test_index_source_create_does_not_block_apply(workspace, transcript):
     # Regression: entity-resolve/SKILL.md now steers the model toward
     # proposing entity_type: index, action: create for index/list-shaped
@@ -2600,6 +3002,23 @@ def test_prepare_enrichment_warns_when_nothing_produced(workspace, transcript):
         str(source_id) in warning and "nothing will be written" in warning
         for warning in proposal.warnings
     )
+
+
+def test_prepare_enrichment_sets_source_captured_date_from_retrieved_at(workspace, transcript):
+    # Wiring for issue #77: the source's own captured/retrieved date must be
+    # threaded onto the proposal so a placeholder Timeline heading has a
+    # real fallback available at write time.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {"entities": []}
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution])
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        expected = (source.retrieved_at or source.created_at).date().isoformat()
+
+    assert proposal.source_captured_date == expected
 
 
 def test_prepare_enrichment_no_false_positive_warning_when_note_produced(workspace, transcript):

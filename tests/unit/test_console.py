@@ -7,7 +7,7 @@ tags and silently mangled (reproduced directly against Rich: it renders as
 because nothing errors, the text just quietly comes out wrong.
 """
 
-from wakil.app.ingest_service import EnrichmentProposal, EntityUpdate
+from wakil.app.ingest_service import EnrichmentProposal, EntityUpdate, ProposedFile
 from wakil.llm.schemas import EntityResolution
 from wakil.ui.console import console, print_enrichment_proposal
 
@@ -92,6 +92,49 @@ def test_high_confidence_entity_update_is_not_flagged(capsys):
                 target_note_path="books/some-book.md",
                 old_content="old",
                 new_content="new",
+                confidence=0.9,
+            )
+        ],
+    )
+    console.width = 200
+    print_enrichment_proposal(proposal)
+    out = capsys.readouterr().out
+    assert "LOW-CONFIDENCE" not in out
+    assert "Flagged for review" not in out
+    assert "confidence 0.90" in out
+
+
+def test_low_confidence_new_entity_page_is_flagged_for_review(capsys):
+    # Create-path counterpart of #39: a stub page whose proposed_frontmatter
+    # was inferred from thin evidence (issue #72) must be distinguishable in
+    # the preview, not rendered identically to a well-supported create.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Test",
+        stub_entities=[
+            ProposedFile(
+                path="books/some-book.md",
+                content="---\ntype: book\n---\n",
+                confidence=0.2,
+            )
+        ],
+    )
+    console.width = 200
+    print_enrichment_proposal(proposal)
+    out = capsys.readouterr().out
+    assert "LOW-CONFIDENCE" in out
+    assert "Flagged for review" in out
+    assert "books/some-book.md" in out
+
+
+def test_high_confidence_new_entity_page_is_not_flagged(capsys):
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Test",
+        stub_entities=[
+            ProposedFile(
+                path="books/some-book.md",
+                content="---\ntype: book\n---\n",
                 confidence=0.9,
             )
         ],

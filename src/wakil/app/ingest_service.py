@@ -69,7 +69,7 @@ from wakil.llm.schemas import (
     complete_with_contract,
 )
 from wakil.llm.skill_loader import SkillLoadError, build_system_prompt, load_skill
-from wakil.schema.loader import load_entity_schemas, resolve_page_shape_template
+from wakil.schema.loader import EntitySchema, load_entity_schemas, resolve_page_shape_template
 from wakil.schema.validate import validate_frontmatter
 from wakil.storage.schema import (
     IngestRun,
@@ -102,8 +102,18 @@ class IngestError(RuntimeError):
 
 @dataclass
 class ProposedFile:
+    """A new file to write. `confidence` mirrors `EntityUpdate.confidence` —
+    populated only for a stub built from an action=create entity resolution
+    (`EntityResolution.proposed_frontmatter_confidence`), so a thinly-
+    supported frontmatter guess (e.g. a book's `status` inferred from one
+    early highlight) can be flagged in the enrich preview instead of
+    rendering identically to a well-supported create. None everywhere else
+    (raw captures, extraction's own proposed_note), where the concept
+    doesn't apply."""
+
     path: str  # workspace-relative
     content: str
+    confidence: float | None = None
 
 
 @dataclass
@@ -204,6 +214,11 @@ class EnrichmentProposal:
     # shown in the preview, never silently swallowed.
     warnings: list[str] = field(default_factory=list)
     model: str | None = None
+    # The source's own captured/retrieved date (yyyy-mm-dd), used as a
+    # fallback Timeline heading when the model's generated heading doesn't
+    # carry a real date of its own (issue #77) — never left as a
+    # placeholder like "(date not recorded)" in an append-only Timeline.
+    source_captured_date: str | None = None
 
 
 @dataclass
@@ -576,6 +591,11 @@ def prepare_enrichment(
                 f"Source {source_id} is already enriched; pass --force to re-analyze."
             )
         metadata = json.loads(source.metadata_json or "{}")
+        # Fallback for a Timeline heading with no real date of its own
+        # (issue #77) — retrieved_at is set at capture time for every
+        # source; created_at covers the rare row without it.
+        captured_at = source.retrieved_at or source.created_at
+        source_captured_date = captured_at.date().isoformat() if captured_at else None
         context = context or metadata.get("context")
         context_digest = context_digest or metadata.get("context_digest")
         context_referenced_paths = (
@@ -640,7 +660,11 @@ def prepare_enrichment(
             )
 
     proposal = EnrichmentProposal(
-        source_id=source_id, title=title, context=context, related_notes=related_notes
+        source_id=source_id,
+        title=title,
+        context=context,
+        related_notes=related_notes,
+        source_captured_date=source_captured_date,
     )
     proposal.model = client.model
     guides = load_workspace_guides(config)
@@ -920,6 +944,7 @@ def _run_entity_resolution(
     _run_entity_updates(config, client, text, proposal)
     _suppress_stubs_matching_updates(proposal)
     _suppress_dated_record_stubs_matching_updates(config, proposal)
+    _suppress_proposed_note_matching_updates(proposal)
     _reconcile_entity_links(config, proposal)
 
 
@@ -940,6 +965,52 @@ def _proposed_note_subject_slug(proposed_note: ProposedFile | None) -> str | Non
     if not isinstance(subject, str) or not subject.strip():
         return None
     return slugify(subject)
+
+
+def _correct_proposed_note_type(
+    proposed_note: ProposedFile,
+    resolution: EntityResolution,
+    schema: EntitySchema,
+    proposal: "EnrichmentProposal",
+) -> ProposedFile:
+    """When a create-resolution's subject matches proposed_note's own
+    subject (see `_proposed_note_subject_slug`) but entity-resolution
+    disagrees with proposed_note's own `type:`, entity-resolution's decision
+    wins: it runs after extraction and gets to see sibling precedents and
+    the full entity catalog that extraction never had (issue #73).
+    Previously only the redundant stub was suppressed in this case, leaving
+    extraction's earlier, less-informed type on disk uncorrected.
+
+    Only the frontmatter `type:` and the file's directory move; the
+    synthesized markdown body (and its own filename slug, already
+    normalized by `_sanitize_note`) is left untouched -- mirrors
+    `_reslug_proposed_note`'s "record the correction, never apply it
+    invisibly" pattern. Returns `proposed_note` unchanged when the types
+    already agree (including when the note's own frontmatter doesn't parse,
+    or carries no `type:` at all -- validate_proposal's own type check
+    catches that separately).
+    """
+    try:
+        post = frontmatter_lib.loads(proposed_note.content)
+    except Exception:
+        return proposed_note
+    metadata = post.metadata if isinstance(post.metadata, dict) else {}
+    old_type = metadata.get("type")
+    if old_type == resolution.entity_type:
+        return proposed_note
+
+    new_metadata = dict(metadata)
+    new_metadata["type"] = resolution.entity_type
+    frontmatter_yaml = yaml.safe_dump(new_metadata, sort_keys=False, allow_unicode=True)
+    new_content = f"---\n{frontmatter_yaml}---\n\n{post.content}"
+    new_path = f"{schema.directory}/{Path(proposed_note.path).name}"
+
+    proposal.warnings.append(
+        f"Corrected the proposed note's type from '{old_type}' to "
+        f"'{resolution.entity_type}' (moving it from {proposed_note.path} to {new_path}) "
+        "to match entity-resolution's decision for the same subject"
+    )
+    return ProposedFile(path=new_path, content=new_content)
 
 
 def _is_source_self_mirror(resolution: EntityResolution, proposal: EnrichmentProposal) -> bool:
@@ -1041,6 +1112,14 @@ def _build_stub_entities(
             continue
         resolution_slug = slugify(resolution.name)
         if proposed_note_slug is not None and resolution_slug == proposed_note_slug:
+            if proposal.proposed_note is not None:
+                old_path = proposal.proposed_note.path
+                proposal.proposed_note = _correct_proposed_note_type(
+                    proposal.proposed_note, resolution, schema, proposal
+                )
+                if proposal.proposed_note.path != old_path:
+                    taken.discard(old_path)
+                    taken.add(proposal.proposed_note.path)
             proposal.warnings.append(
                 f"{resolution.name}: already represented by the proposed note "
                 f"({proposal.proposed_note.path}) — not creating a duplicate page"
@@ -1079,7 +1158,13 @@ def _build_stub_entities(
         for date_field in ("created", "updated"):
             if date_field in schema.fields and not metadata.get(date_field):
                 metadata[date_field] = today
-        stubs.append(ProposedFile(path=path, content=_stub_content(metadata, resolution.name)))
+        stubs.append(
+            ProposedFile(
+                path=path,
+                content=_stub_content(metadata, resolution.name),
+                confidence=resolution.proposed_frontmatter_confidence,
+            )
+        )
 
     proposal.entity_resolutions = kept_resolutions
     return stubs
@@ -1189,6 +1274,72 @@ def _suppress_dated_record_stubs_matching_updates(
     proposal.stub_entities = kept
 
 
+def _suppress_proposed_note_matching_updates(proposal: EnrichmentProposal) -> None:
+    """Null out proposal.proposed_note when it's redundant with an entity
+    update (DAG node 3) applied in this same proposal (issue #68).
+
+    _suppress_stubs_matching_updates and
+    _suppress_dated_record_stubs_matching_updates both only ever prune
+    proposal.stub_entities — an entity-resolution create. Neither touches
+    proposal.proposed_note, which is set by extraction (_run_extraction),
+    an independent model call that runs *before* entity resolution and so
+    can never see entity_updates at all. The same duplication both of those
+    functions guard against for a stub can happen to proposed_note instead:
+    a dated journal-style source can correctly update an existing
+    accumulating entity's Timeline via entity_updates and *also*
+    independently produce its own proposed_note for the same source.
+
+    Two redundancy signals, mirroring the two suppression functions above:
+
+    1. Subject-slug match (mirrors _suppress_stubs_matching_updates):
+       proposed_note's own frontmatter name/title slug
+       (_proposed_note_subject_slug) matches an applied entity_updates
+       target's slug — same subject, just extraction's independent
+       representation of it.
+    2. Dated-record type (mirrors _suppress_dated_record_stubs_matching_updates):
+       proposed_note's frontmatter `type` is journal or meeting
+       (_REDUNDANT_DATED_RECORD_TYPES) and this same proposal already
+       produced a real entity_update — a journal/meeting note's whole
+       purpose is "record what this source said," which an update that
+       already recorded it makes redundant, even when proposed_note's own
+       subject (a date/topic) never slug-matches the update target.
+
+    Unlike the stub-suppression functions there's only ever one candidate
+    (proposal.proposed_note itself), so this is a null-or-keep decision,
+    not a filtered list.
+    """
+    if not proposal.entity_updates or proposal.proposed_note is None:
+        return
+
+    updated_paths = {update.target_note_path for update in proposal.entity_updates}
+    updated_slugs = {slugify(Path(path).stem) for path in updated_paths}
+    for resolution in proposal.entity_resolutions:
+        if resolution.action == "update" and resolution.target_note_path in updated_paths:
+            updated_slugs.add(slugify(resolution.name))
+
+    proposed_note_slug = _proposed_note_subject_slug(proposal.proposed_note)
+    if proposed_note_slug is not None and proposed_note_slug in updated_slugs:
+        proposal.warnings.append(
+            f"{proposal.proposed_note.path}: subject already updated via an existing "
+            "entity in this same proposal — not creating a duplicate page"
+        )
+        proposal.proposed_note = None
+        return
+
+    try:
+        metadata = frontmatter_lib.loads(proposal.proposed_note.content).metadata
+    except Exception:
+        metadata = {}
+    entity_type = metadata.get("type") if isinstance(metadata, dict) else None
+    if entity_type in _REDUNDANT_DATED_RECORD_TYPES:
+        proposal.warnings.append(
+            f"{proposal.proposed_note.path}: this source's content already merged into "
+            "an existing entity via an update in this same proposal — not creating a "
+            f"separate {entity_type} record for the same source"
+        )
+        proposal.proposed_note = None
+
+
 # Wikilink parsing/normalization live in wakil.knowledge.wikilinks (shared
 # with index-time extraction) — imported at the top of the module. This
 # section retains only the entity-resolution reconciliation logic that
@@ -1280,7 +1431,48 @@ _H1_RE = re.compile(r"(?m)^#\s+.*$")
 _TIMELINE_HEADING_RE = re.compile(r"(?m)^##\s+Timeline(?:\s*/\s*Log)?\s*$")
 
 
-def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
+# Matches a Timeline entry's own heading line, e.g. "### 2026-07-16 —
+# what happened". Used only to detect whether it carries a real date —
+# see `_dated_timeline_entry` below.
+_ENTRY_HEADING_RE = re.compile(r"^(#{2,4})\s+(.*)$")
+_ISO_DATE_IN_HEADING_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _dated_timeline_entry(entry: str, fallback_date: str | None) -> str:
+    """Replace `entry`'s heading with `fallback_date` when it doesn't carry
+    a real, parseable date of its own.
+
+    Timeline entries are append-only (never rewritten once written), so a
+    placeholder heading the model invents when the source itself has no
+    date — "(date not recorded)", "Undated -- source: clipping" — would
+    otherwise sit there permanently (issue #77). Falls back to the source's
+    own captured/retrieved date instead of accepting that text verbatim.
+    Any description text after a separator (" — ", " -- ", " - ") is kept;
+    only the placeholder date token itself is replaced. A no-op when
+    `fallback_date` is unavailable or the heading already has a real date.
+    """
+    if not fallback_date:
+        return entry
+    lines = entry.splitlines()
+    if not lines:
+        return entry
+    match = _ENTRY_HEADING_RE.match(lines[0])
+    if match is None or _ISO_DATE_IN_HEADING_RE.search(match.group(2)):
+        return entry
+    marker, rest = match.group(1), match.group(2).strip()
+    for sep in (" — ", " -- ", " - "):
+        if sep in rest:
+            description = rest.partition(sep)[2].strip()
+            if description:
+                lines[0] = f"{marker} {fallback_date} — {description}"
+                return "\n".join(lines)
+    lines[0] = f"{marker} {fallback_date}"
+    return "\n".join(lines)
+
+
+def _insert_timeline_entry(
+    timeline_section: str, entry: str, fallback_date: str | None = None
+) -> str:
     """Prepend `entry` as the new first dated entry, right after the
     heading line — before every existing entry, including any
     auto-generated back-link bullets at the bottom, which are never
@@ -1291,6 +1483,7 @@ def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
     entry = entry.strip()
     if not entry:
         return timeline_section
+    entry = _dated_timeline_entry(entry, fallback_date)
     return f"{heading_line}\n\n{entry}\n\n{rest}" if rest else f"{heading_line}\n\n{entry}\n"
 
 
@@ -1384,7 +1577,12 @@ def _split_note_sections(content: str) -> tuple[str, str, str] | None:
     return h1_line, top_section, timeline_section
 
 
-def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -> str | None:
+def _merge_entity_note(
+    old_content: str,
+    revision: EntityRevision,
+    today: str,
+    fallback_date: str | None = None,
+) -> str | None:
     """Deterministic surgical merge — never a full-file regeneration (the
     "clobbering bug" note-revision's own skill warns against): existing
     frontmatter with only the delta keys changed, the H1 line preserved
@@ -1393,6 +1591,12 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
     entry prepended inside the Timeline section. Returns None if the note
     doesn't have the expected H1 + '## Timeline / Log' shape — the caller
     surfaces that as a warning rather than guessing at a different one.
+
+    `fallback_date` (the source's own captured/retrieved date) stands in
+    for `revision.timeline_entry`'s heading when that heading has no real
+    date of its own — see `_dated_timeline_entry`. The entity-compile pilot
+    callers never set `timeline_entry`, so they can leave this at its
+    default.
     """
     try:
         post = frontmatter_lib.loads(old_content)
@@ -1408,7 +1612,14 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
     metadata = dict(post.metadata)
     if revision.frontmatter_updates:
         metadata.update(revision.frontmatter_updates)
-    metadata["updated"] = today
+    # Assign a real date object, not the isoformat string `today` actually
+    # is: yaml.safe_dump quotes a plain string that merely looks like a
+    # date (to disambiguate it from a date scalar), but dumps an actual
+    # date object unquoted. `created` survives as a date object from the
+    # frontmatter round-trip (PyYAML's implicit resolver parses unquoted
+    # `created: 2026-01-15` into a date on load), so without this cast
+    # `updated:` would be the only quoted date field in the frontmatter.
+    metadata["updated"] = date.fromisoformat(today)
 
     # An empty/absent compiled_truth means "no change to the top section",
     # never "delete the top section" — has_update=True can legitimately mean
@@ -1427,7 +1638,7 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
         old_content, revision.timeline_entry or "", target_note_path
     )
     new_top = f"{h1_line}\n\n{compiled_truth}\n\n---" if compiled_truth else h1_line
-    new_timeline = _insert_timeline_entry(timeline_section, timeline_entry)
+    new_timeline = _insert_timeline_entry(timeline_section, timeline_entry, fallback_date)
 
     new_body = f"{new_top}\n\n{new_timeline}".rstrip("\n") + "\n"
     frontmatter_yaml = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
@@ -1557,7 +1768,9 @@ def _apply_entity_revisions(
                     "it either — its founding content may be permanently missing."
                 )
             continue
-        new_content = _merge_entity_note(old_content, revision, today)
+        new_content = _merge_entity_note(
+            old_content, revision, today, proposal.source_captured_date
+        )
         if new_content is None:
             proposal.warnings.append(
                 f"{revision.target_note_path}: doesn't match the expected H1 / "

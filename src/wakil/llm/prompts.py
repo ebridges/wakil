@@ -154,6 +154,10 @@ def build_resolution_prompt(
     """
     parts = [
         "Resolve every entity this source touched against the knowledge base.",
+        "For action=create, also set proposed_frontmatter_confidence: how "
+        "well-supported proposed_frontmatter's field values are by the source "
+        "(e.g. a status field inferred from a single thin or ambiguous mention "
+        "gets low confidence), not whether creating the page at all was warranted.",
         "",
         f"Known entity types (use these exactly):\n{describe_entity_types(entity_types)}",
         "",
