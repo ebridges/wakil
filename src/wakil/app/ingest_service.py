@@ -675,14 +675,6 @@ def prepare_enrichment(
     related_pairs = [(hit.ref, hit.title) for hit in related_notes]
     source_text = text[:MAX_SOURCE_CHARS]
 
-    # Issue #94 heuristic: scoped to source_type "text" — a hand-authored
-    # personal reflection is realistically only ever captured that way (an
-    # article comes from a URL, a transcript from a recording), so this
-    # never touches the article/transcript extraction path at all.
-    reflection_shape = source.source_type == "text" and _looks_like_personal_reflection(
-        source_text
-    )
-
     # DAG node 1: extraction judgment (the <kind> skill + ExtractionOutput).
     # The raw *capture* path (sources/transcripts/...), not source.origin's
     # pre-capture location — origin may be a binary/external file (a
@@ -696,7 +688,6 @@ def prepare_enrichment(
         related_pairs,
         proposal,
         guides,
-        shape_hint=_REFLECTION_SHAPE_HINT if reflection_shape else None,
     )
     if extraction.title and extraction.title.strip():
         proposal.title = extraction.title.strip()
@@ -726,8 +717,6 @@ def prepare_enrichment(
             ),
             proposal,
         )
-    if reflection_shape:
-        _warn_if_reflection_not_journaled(config, proposal)
 
     # DAG node 2: entity resolution — always invoked, never optional.
     _run_entity_resolution(config, client, source_text, related_pairs, proposal, guides)
@@ -888,271 +877,6 @@ def _candidate_entity_notes(
     return matches
 
 
-# --------------------------------------------------------------------------
-# Issue #94: personal-reflection shape heuristic
-#
-# A hand-authored, multi-date personal reflection captured as source_type
-# "text" needs its own content recognized and proposed as a journal-typed
-# note by extraction — the primary fix for that lives in
-# skills/text/SKILL.md, which now names this shape explicitly. Two prior
-# guidance attempts (#75, PR #83) edited entity-resolve/SKILL.md instead — a
-# different model call that decides create/update/skip for entities the
-# source *touches*, never the type of the source's *own* proposed_note, so
-# that guidance was structurally incapable of ever affecting this outcome
-# (see issue #94's root-cause writeup).
-#
-# This heuristic is a conservative, source-text-only backstop for when
-# guidance alone still doesn't land. When it fires, it only:
-#   (a) adds a non-binding reminder to the extraction prompt — the model
-#       still judges the actual text, so a misfire here costs nothing but
-#       an ignorable sentence in the prompt; and
-#   (b) if the eventual proposed_note still isn't the workspace's
-#       dated-record type, records a visible warning for manual review
-#       (_warn_if_reflection_not_journaled) rather than silently doing
-#       nothing.
-# It never rewrites proposed_note's type or content on its own guess: unlike
-# _correct_proposed_note_type, there is no second, independently-informed
-# judgment to defer to here (entity-resolution's own catalog access and
-# sibling precedent) — just a lexical guess from the raw text, and
-# rewriting a note on a guess this shallow risks being confidently wrong in
-# a way a dismissible warning is not.
-#
-# Tuned and regression-tested (tests/unit/test_ingest_service.py) against
-# the reported shape plus four non-reflective counter-shapes that each
-# share at least one individual signal with it: a book note (first-person
-# commentary, no dated structure), a meeting transcript (dated, first-person
-# dialogue, but one recurring subject), a reference article (no first
-# person, no dates), and — the hardest case — a personal build log, which is
-# also first-person and multi-dated but revolves around one recurring
-# subject noun ("deck", "cabinet") across its entries rather than moving
-# between different subjects the way a reflection does.
-#
-# _MIN_DATED_HEADERS and the pronoun-density floor are hard gates: below
-# either, this never fires, full stop. What is NOT a hard gate (anymore) is
-# "does one subject recur across sections" (_has_dominant_recurring_subject).
-# An earlier version of this heuristic used that as a third hard veto —
-# recurring subject present, no reflection — reasoning that a build log's
-# "deck" or a meeting's shared project noun recurring across every section
-# was the shape's tell. But a real personal reflection just as often
-# revolves around one recurring life theme across entries (the same breakup,
-# job, or health concern, journaled about repeatedly) as it does hop between
-# unrelated subjects entry to entry — and separately, "recurring subject" as
-# implemented is *any* shared content word, so two entries that each merely
-# mention the same ordinary word in passing ("outside", "evening") register
-# identically to a build log's genuine recurring project noun. Both failure
-# modes were confirmed against real two- and three-section reflections
-# (_TP_TWO_DATE_REFLECTION_TEXT, _TP_RECURRING_THEME_REFLECTION_TEXT): the
-# hard veto silently swallowed both, which is precisely the case this
-# backstop exists to catch (guidance already failed twice; this is the
-# second line of defense, and a silent no-op here is a no-op on the exact
-# input it was built for).
-#
-# So recurring-subject is now one signal weighed against a second, positive
-# one instead of a unilateral veto: _has_reflective_language, which looks
-# for actual introspective/evaluative phrasing ("I feel", "I think", "I
-# realized", "reflecting on", "I'm trying to be patient with myself") rather
-# than just first-person pronoun density (a meeting transcript and a build
-# log are both first-person-heavy too — that's the pronoun gate above, not
-# this signal). A recurring subject only vetoes when reflective language is
-# ALSO absent: that combination is what actually distinguishes "this source
-# revolves around one non-reflective external subject" (a build log's deck,
-# a meeting's shared project) from "this source revolves around one
-# recurring subject and evaluates/processes it in first person" (a
-# reflection about a breakup, a job, a health concern) or "this source
-# merely shares one incidental word between otherwise-unrelated entries."
-# Both existing non-reflective counter-shapes that have a recurring subject
-# (the meeting transcript, the build log) lack reflective-language phrasing
-# entirely, so this still excludes them correctly; both new reflection
-# counter-examples have it, so they're no longer excluded.
-
-_HEADER_LINE_RE = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
-_MONTH_NAME_RE = (
-    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun[e]?|jul[y]?|aug(?:ust)?|"
-    r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
-)
-_DATE_TOKEN_RE = re.compile(
-    rf"\d{{4}}-\d{{2}}-\d{{2}}|\b{_MONTH_NAME_RE}\.?\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s*\d{{4}})?\b",
-    re.IGNORECASE,
-)
-_FIRST_PERSON_RE = re.compile(
-    r"\bI\b|\bI['\u2019](?:m|ve|d|ll)\b|(?i:\bmy\b|\bme\b|\bmyself\b|\bmine\b)"
-)
-
-# A small, hand-picked function-word list — deliberately not
-# _COMMON_SINGLE_WORDS above: that list is frequency-based and includes
-# ordinary concrete nouns like "deck", which is exactly the kind of
-# recurring subject a build log needs this check to keep, not discard.
-_SHAPE_STOPWORDS = frozenset(
-    (
-        "im", "ive", "id", "ill", "youre", "youve", "youll", "hes", "shes", "theyre",
-        "theyve", "weve", "the", "a", "an", "and", "but", "or", "nor", "so", "yet",
-        "for", "of", "to", "in", "on", "at", "by", "with", "from", "as", "into",
-        "onto", "over", "under", "again", "further", "then", "once", "here", "there",
-        "when", "where", "why", "how", "all", "any", "both", "each", "few", "more",
-        "most", "other", "some", "such", "no", "not", "only", "own", "same", "than",
-        "too", "very", "can", "will", "just", "this", "that", "these", "those", "am",
-        "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-        "having", "do", "does", "did", "doing", "you", "your", "yours", "he", "him",
-        "his", "she", "her", "hers", "it", "its", "we", "us", "our", "ours", "they",
-        "them", "their", "theirs", "today", "tomorrow", "yesterday", "week",
-        "weekend", "day", "days", "went", "going", "got", "getting", "started",
-        "finished", "done", "about", "after", "before", "during", "while", "still",
-        "like", "really", "much", "lot", "bit", "little", "good", "great", "nice",
-        "pretty", "looking", "looks", "felt", "feel",
-    )
-)
-
-
-def _text_content_words(text: str, *, min_len: int = 3) -> set[str]:
-    return {
-        w.lower()
-        for w in re.findall(r"[A-Za-z']+", text)
-        if len(w) >= min_len and w.lower() not in _SHAPE_STOPWORDS
-    }
-
-
-def _has_dominant_recurring_subject(text: str, *, threshold: float = 0.6) -> bool:
-    """True when some content word repeats across most of the text's own
-    header-delimited sections — the lexical signature of a source that
-    revolves around one recurring subject across its dated entries (a build
-    log's project noun, a multi-session meeting's company/attendee) rather
-    than one that moves between different subjects entry to entry (a
-    personal reflection). Sections come from *any* markdown header, not
-    just dated ones, so a build log's non-dated intro section still counts
-    against the reflection reading.
-    """
-    headers = list(_HEADER_LINE_RE.finditer(text))
-    if len(headers) < 2:
-        return False
-    sections = []
-    for i, header in enumerate(headers):
-        start = header.end()
-        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
-        sections.append(text[start:end])
-    presence: dict[str, int] = {}
-    for section in sections:
-        for word in _text_content_words(section):
-            presence[word] = presence.get(word, 0) + 1
-    if not presence:
-        return False
-    return max(presence.values()) / len(sections) >= threshold
-
-
-# Actual introspective/evaluative phrasing, as distinct from mere first-person
-# pronoun density (_FIRST_PERSON_RE) — a meeting transcript ("I'll set up the
-# review", "I finished the schema draft") and a build log ("I sealed the deck
-# today") are both first-person-heavy without ever processing or evaluating
-# anything the way a reflection does ("I feel like I need to reprioritize my
-# time", "reflecting on my goals all week"). Deliberately phrase-based rather
-# than single-word (a lone "feel" or "think" shows up in ordinary factual
-# writing too — "I think the schema is solid") for the same reason
-# _PROPER_NOUN_RE above prefers multi-word runs: a whole reflective phrase is
-# a much stronger signal than any one of its words in isolation.
-_REFLECTIVE_LANGUAGE_RE = re.compile(
-    r"\bi\s+(?:feel|felt|think|thought|realiz(?:e|ed)|wonder(?:ed)?|keep\s+thinking|need\s+to)\b"
-    r"|\bi['’]m\s+(?:not\s+sure|trying\s+to|struggling)\b"
-    r"|\bi['’]ve\s+been\s+(?:thinking|struggling|trying)\b"
-    r"|\bmakes?\s+me\s+(?:realize|think|feel)\b"
-    r"|\bmade\s+me\s+realize\b"
-    r"|\breflecting\s+on\b"
-    r"|\bmy\s+takeaway\b",
-    re.IGNORECASE,
-)
-
-
-def _has_reflective_language(text: str) -> bool:
-    """True when the text contains at least one introspective/evaluative
-    phrase (see _REFLECTIVE_LANGUAGE_RE) — the positive signal weighed
-    against _has_dominant_recurring_subject below, rather than letting a
-    recurring subject alone veto reflection detection."""
-    return _REFLECTIVE_LANGUAGE_RE.search(text) is not None
-
-
-_MIN_REFLECTION_WORDS = 40
-_MIN_DATED_HEADERS = 2
-_MIN_PRONOUN_DENSITY_PER_100_WORDS = 3.0
-
-
-def _looks_like_personal_reflection(text: str) -> bool:
-    """Conservative, source-text-only signal for issue #94's reported
-    shape: a hand-authored, multi-date personal reflection touching 1-2
-    external works in passing. See the module comment above this block for
-    what this is and is not used for."""
-    words = re.findall(r"[A-Za-z']+", text)
-    if len(words) < _MIN_REFLECTION_WORDS:
-        return False
-    dated_headers = {
-        match.group(0).lower()
-        for line in _HEADER_LINE_RE.findall(text)
-        if (match := _DATE_TOKEN_RE.search(line))
-    }
-    if len(dated_headers) < _MIN_DATED_HEADERS:
-        return False
-    pronoun_density = len(_FIRST_PERSON_RE.findall(text)) / len(words) * 100
-    if pronoun_density < _MIN_PRONOUN_DENSITY_PER_100_WORDS:
-        return False
-    # A recurring subject only disqualifies when reflective language is ALSO
-    # absent — see the module comment above for why a hard veto on recurring
-    # subject alone misclassified real reflections (a recurring life theme,
-    # or two entries that merely share one incidental word).
-    return not (_has_dominant_recurring_subject(text) and not _has_reflective_language(text))
-
-
-_REFLECTION_SHAPE_HINT = (
-    "Heuristic note (verify against the text yourself — this may be wrong): "
-    "this source's structure (multiple dated sections, heavy first-person "
-    "language) mechanically resembles a personal reflection about the "
-    "day/period. If it genuinely is one, propose a journal-typed (or "
-    "whichever dated-record type this workspace uses) proposed_note for its "
-    "own content, even if it also discusses other works or projects in "
-    "passing — don't let those substitute for capturing the reflection "
-    "itself."
-)
-
-
-def _proposed_note_type(proposed_note: ProposedFile | None) -> str | None:
-    """The frontmatter `type:` a proposed_note claims for itself, or None
-    when there's no proposed_note or its frontmatter doesn't parse/carry
-    one. Sibling to `_proposed_note_subject_slug` (identity) — this reads
-    `type` instead of `name`/`title`."""
-    if proposed_note is None:
-        return None
-    try:
-        metadata = frontmatter_lib.loads(proposed_note.content).metadata
-    except Exception:
-        return None
-    if not isinstance(metadata, dict):
-        return None
-    value = metadata.get("type")
-    return value if isinstance(value, str) else None
-
-
-def _warn_if_reflection_not_journaled(
-    config: WorkspaceConfig, proposal: EnrichmentProposal
-) -> None:
-    """Issue #94 backstop's visible half — call only when
-    `_looks_like_personal_reflection` already fired for this source. If the
-    proposed_note extraction actually produced still isn't the workspace's
-    journal type, record a warning rather than silently doing nothing — but
-    never rewrite proposed_note itself (see the module comment above
-    `_looks_like_personal_reflection` for why not)."""
-    schemas = load_entity_schemas(config.root_path)
-    if "journal" not in schemas:
-        return  # this workspace doesn't define that dated-record type at all
-    note_type = _proposed_note_type(proposal.proposed_note)
-    if note_type == "journal":
-        return
-    outcome = (
-        f"proposed a '{note_type}'-typed note instead" if note_type else "proposed no note at all"
-    )
-    proposal.warnings.append(
-        "This source's structure (multiple dated sections, heavy first-person "
-        f"language) mechanically resembles a personal reflection, but extraction {outcome} "
-        "for its own content — review manually; the reflection itself may need its own "
-        "journal entry alongside anything it references."
-    )
-
-
 def _run_extraction(
     config: WorkspaceConfig,
     client: ModelClient,
@@ -1162,8 +886,6 @@ def _run_extraction(
     related_pairs: list[tuple[str, str]],
     proposal: EnrichmentProposal,
     guides: dict[str, str],
-    *,
-    shape_hint: str | None = None,
 ) -> ExtractionOutput:
     try:
         skill = load_skill(source_type, config.root_path)
@@ -1185,7 +907,6 @@ def _run_extraction(
         page_shapes,
         context=proposal.context,
         guides=guides,
-        shape_hint=shape_hint,
     )
     try:
         return complete_with_contract(client, system, prompt, ExtractionOutput)

@@ -90,7 +90,6 @@ def build_extraction_prompt(
     page_shapes: dict[str, str],
     context: str | None = None,
     guides: dict[str, str] | None = None,
-    shape_hint: str | None = None,
 ) -> str:
     """User content for the extraction call.
 
@@ -103,16 +102,10 @@ def build_extraction_prompt(
     `wakil.schema.loader.resolve_page_shape_template` — this module stays
     I/O-free). Each type below names its shape; the matching body tells the
     model what that shape actually looks like.
-    shape_hint: an optional, non-binding reminder from a deterministic,
-    source-text-only heuristic (see
-    `wakil.app.ingest_service._looks_like_personal_reflection`, issue #94) —
-    never a directive to follow blindly; the model judges the actual text.
     """
     parts = [f"Source type: {source_type}", f"Origin: {origin}", ""]
     if context:
         parts += ["User-provided context about this source:", context, ""]
-    if shape_hint:
-        parts += [shape_hint, ""]
     parts += [
         "If you propose a note, its frontmatter must be valid for its type "
         "below: every required field filled, and every optional field filled "
