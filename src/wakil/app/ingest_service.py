@@ -1140,6 +1140,17 @@ def _run_entity_updates(
             continue
         if resolution.relevance in _LOW_RELEVANCE:
             below_threshold.append((resolution.name, resolution.relevance))
+            target = config.root_path / resolution.target_note_path
+            if target.is_file():
+                with contextlib.suppress(OSError):
+                    existing = target.read_text(encoding="utf-8")
+                    if _is_unpopulated_stub(existing):
+                        proposal.warnings.append(
+                            f"{resolution.name} is still an empty stub and this update "
+                            "didn't populate it either (left below the relevance "
+                            "threshold) — its founding content may be permanently "
+                            "missing."
+                        )
             continue
         target = config.root_path / resolution.target_note_path
         if not target.is_file():
@@ -1202,9 +1213,24 @@ def _apply_entity_revisions(
 ) -> None:
     today = datetime.now(UTC).date().isoformat()
     by_path = {res.target_note_path: content for res, _, content in candidates}
+    name_by_path = {res.target_note_path: res.name for res, _, _ in candidates}
     for revision in revisions:
         old_content = by_path.get(revision.target_note_path)
-        if old_content is None or not revision.has_update:
+        if old_content is None:
+            continue
+        if not revision.has_update:
+            # This update was declined outright — a much higher-severity case
+            # than the below-relevance-threshold skip above if the entity has
+            # NEVER been populated: the stub _stub_content wrote at creation
+            # time is still exactly what's on disk, and this pass — like
+            # every one before it — didn't fold in real content either
+            # (issue #45).
+            if _is_unpopulated_stub(old_content):
+                name = name_by_path.get(revision.target_note_path, revision.target_note_path)
+                proposal.warnings.append(
+                    f"{name} is still an empty stub and this update didn't populate "
+                    "it either — its founding content may be permanently missing."
+                )
             continue
         new_content = _merge_entity_note(old_content, revision, today)
         if new_content is None:
@@ -1277,6 +1303,35 @@ def _stub_content(metadata: dict, name: str) -> str:
         "---\n\n"
         "## Timeline / Log\n"
     )
+
+
+# The Compiled Truth / Open Threads span _stub_content writes at creation
+# time, independent of entity name or frontmatter (both live outside this
+# span) — derived from _stub_content itself rather than duplicated as a
+# second literal, so the two can never silently drift apart. Used to detect
+# an entity that has NEVER been populated, so a declined update against it
+# can be flagged with a much higher-severity warning than "this particular
+# update was skipped" (issue #45).
+_stub_sections = _split_note_sections(frontmatter_lib.loads(_stub_content({}, "_")).content)
+assert _stub_sections is not None
+_STUB_TOP_SECTION = _stub_sections[1]
+del _stub_sections
+
+
+def _is_unpopulated_stub(content: str) -> bool:
+    """True if `content` (a full note file, frontmatter included) still has
+    exactly the Compiled Truth placeholder `_stub_content` writes at
+    creation time — i.e. nothing has ever synthesized real content into it,
+    across however many enrich passes have touched the entity since."""
+    try:
+        post = frontmatter_lib.loads(content)
+    except Exception:
+        return False
+    sections = _split_note_sections(post.content)
+    if sections is None:
+        return False
+    _, top_section, _ = sections
+    return top_section.strip() == _STUB_TOP_SECTION
 
 
 def validate_proposal(
