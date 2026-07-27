@@ -1049,6 +1049,144 @@ def test_entity_update_warns_when_target_missing_on_disk(workspace, transcript):
     assert len(client.calls) == 2
 
 
+# --------------------------------------------------------------------------
+# Issue #36: duplicate entity stubs (create-resolutions whose subject
+# already has a home in this same proposal).
+
+
+def test_stub_suppressed_when_matches_proposed_note_subject(workspace, transcript):
+    # MODEL_JSON's proposed_note is a `meeting` page titled "Claims Kickoff".
+    # Entity resolution independently proposing a `create` for the exact
+    # same subject under a different type (here `project`) must not produce
+    # a second, always-empty page for it — but a genuinely distinct new
+    # entity (Dana Prieto) in the same resolution call still gets its stub.
+    resolution = {
+        "entities": [
+            {
+                "name": "Claims Kickoff",
+                "entity_type": "project",
+                "action": "create",
+                "confidence": 0.8,
+            },
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+            },
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([MODEL_JSON, resolution])  # no update actions -> no 3rd call
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
+    assert any(
+        "Claims Kickoff" in warning and "already represented by the proposed note" in warning
+        for warning in proposal.warnings
+    )
+    assert len(client.calls) == 2
+
+
+def test_stub_suppressed_when_matches_applied_entity_update_target(
+    workspace, transcript, kb_path
+):
+    # Entity resolution proposes both a real update to an existing long-lived
+    # entity (people/priya-shah.md) AND, independently, a `create` for the
+    # same subject under a different (builtin) type -- the worst-cases in
+    # issue #36 look like journal/meeting duplicates alongside a project
+    # entity's own correct Timeline update. The create must be suppressed
+    # once the update is confirmed to actually change content.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "Priya Shah",
+                "entity_type": "journal",
+                "action": "create",
+                "confidence": 0.7,
+            },
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.stub_entities == []
+    assert any(
+        "subject already updated via an existing entity" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_stub_kept_when_create_subject_differs_from_update_target(
+    workspace, transcript, kb_path
+):
+    # No over-suppression: a create-resolution for a genuinely distinct
+    # entity must still get its stub even when the same proposal also
+    # updates an unrelated existing entity.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+            },
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
+    assert not any(
+        "subject already updated via an existing entity" in warning
+        for warning in proposal.warnings
+    )
+
+
 @pytest.mark.parametrize("relevance", ["minor", "peripheral"])
 def test_entity_update_excluded_when_relevance_below_threshold(
     workspace, transcript, kb_path, relevance
