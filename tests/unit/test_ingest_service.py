@@ -2371,6 +2371,105 @@ def test_stub_kept_for_legitimate_domain_type_create_alongside_own_subject(works
     assert proposal.warnings == []
 
 
+# --------------------------------------------------------------------------
+# Issue #73: when a create-resolution matching proposed_note's own subject
+# disagrees with proposed_note's own `type:`, entity-resolution's decision
+# must correct proposed_note's frontmatter type and path, not just suppress
+# the redundant stub.
+
+
+def test_stub_match_with_different_type_corrects_proposed_note(workspace):
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Guns Germs",
+        entity_resolutions=[
+            EntityResolution(name="Guns Germs", entity_type="project", action="create"),
+        ],
+    )
+    proposal.proposed_note = ProposedFile(
+        path="concepts/guns-germs.md",
+        content=(
+            "---\ntype: concept\nname: Guns Germs\ncreated: 2026-07-09\n---\n\n"
+            "# Guns Germs\n\nSynthesized body prose that must survive untouched.\n"
+        ),
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    # No duplicate stub — same suppression as issue #36.
+    assert stubs == []
+    # But unlike #36's original fix, proposed_note itself is now corrected
+    # to entity-resolution's (better-informed) type and path.
+    assert proposal.proposed_note.path == "projects/guns-germs.md"
+    metadata = frontmatter.loads(proposal.proposed_note.content).metadata
+    assert metadata["type"] == "project"
+    assert metadata["name"] == "Guns Germs"
+    # The synthesized markdown body is preserved verbatim — only frontmatter
+    # `type:` and the file path moved.
+    assert "Synthesized body prose that must survive untouched." in proposal.proposed_note.content
+    assert "# Guns Germs" in proposal.proposed_note.content
+    assert any(
+        "Corrected the proposed note's type from 'concept' to 'project'" in warning
+        for warning in proposal.warnings
+    )
+    assert any(
+        "Guns Germs" in warning and "already represented by the proposed note" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_stub_match_with_same_type_leaves_proposed_note_unchanged(workspace):
+    original_content = (
+        "---\ntype: concept\nname: Guns Germs\ncreated: 2026-07-09\n---\n\n"
+        "# Guns Germs\n\nSynthesized body prose.\n"
+    )
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Guns Germs",
+        entity_resolutions=[
+            EntityResolution(name="Guns Germs", entity_type="concept", action="create"),
+        ],
+    )
+    proposal.proposed_note = ProposedFile(path="concepts/guns-germs.md", content=original_content)
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert stubs == []
+    # Matches #36's existing behavior exactly: suppressed, but no spurious
+    # correction since the types already agree.
+    assert proposal.proposed_note.path == "concepts/guns-germs.md"
+    assert proposal.proposed_note.content == original_content
+    assert not any("Corrected the proposed note's type" in warning for warning in proposal.warnings)
+    assert any(
+        "Guns Germs" in warning and "already represented by the proposed note" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_stub_for_unrelated_subject_leaves_proposed_note_unchanged(workspace):
+    original_content = (
+        "---\ntype: concept\nname: Guns Germs\ncreated: 2026-07-09\n---\n\n"
+        "# Guns Germs\n\nSynthesized body prose.\n"
+    )
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Guns Germs",
+        entity_resolutions=[
+            EntityResolution(name="Dana Prieto", entity_type="person", action="create"),
+        ],
+    )
+    proposal.proposed_note = ProposedFile(path="concepts/guns-germs.md", content=original_content)
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    # A genuinely different, unrelated subject still gets its own stub, and
+    # proposed_note is completely untouched — no regression.
+    assert [stub.path for stub in stubs] == ["people/dana-prieto.md"]
+    assert proposal.proposed_note.path == "concepts/guns-germs.md"
+    assert proposal.proposed_note.content == original_content
+    assert not any("Corrected the proposed note's type" in warning for warning in proposal.warnings)
+
+
 def test_index_source_create_does_not_block_apply(workspace, transcript):
     # Regression: entity-resolve/SKILL.md now steers the model toward
     # proposing entity_type: index, action: create for index/list-shaped
