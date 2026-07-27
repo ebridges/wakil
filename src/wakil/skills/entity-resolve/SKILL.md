@@ -24,6 +24,17 @@ Decide one action per entity:
   what happened, a company named only as someone's past employer, a concept
   mentioned but not developed. Not every mentioned name deserves a page.
 
+Some sources are not really about one primary entity at all — they're
+themselves an index or list spanning many (a reading tracker, a running
+project list, a reflective entry that's really two separate dated
+entries stitched together). Recognize that shape explicitly: resolve the
+source itself as its own entry (`entity_type: index`, `action: create`)
+alongside whatever entities it references, rather than only resolving
+the entities it mentions and letting the source's own list-of-many
+nature go unrecorded. An index that gets no resolution of its own
+vanishes from the output with no visible trace that anything was
+skipped.
+
 Notability gate — apply before every create, not after: a missing page
 costs nothing (it can be created the next time the entity actually
 matters); a junk page costs real attention and degrades search for

@@ -894,8 +894,9 @@ def _build_stub_entities(
     """One stub page per notable new entity (action=create), schema-routed.
 
     Unknown entity types and types without a canonical directory build no
-    stub here — validate_proposal() reports them as hard stops instead of
-    best-guessing a location or frontmatter shape.
+    stub here — validate_proposal() reports them as hard stops, and a
+    warning is recorded here so the skip is visible in the enrich preview
+    even when validate_proposal isn't run against this exact resolution.
     """
     schemas = load_entity_schemas(config.root_path)
     today = datetime.now(UTC).date().isoformat()
@@ -907,7 +908,11 @@ def _build_stub_entities(
             continue
         schema = schemas.get(resolution.entity_type)
         if schema is None or schema.directory is None:
-            continue  # surfaced by validate_proposal
+            proposal.warnings.append(
+                f"{resolution.name}: type '{resolution.entity_type}' has no canonical "
+                "directory to route into — needs manual placement"
+            )
+            continue
         path = f"{schema.directory}/{slugify(resolution.name)}.md"
         if (config.root_path / path).exists():
             proposal.warnings.append(

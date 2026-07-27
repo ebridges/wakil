@@ -1762,6 +1762,47 @@ def test_resolution_double_failure_degrades_visibly(workspace, transcript):
     apply_enrichment(workspace, proposal)
 
 
+def test_build_stub_entities_warns_for_directory_less_type(workspace):
+    # "index" is a real schema type (MOC/navigation pages) with
+    # `directory: null` — it has nowhere to be routed, so the create is
+    # skipped, but that skip must be visible in proposal.warnings rather
+    # than silent (issue #40).
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Reading List",
+        entity_resolutions=[
+            EntityResolution(name="Reading List", entity_type="index", action="create"),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert stubs == []
+    assert any(
+        "Reading List" in warning
+        and "index" in warning
+        and "no canonical directory" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_build_stub_entities_routable_type_unaffected(workspace):
+    # A normal, routable type must not gain a spurious warning as a side
+    # effect of the directory-less-type fix.
+    proposal = EnrichmentProposal(
+        source_id=1,
+        title="Some Source",
+        entity_resolutions=[
+            EntityResolution(name="Dana Prieto", entity_type="person", action="create"),
+        ],
+    )
+
+    stubs = ingest_service._build_stub_entities(workspace, proposal)
+
+    assert [stub.path for stub in stubs] == ["people/dana-prieto.md"]
+    assert proposal.warnings == []
+
+
 def test_enrichment_guides_reach_prompt(workspace, transcript):
     (workspace.root_path / "RESOLVER.md").write_text("# Resolver\n\nMeetings go in meetings/.\n")
     source_id = _capture(workspace, transcript)
