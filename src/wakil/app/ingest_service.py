@@ -946,9 +946,19 @@ def _build_stub_entities(
 ) -> list[ProposedFile]:
     """One stub page per notable new entity (action=create), schema-routed.
 
-    Unknown entity types and types without a canonical directory build no
-    stub here — validate_proposal() reports them as hard stops instead of
-    best-guessing a location or frontmatter shape.
+    Unknown entity types (no schema at all) build no stub here and are left
+    in proposal.entity_resolutions — validate_proposal() reports those as a
+    hard stop, which is correct: the type is genuinely unrecognized.
+
+    Types that DO have a schema but no canonical directory (e.g. `index`,
+    a MOC/nav page with nowhere to be filed) are a different situation:
+    the source is real and recognized, it just needs manual placement.
+    A warning is recorded so the skip is visible in the enrich preview, and
+    the resolution is dropped from proposal.entity_resolutions so
+    validate_proposal's create-scanning loop never sees it — otherwise its
+    hard stop would abort the entire apply (including this proposal's
+    unrelated proposed_note and other stubs/updates) over a case that's
+    already been surfaced as a warning, not an error.
 
     Extraction (proposed_note) and entity resolution are independent model
     calls, and both can independently decide to represent the *same*
@@ -962,30 +972,51 @@ def _build_stub_entities(
     today = datetime.now(UTC).date().isoformat()
     stubs: list[ProposedFile] = []
     taken = {proposal.proposed_note.path} if proposal.proposed_note else set()
+    kept_resolutions: list[EntityResolution] = []
     proposed_note_slug = _proposed_note_subject_slug(proposal.proposed_note)
 
     for resolution in proposal.entity_resolutions:
         if resolution.action != "create":
+            kept_resolutions.append(resolution)
             continue
         schema = schemas.get(resolution.entity_type)
-        if schema is None or schema.directory is None:
-            continue  # surfaced by validate_proposal
+        if schema is None:
+            # Genuinely unknown type: keep it in entity_resolutions so
+            # validate_proposal's hard stop still fires for it.
+            proposal.warnings.append(
+                f"{resolution.name}: type '{resolution.entity_type}' has no canonical "
+                "directory to route into — needs manual placement"
+            )
+            kept_resolutions.append(resolution)
+            continue
+        if schema.directory is None:
+            # Known type, no canonical directory: warn and drop, so
+            # validate_proposal doesn't hard-stop the whole apply over it.
+            proposal.warnings.append(
+                f"{resolution.name}: type '{resolution.entity_type}' has no canonical "
+                "directory to route into — needs manual placement"
+            )
+            continue
         resolution_slug = slugify(resolution.name)
         if proposed_note_slug is not None and resolution_slug == proposed_note_slug:
             proposal.warnings.append(
                 f"{resolution.name}: already represented by the proposed note "
                 f"({proposal.proposed_note.path}) — not creating a duplicate page"
             )
+            kept_resolutions.append(resolution)
             continue
         path = f"{schema.directory}/{slugify(resolution.name)}.md"
         if (config.root_path / path).exists():
             proposal.warnings.append(
                 f"{resolution.name}: {path} already exists — not creating a duplicate page"
             )
+            kept_resolutions.append(resolution)
             continue
         if path in taken:
+            kept_resolutions.append(resolution)
             continue
         taken.add(path)
+        kept_resolutions.append(resolution)
 
         proposed = dict(resolution.proposed_frontmatter or {})
         proposed.pop("type", None)
@@ -999,6 +1030,8 @@ def _build_stub_entities(
             if date_field in schema.fields and not metadata.get(date_field):
                 metadata[date_field] = today
         stubs.append(ProposedFile(path=path, content=_stub_content(metadata, resolution.name)))
+
+    proposal.entity_resolutions = kept_resolutions
     return stubs
 
 
@@ -1449,8 +1482,11 @@ def validate_proposal(
 
     Implements entity-resolution.md's constraints plus the schema check:
     every proposed new file must carry frontmatter valid against its entity
-    schema; a type with no schema (or no canonical directory) is a hard stop,
-    not a best-guess write; no two proposed files may share a path. Routing
+    schema; a pending create for a type with no schema at all is a hard
+    stop, not a best-guess write (types that have a schema but no canonical
+    directory, e.g. `index`, are instead warned about and dropped from
+    proposal.entity_resolutions upstream in _build_stub_entities, so this
+    loop never sees them); no two proposed files may share a path. Routing
     is 1:N by construction (proposed_note + stub_entities), and content-hash
     dedup is already enforced upstream at capture time.
 

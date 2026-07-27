@@ -172,7 +172,12 @@ def test_unknown_entity_type_is_a_hard_stop(workspace, kb_path):
         apply_enrichment(workspace, proposal)
 
 
-def test_type_without_directory_is_a_hard_stop(workspace, kb_path):
+def test_type_without_directory_is_a_warning_not_a_hard_stop(workspace, kb_path):
+    # "meta" is a real schema type (workspace-meta pages) with
+    # `directory: null` -- recognized but with nowhere to be routed. Unlike
+    # a genuinely unknown type, this must degrade to a visible warning
+    # rather than a validate_proposal hard stop that would abort the whole
+    # apply over it (issue #40's index/no-directory case is the same shape).
     proposal = _enrich(
         workspace,
         kb_path,
@@ -180,9 +185,15 @@ def test_type_without_directory_is_a_hard_stop(workspace, kb_path):
     )
 
     assert proposal.stub_entities == []
-    issues = validate_proposal(proposal)
-    assert len(issues) == 1
-    assert "no canonical directory" in issues[0].message
+    # _build_stub_entities drops the resolution rather than leaving it
+    # pending, so validate_proposal's create-scanning loop never sees it.
+    assert proposal.entity_resolutions == []
+    assert any(
+        "Vault Meta" in warning and "no canonical directory" in warning
+        for warning in proposal.warnings
+    )
+    assert validate_proposal(proposal) == []
+    apply_enrichment(workspace, proposal)  # does not raise
 
 
 def test_proposed_note_frontmatter_is_validated(workspace, kb_path):
