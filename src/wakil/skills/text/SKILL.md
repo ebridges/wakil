@@ -34,4 +34,7 @@ first, then extract accordingly.
   `(reported: <source>)`), overridden by the workspace's own citation format
   when SCHEMA.md defines one.
 - Memories must be grounded in the clipping; never invent facts. Mark
-  uncertainty explicitly.
+  uncertainty explicitly. This covers the proposed note's body too, not just
+  memories: a page-shape section like Open threads must reflect what the
+  clipping actually says, never a default "unresolved" framing that
+  contradicts it.
