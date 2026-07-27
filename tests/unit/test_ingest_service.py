@@ -1412,7 +1412,24 @@ def test_stub_kept_for_type_outside_narrow_dated_record_scope(workspace, transcr
     # its stub even when this same proposal also applies an unrelated
     # entity update -- the fix is deliberately scoped to journal/meeting,
     # not every type that could share a source with an update.
+    #
+    # proposed_note is overridden away from MODEL_JSON's default `meeting`
+    # type so this test isolates stub suppression -- with the default
+    # `meeting` proposed_note, _suppress_proposed_note_matching_updates
+    # (issue #68) would also legitimately null it out here, which is
+    # covered by its own tests below rather than this one.
     _write_person(kb_path, "priya-shah")
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={
+            "path": "concepts/handler-assignment.md",
+            "markdown": (
+                "---\ntype: concept\nname: Handler Assignment\n"
+                "created: 2026-07-09\nupdated: 2026-07-09\n---\n\n"
+                "# Handler Assignment\n\nBackground on FNOL routing.\n"
+            ),
+        },
+    )
     resolution = {
         "entities": [
             {
@@ -1443,13 +1460,167 @@ def test_stub_kept_for_type_outside_narrow_dated_record_scope(workspace, transcr
     }
     source_id = _capture(workspace, transcript)
     proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+        workspace, source_id, FakeClient([payload, resolution, revisions])
     )
 
     assert len(proposal.entity_updates) == 1
     assert [stub.path for stub in proposal.stub_entities] == ["projects/elektrum.md"]
+    assert proposal.proposed_note is not None
     assert not any(
         "already merged into an existing entity" in warning for warning in proposal.warnings
+    )
+
+
+# --------------------------------------------------------------------------
+# Issue #68: _suppress_stubs_matching_updates and
+# _suppress_dated_record_stubs_matching_updates only ever prune
+# proposal.stub_entities -- neither ever inspects proposal.proposed_note,
+# which is set by extraction *before* entity resolution runs. A dated
+# source can correctly update an existing entity's Timeline via
+# entity_updates and *also* independently produce its own proposed_note
+# for the same source; nothing suppressed that duplicate.
+
+
+def test_proposed_note_suppressed_when_subject_matches_applied_entity_update(
+    workspace, transcript, kb_path
+):
+    # MODEL_JSON's proposed_note is titled "Claims Kickoff" (slug
+    # claims-kickoff). An existing entity at that same slug gets a real
+    # Timeline update in this same proposal -- the note is just extraction's
+    # own independent representation of a subject that already has a home.
+    _write_person(kb_path, "claims-kickoff")
+    resolution = {
+        "entities": [
+            {
+                "name": "Claims Kickoff",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/claims-kickoff.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/claims-kickoff.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.proposed_note is None
+    assert any(
+        "subject already updated via an existing entity" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_proposed_note_suppressed_when_dated_record_type_and_source_already_merged(
+    workspace, transcript, kb_path
+):
+    # MODEL_JSON's proposed_note is a `meeting` page titled "Claims Kickoff"
+    # -- a subject entirely unrelated to "priya-shah", so the subject-slug
+    # match above cannot catch it. It must still be suppressed: a
+    # journal/meeting note's whole purpose is "record what this source
+    # said," which the Priya Shah Timeline update -- from this same source,
+    # in this same proposal -- has already done.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.proposed_note is None
+    assert any(
+        "meetings/2026/2026-07-09-claims-kickoff.md" in warning
+        and "already merged into an existing entity" in warning
+        for warning in proposal.warnings
+    )
+
+
+def test_proposed_note_kept_when_unrelated_to_any_entity_update(workspace, transcript, kb_path):
+    # No over-suppression: a proposed_note whose type is outside the narrow
+    # journal/meeting scope, and whose subject doesn't match any applied
+    # update's target, must survive even though this same proposal also
+    # applies an unrelated entity update.
+    _write_person(kb_path, "priya-shah")
+    payload = dict(
+        MODEL_JSON,
+        proposed_note={
+            "path": "concepts/handler-assignment.md",
+            "markdown": (
+                "---\ntype: concept\nname: Handler Assignment\n"
+                "created: 2026-07-09\nupdated: 2026-07-09\n---\n\n"
+                "# Handler Assignment\n\nBackground on FNOL routing.\n"
+            ),
+        },
+    )
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(
+        workspace, source_id, FakeClient([payload, resolution, revisions])
+    )
+
+    assert len(proposal.entity_updates) == 1
+    assert proposal.proposed_note is not None
+    assert proposal.proposed_note.path == "concepts/handler-assignment.md"
+    assert not any(
+        "already updated via an existing entity" in warning
+        or "already merged into an existing entity" in warning
+        for warning in proposal.warnings
     )
 
 
