@@ -128,6 +128,19 @@ class EntityResolution(BaseModel):
         description="For action=create: frontmatter satisfying the type's required "
         "fields. Ignored for action=update.",
     )
+    proposed_frontmatter_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="For action=create only: how well-supported proposed_frontmatter's "
+        "field values are by the source, not whether creating the page at all was "
+        "warranted — that's `action`/`relevance`. A field asserted from thin or "
+        "ambiguous evidence (e.g. a book's `status: finished` inferred from a single "
+        "early highlight with no explicit completion signal) gets low confidence even "
+        "though the entity clearly merits a page; a clearly-stated field gets high "
+        "confidence. Omit or leave null when the source's support is unambiguous "
+        "enough that a confidence figure wouldn't add information.",
+    )
 
 
 class EntityResolutionOutput(BaseModel):

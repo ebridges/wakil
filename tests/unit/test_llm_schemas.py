@@ -142,6 +142,44 @@ def test_entity_resolution_rejects_invalid_relevance():
         EntityResolution(name="X", entity_type="person", action="update", relevance="urgent")
 
 
+def test_entity_resolution_proposed_frontmatter_confidence_defaults_to_none():
+    resolution = EntityResolution(name="X", entity_type="book", action="create")
+    assert resolution.proposed_frontmatter_confidence is None
+
+
+def test_entity_resolution_accepts_valid_proposed_frontmatter_confidence():
+    resolution = EntityResolution(
+        name="X", entity_type="book", action="create", proposed_frontmatter_confidence=0.2
+    )
+    assert resolution.proposed_frontmatter_confidence == 0.2
+
+
+def test_entity_resolution_accepts_boundary_proposed_frontmatter_confidence():
+    assert (
+        EntityResolution(
+            name="X", entity_type="book", action="create", proposed_frontmatter_confidence=0.0
+        ).proposed_frontmatter_confidence
+        == 0.0
+    )
+    assert (
+        EntityResolution(
+            name="X", entity_type="book", action="create", proposed_frontmatter_confidence=1.0
+        ).proposed_frontmatter_confidence
+        == 1.0
+    )
+
+
+def test_entity_resolution_rejects_out_of_range_proposed_frontmatter_confidence():
+    with pytest.raises(ValidationError):
+        EntityResolution(
+            name="X", entity_type="book", action="create", proposed_frontmatter_confidence=1.5
+        )
+    with pytest.raises(ValidationError):
+        EntityResolution(
+            name="X", entity_type="book", action="create", proposed_frontmatter_confidence=-0.1
+        )
+
+
 def test_candidate_memory_model_accepts_valid_stance_values():
     assert CandidateMemoryModel(type="fact", content="X", stance="casual").stance == "casual"
     assert CandidateMemoryModel(type="fact", content="X", stance="formal").stance == "formal"
