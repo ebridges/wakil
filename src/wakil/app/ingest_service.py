@@ -204,6 +204,11 @@ class EnrichmentProposal:
     # shown in the preview, never silently swallowed.
     warnings: list[str] = field(default_factory=list)
     model: str | None = None
+    # The source's own captured/retrieved date (yyyy-mm-dd), used as a
+    # fallback Timeline heading when the model's generated heading doesn't
+    # carry a real date of its own (issue #77) — never left as a
+    # placeholder like "(date not recorded)" in an append-only Timeline.
+    source_captured_date: str | None = None
 
 
 @dataclass
@@ -576,6 +581,11 @@ def prepare_enrichment(
                 f"Source {source_id} is already enriched; pass --force to re-analyze."
             )
         metadata = json.loads(source.metadata_json or "{}")
+        # Fallback for a Timeline heading with no real date of its own
+        # (issue #77) — retrieved_at is set at capture time for every
+        # source; created_at covers the rare row without it.
+        captured_at = source.retrieved_at or source.created_at
+        source_captured_date = captured_at.date().isoformat() if captured_at else None
         context = context or metadata.get("context")
         context_digest = context_digest or metadata.get("context_digest")
         context_referenced_paths = (
@@ -640,7 +650,11 @@ def prepare_enrichment(
             )
 
     proposal = EnrichmentProposal(
-        source_id=source_id, title=title, context=context, related_notes=related_notes
+        source_id=source_id,
+        title=title,
+        context=context,
+        related_notes=related_notes,
+        source_captured_date=source_captured_date,
     )
     proposal.model = client.model
     guides = load_workspace_guides(config)
@@ -1280,7 +1294,48 @@ _H1_RE = re.compile(r"(?m)^#\s+.*$")
 _TIMELINE_HEADING_RE = re.compile(r"(?m)^##\s+Timeline(?:\s*/\s*Log)?\s*$")
 
 
-def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
+# Matches a Timeline entry's own heading line, e.g. "### 2026-07-16 —
+# what happened". Used only to detect whether it carries a real date —
+# see `_dated_timeline_entry` below.
+_ENTRY_HEADING_RE = re.compile(r"^(#{2,4})\s+(.*)$")
+_ISO_DATE_IN_HEADING_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _dated_timeline_entry(entry: str, fallback_date: str | None) -> str:
+    """Replace `entry`'s heading with `fallback_date` when it doesn't carry
+    a real, parseable date of its own.
+
+    Timeline entries are append-only (never rewritten once written), so a
+    placeholder heading the model invents when the source itself has no
+    date — "(date not recorded)", "Undated -- source: clipping" — would
+    otherwise sit there permanently (issue #77). Falls back to the source's
+    own captured/retrieved date instead of accepting that text verbatim.
+    Any description text after a separator (" — ", " -- ", " - ") is kept;
+    only the placeholder date token itself is replaced. A no-op when
+    `fallback_date` is unavailable or the heading already has a real date.
+    """
+    if not fallback_date:
+        return entry
+    lines = entry.splitlines()
+    if not lines:
+        return entry
+    match = _ENTRY_HEADING_RE.match(lines[0])
+    if match is None or _ISO_DATE_IN_HEADING_RE.search(match.group(2)):
+        return entry
+    marker, rest = match.group(1), match.group(2).strip()
+    for sep in (" — ", " -- ", " - "):
+        if sep in rest:
+            description = rest.partition(sep)[2].strip()
+            if description:
+                lines[0] = f"{marker} {fallback_date} — {description}"
+                return "\n".join(lines)
+    lines[0] = f"{marker} {fallback_date}"
+    return "\n".join(lines)
+
+
+def _insert_timeline_entry(
+    timeline_section: str, entry: str, fallback_date: str | None = None
+) -> str:
     """Prepend `entry` as the new first dated entry, right after the
     heading line — before every existing entry, including any
     auto-generated back-link bullets at the bottom, which are never
@@ -1291,6 +1346,7 @@ def _insert_timeline_entry(timeline_section: str, entry: str) -> str:
     entry = entry.strip()
     if not entry:
         return timeline_section
+    entry = _dated_timeline_entry(entry, fallback_date)
     return f"{heading_line}\n\n{entry}\n\n{rest}" if rest else f"{heading_line}\n\n{entry}\n"
 
 
@@ -1325,7 +1381,12 @@ def _split_note_sections(content: str) -> tuple[str, str, str] | None:
     return h1_line, top_section, timeline_section
 
 
-def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -> str | None:
+def _merge_entity_note(
+    old_content: str,
+    revision: EntityRevision,
+    today: str,
+    fallback_date: str | None = None,
+) -> str | None:
     """Deterministic surgical merge — never a full-file regeneration (the
     "clobbering bug" note-revision's own skill warns against): existing
     frontmatter with only the delta keys changed, the H1 line preserved
@@ -1334,6 +1395,12 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
     entry prepended inside the Timeline section. Returns None if the note
     doesn't have the expected H1 + '## Timeline / Log' shape — the caller
     surfaces that as a warning rather than guessing at a different one.
+
+    `fallback_date` (the source's own captured/retrieved date) stands in
+    for `revision.timeline_entry`'s heading when that heading has no real
+    date of its own — see `_dated_timeline_entry`. The entity-compile pilot
+    callers never set `timeline_entry`, so they can leave this at its
+    default.
     """
     try:
         post = frontmatter_lib.loads(old_content)
@@ -1358,7 +1425,9 @@ def _merge_entity_note(old_content: str, revision: EntityRevision, today: str) -
     # to prevent (docs/TROUBLESHOOTING.md).
     compiled_truth = (revision.compiled_truth or "").strip() or old_top
     new_top = f"{h1_line}\n\n{compiled_truth}\n\n---" if compiled_truth else h1_line
-    new_timeline = _insert_timeline_entry(timeline_section, revision.timeline_entry or "")
+    new_timeline = _insert_timeline_entry(
+        timeline_section, revision.timeline_entry or "", fallback_date
+    )
 
     new_body = f"{new_top}\n\n{new_timeline}".rstrip("\n") + "\n"
     frontmatter_yaml = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
@@ -1488,7 +1557,9 @@ def _apply_entity_revisions(
                     "it either — its founding content may be permanently missing."
                 )
             continue
-        new_content = _merge_entity_note(old_content, revision, today)
+        new_content = _merge_entity_note(
+            old_content, revision, today, proposal.source_captured_date
+        )
         if new_content is None:
             proposal.warnings.append(
                 f"{revision.target_note_path}: doesn't match the expected H1 / "

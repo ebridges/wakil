@@ -15,6 +15,7 @@ from wakil.app.ingest_service import (
     IngestError,
     ProposedFile,
     _candidate_entity_notes,
+    _dated_timeline_entry,
     _is_noise_candidate,
     _is_unpopulated_stub,
     _merge_entity_note,
@@ -932,6 +933,72 @@ def test_merge_entity_note_returns_none_for_unexpected_shape(workspace):
         timeline_entry="### 2026-07-16 — x\n- y",
     )
     assert _merge_entity_note(minimal, revision, "2026-07-16") is None
+
+
+# --------------------------------------------------------------------------
+# issue #77: a placeholder Timeline heading (no real date of its own) must
+# fall back to the source's own captured/retrieved date rather than being
+# written verbatim into the append-only Timeline.
+
+
+def test_dated_timeline_entry_leaves_real_date_heading_unchanged():
+    entry = "### 2026-06-01 — recruiter screen\n- Introductory call."
+    assert _dated_timeline_entry(entry, "2026-07-20") == entry
+
+
+def test_dated_timeline_entry_is_noop_without_fallback_date():
+    entry = "### (date not recorded)\n- Something happened."
+    assert _dated_timeline_entry(entry, None) == entry
+
+
+def test_dated_timeline_entry_substitutes_fallback_for_parenthetical_placeholder():
+    entry = "### (date not recorded) — merged into existing entity\n- Something happened."
+    result = _dated_timeline_entry(entry, "2026-07-20")
+    assert result == "### 2026-07-20 — merged into existing entity\n- Something happened."
+
+
+def test_dated_timeline_entry_substitutes_fallback_for_undated_source_heading():
+    # Confirmed real-world regression: merging an unrelated follow-up
+    # source produced this exact heading.
+    entry = "### Undated -- source: clipping\n- Some detail."
+    result = _dated_timeline_entry(entry, "2026-07-20")
+    assert result == "### 2026-07-20 — source: clipping\n- Some detail."
+
+
+def test_dated_timeline_entry_substitutes_bare_placeholder_with_no_description():
+    entry = "### undated\n- Some detail."
+    result = _dated_timeline_entry(entry, "2026-07-20")
+    assert result == "### 2026-07-20\n- Some detail."
+
+
+def test_merge_entity_note_substitutes_fallback_date_for_placeholder_heading(workspace):
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### (date not recorded) — merged into existing entity\n- detail",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16", "2026-07-15")
+
+    assert new_content is not None
+    assert "(date not recorded)" not in new_content
+    assert "### 2026-07-15 — merged into existing entity" in new_content
+    # Existing, real-dated entry survives untouched.
+    assert "### 2026-06-01 — recruiter screen" in new_content
+
+
+def test_merge_entity_note_leaves_real_date_heading_unchanged_even_with_fallback(workspace):
+    revision = EntityRevision(
+        target_note_path="people/priya-shah.md",
+        has_update=True,
+        compiled_truth="Updated truth.",
+        timeline_entry="### 2026-07-16 — second search kicked off\n- New role.",
+    )
+    new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16", "2026-07-01")
+
+    assert new_content is not None
+    assert "### 2026-07-16 — second search kicked off" in new_content
+    assert "2026-07-01" not in new_content
 
 
 def test_is_unpopulated_stub_true_for_fresh_stub_content():
@@ -2460,6 +2527,23 @@ def test_prepare_enrichment_warns_when_nothing_produced(workspace, transcript):
         str(source_id) in warning and "nothing will be written" in warning
         for warning in proposal.warnings
     )
+
+
+def test_prepare_enrichment_sets_source_captured_date_from_retrieved_at(workspace, transcript):
+    # Wiring for issue #77: the source's own captured/retrieved date must be
+    # threaded onto the proposal so a placeholder Timeline heading has a
+    # real fallback available at write time.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {"entities": []}
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution])
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        expected = (source.retrieved_at or source.created_at).date().isoformat()
+
+    assert proposal.source_captured_date == expected
 
 
 def test_prepare_enrichment_no_false_positive_warning_when_note_produced(workspace, transcript):
