@@ -919,6 +919,7 @@ def _run_entity_resolution(
     # reconciliation needs the final stub set to correct links against.
     _run_entity_updates(config, client, text, proposal)
     _suppress_stubs_matching_updates(proposal)
+    _suppress_dated_record_stubs_matching_updates(config, proposal)
     _reconcile_entity_links(config, proposal)
 
 
@@ -1067,6 +1068,72 @@ def _suppress_stubs_matching_updates(proposal: EnrichmentProposal) -> None:
             proposal.warnings.append(
                 f"{stub.path}: subject already updated via an existing entity in this "
                 "same proposal — not creating a duplicate page"
+            )
+            continue
+        kept.append(stub)
+    proposal.stub_entities = kept
+
+
+# Entity types whose whole reason to exist is recording "what happened via
+# this source" for one dated occurrence (docs/entity-metadata.md) — never a
+# type a vault would want *in addition to* an update this same source
+# already made elsewhere in this same proposal. Deliberately narrower than
+# "every single-occurrence-shaped type" (issue #60): a personal `reflection`
+# entity, say, could still be a genuinely distinct record even when it
+# shares a source with a project's factual Timeline update, so this list is
+# hand-picked rather than schema-driven.
+_REDUNDANT_DATED_RECORD_TYPES = frozenset({"journal", "meeting"})
+
+
+def _suppress_dated_record_stubs_matching_updates(
+    config: WorkspaceConfig, proposal: EnrichmentProposal
+) -> None:
+    """Drop a journal/meeting create-resolution's stub when this same
+    source's content already merged into an existing accumulating entity via
+    entity_updates (DAG node 3) in this same proposal.
+
+    Complements _suppress_stubs_matching_updates, which only catches a
+    create whose own subject slug matches the update target's slug (e.g.
+    extraction and entity-resolution both proposing "Elektrum" under
+    different types). It structurally cannot catch a *dated* journal/meeting
+    record, whose name/slug is the date/topic — e.g. "2014-05-17 Elektrum
+    VPC Subnet Layout Finalized" (slug
+    elektrum-work-vpc-subnet-layout-finalized) — never the project it's
+    about ("elektrum"), so the two can never slug-match even when both
+    represent the same source landing twice (issue #60). Matching by type
+    rather than subject keeps this the narrow case it's meant to be: journal
+    and meeting exist specifically to log "what happened via this source,"
+    so an update that already did that in this same proposal makes them
+    redundant — this does NOT extend to every single-occurrence type (see
+    _REDUNDANT_DATED_RECORD_TYPES).
+    """
+    if not proposal.entity_updates or not proposal.stub_entities:
+        return
+
+    schemas = load_entity_schemas(config.root_path)
+    stub_types: dict[str, str] = {}
+    for resolution in proposal.entity_resolutions:
+        if resolution.action != "create":
+            continue
+        if resolution.entity_type not in _REDUNDANT_DATED_RECORD_TYPES:
+            continue
+        schema = schemas.get(resolution.entity_type)
+        if schema is None or schema.directory is None:
+            continue
+        path = f"{schema.directory}/{slugify(resolution.name)}.md"
+        stub_types[path] = resolution.entity_type
+
+    if not stub_types:
+        return
+
+    kept: list[ProposedFile] = []
+    for stub in proposal.stub_entities:
+        entity_type = stub_types.get(stub.path)
+        if entity_type is not None:
+            proposal.warnings.append(
+                f"{stub.path}: this source's content already merged into an existing "
+                "entity via an update in this same proposal — not creating a separate "
+                f"{entity_type} record for the same source"
             )
             continue
         kept.append(stub)

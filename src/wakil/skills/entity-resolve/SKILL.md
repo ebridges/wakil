@@ -24,6 +24,20 @@ Decide one action per entity:
   what happened, a company named only as someone's past employer, a concept
   mentioned but not developed. Not every mentioned name deserves a page.
 
+Before proposing a create for a dated record type whose whole purpose is
+logging what happened via this source (journal, meeting), check whether
+this same source's content already has a home: is there an existing note —
+of any type, not just one with a matching name — that already
+substantively covers it, or that you're already resolving as action=update
+in this same pass? A project's Timeline, a company's Compilation, whichever
+accumulating page the source is really about can already capture the event
+even though its own name never matches the dated record's title. Don't rely
+on subject-name matching to catch this — a journal entry titled after its
+own date and topic will essentially never share a name with the project or
+company it's really about. If the source's content is already merged
+somewhere else, that's a reason to skip the dated record, not a coincidence
+to ignore.
+
 Some sources are not really about one primary entity at all — they're
 themselves an index or list spanning many (a reading tracker, a running
 project list, a reflective entry that's really two separate dated
