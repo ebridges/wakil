@@ -173,6 +173,55 @@ def test_kb_local_only_type_is_additive(tmp_path: Path):
     assert "person" in schemas  # built-in types still present
 
 
+def test_kb_local_disabled_marker_suppresses_builtin_type(tmp_path: Path):
+    kb_root = tmp_path / "kb"
+    (kb_root / "schema" / "entities").mkdir(parents=True)
+    (kb_root / "schema" / "entities" / "concept.yaml").write_text("type: concept\ndisabled: true\n")
+    ctx = SchemaResolutionContext(
+        kb_root=kb_root,
+        user_schema_root=tmp_path / "unused-user-root",
+        builtin_schema_root=DEFAULT_SCHEMA_DIR,
+    )
+    schemas = load_entity_schemas(context=ctx)
+    assert "concept" not in schemas
+    # Untouched types are unaffected.
+    assert "person" in schemas
+
+
+def test_disabled_marker_excludes_type_from_known_types(tmp_path: Path):
+    kb_root = tmp_path / "kb"
+    (kb_root / "schema" / "entities").mkdir(parents=True)
+    (kb_root / "schema" / "entities" / "concept.yaml").write_text("type: concept\ndisabled: true\n")
+    types = known_types(kb_root)
+    assert "concept" not in types
+    assert "person" in types  # untouched builtin types still present
+
+
+def test_disabled_marker_does_not_undo_a_higher_priority_override(tmp_path: Path):
+    # An override-tier (WAKIL_SCHEMA_PATH) schema for a type wins outright;
+    # a lower-priority kb-local `disabled: true` for the same type must not
+    # retroactively suppress it.
+    override_root = tmp_path / "override"
+    override_root.mkdir()
+    (override_root / "concept.yaml").write_text(
+        "type: concept\ndirectory: concepts\ncategory: hybrid\n"
+        "page_shape: single-occurrence\n"
+        "fields:\n  name: {required: true, kind: string}\n"
+    )
+    kb_root = tmp_path / "kb"
+    (kb_root / "schema" / "entities").mkdir(parents=True)
+    (kb_root / "schema" / "entities" / "concept.yaml").write_text("type: concept\ndisabled: true\n")
+    ctx = SchemaResolutionContext(
+        kb_root=kb_root,
+        user_schema_root=tmp_path / "unused-user-root",
+        builtin_schema_root=DEFAULT_SCHEMA_DIR,
+        schema_path=str(override_root),
+    )
+    schemas = load_entity_schemas(context=ctx)
+    assert "concept" in schemas
+    assert schemas["concept"].directory == "concepts"
+
+
 def test_missing_kb_local_root_falls_back_to_builtin(tmp_path: Path):
     # kb_root has no schema/entities/ dir at all -> silently dropped, like a
     # missing default skill root.
