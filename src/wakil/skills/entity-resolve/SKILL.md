@@ -27,7 +27,13 @@ Decide one action per entity:
 Notability gate — apply before every create, not after: a missing page
 costs nothing (it can be created the next time the entity actually
 matters); a junk page costs real attention and degrades search for
-everyone later. **When in doubt, don't create — skip instead.**
+everyone later. **When in doubt about a drive-by mention, don't create —
+skip instead.** That bias is for mentions, not for the source's own
+subject: a source with real, attributable content about a single entity —
+a single-URL bookmark, a short reference link, a sparse build-plan note —
+clears the bar even when the content is thin. Create a minimal stub
+rather than skip it; a stub can always be filled in later, but a skip
+leaves no trace at all.
 
 - Person: will the user plausibly interact with them again, or are they
   otherwise relevant to ongoing work? A name surfaced once with no
