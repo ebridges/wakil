@@ -920,6 +920,7 @@ def _run_entity_resolution(
     _run_entity_updates(config, client, text, proposal)
     _suppress_stubs_matching_updates(proposal)
     _suppress_dated_record_stubs_matching_updates(config, proposal)
+    _suppress_proposed_note_matching_updates(proposal)
     _reconcile_entity_links(config, proposal)
 
 
@@ -1187,6 +1188,72 @@ def _suppress_dated_record_stubs_matching_updates(
             continue
         kept.append(stub)
     proposal.stub_entities = kept
+
+
+def _suppress_proposed_note_matching_updates(proposal: EnrichmentProposal) -> None:
+    """Null out proposal.proposed_note when it's redundant with an entity
+    update (DAG node 3) applied in this same proposal (issue #68).
+
+    _suppress_stubs_matching_updates and
+    _suppress_dated_record_stubs_matching_updates both only ever prune
+    proposal.stub_entities — an entity-resolution create. Neither touches
+    proposal.proposed_note, which is set by extraction (_run_extraction),
+    an independent model call that runs *before* entity resolution and so
+    can never see entity_updates at all. The same duplication both of those
+    functions guard against for a stub can happen to proposed_note instead:
+    a dated journal-style source can correctly update an existing
+    accumulating entity's Timeline via entity_updates and *also*
+    independently produce its own proposed_note for the same source.
+
+    Two redundancy signals, mirroring the two suppression functions above:
+
+    1. Subject-slug match (mirrors _suppress_stubs_matching_updates):
+       proposed_note's own frontmatter name/title slug
+       (_proposed_note_subject_slug) matches an applied entity_updates
+       target's slug — same subject, just extraction's independent
+       representation of it.
+    2. Dated-record type (mirrors _suppress_dated_record_stubs_matching_updates):
+       proposed_note's frontmatter `type` is journal or meeting
+       (_REDUNDANT_DATED_RECORD_TYPES) and this same proposal already
+       produced a real entity_update — a journal/meeting note's whole
+       purpose is "record what this source said," which an update that
+       already recorded it makes redundant, even when proposed_note's own
+       subject (a date/topic) never slug-matches the update target.
+
+    Unlike the stub-suppression functions there's only ever one candidate
+    (proposal.proposed_note itself), so this is a null-or-keep decision,
+    not a filtered list.
+    """
+    if not proposal.entity_updates or proposal.proposed_note is None:
+        return
+
+    updated_paths = {update.target_note_path for update in proposal.entity_updates}
+    updated_slugs = {slugify(Path(path).stem) for path in updated_paths}
+    for resolution in proposal.entity_resolutions:
+        if resolution.action == "update" and resolution.target_note_path in updated_paths:
+            updated_slugs.add(slugify(resolution.name))
+
+    proposed_note_slug = _proposed_note_subject_slug(proposal.proposed_note)
+    if proposed_note_slug is not None and proposed_note_slug in updated_slugs:
+        proposal.warnings.append(
+            f"{proposal.proposed_note.path}: subject already updated via an existing "
+            "entity in this same proposal — not creating a duplicate page"
+        )
+        proposal.proposed_note = None
+        return
+
+    try:
+        metadata = frontmatter_lib.loads(proposal.proposed_note.content).metadata
+    except Exception:
+        metadata = {}
+    entity_type = metadata.get("type") if isinstance(metadata, dict) else None
+    if entity_type in _REDUNDANT_DATED_RECORD_TYPES:
+        proposal.warnings.append(
+            f"{proposal.proposed_note.path}: this source's content already merged into "
+            "an existing entity via an update in this same proposal — not creating a "
+            f"separate {entity_type} record for the same source"
+        )
+        proposal.proposed_note = None
 
 
 # Wikilink parsing/normalization live in wakil.knowledge.wikilinks (shared
