@@ -306,6 +306,7 @@ def test_enrich_prepare_apply_writes_note_and_flips_pr_ready(git_kb, transcript,
 
     with open_session(git_kb) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         assert source.status == "enriched"
 
 

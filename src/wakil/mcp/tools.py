@@ -23,7 +23,7 @@ from wakil.app.git_service import (
     land_ingestion,
     prepare_landing,
 )
-from wakil.app.graph_service import TraversalError, traverse
+from wakil.app.graph_service import Direction, TraversalError, traverse
 from wakil.app.ingest_service import (
     IngestError,
     apply_capture,
@@ -186,7 +186,7 @@ def memory_show(config: WorkspaceConfig, memory_id: int) -> dict:
 def relationships(
     config: WorkspaceConfig,
     anchor_path: str,
-    direction: str = "both",
+    direction: Direction = "both",
     predicate: str | None = None,
     depth: int = 1,
 ) -> dict:

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from wakil.app.graph_service import Direction
 from wakil.config.settings import WorkspaceConfig
 from wakil.mcp import tools
 from wakil.mcp.proposals import ProposalCache
@@ -90,7 +91,10 @@ def build_server(config: WorkspaceConfig) -> FastMCP:
 
     @mcp.tool()
     def relationships(
-        anchor_path: str, direction: str = "both", predicate: str | None = None, depth: int = 1
+        anchor_path: str,
+        direction: Direction = "both",
+        predicate: str | None = None,
+        depth: int = 1,
     ) -> dict:
         """Walk Note<->Note relationship edges out from an anchor note path."""
         return tools.relationships(
