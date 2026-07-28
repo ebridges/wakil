@@ -160,7 +160,7 @@ jobs:
       # Must run after checkout: actions/checkout cleans the workspace
       # before checking out, which would otherwise delete these files.
       - name: Download changelog artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: release-changelog
 
@@ -217,7 +217,7 @@ jobs:
       NEW_TAG: ${{ needs.version.outputs.new_tag }}
     steps:
       - name: Download dist artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: release-dist
 
