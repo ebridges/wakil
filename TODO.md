@@ -65,6 +65,20 @@ Tracked future work, ordered roughly by the build phases in `PROMPT.md`.
 - [ ] `wakil dream --recent` report-only synthesis
 - [ ] Topic-based dream, `--write-report` mode
 
+## MCP interface (docs/adr/0018, docs/adr/0019)
+
+- [x] `wakil mcp serve` (stdio, one workspace per process)
+- [x] Read tools: status, search, query, memory_list/show, relationships,
+      sources_list/show, git_summary/history, skills_list
+- [x] Write tools as prepare/apply pairs: ingest_prepare/apply,
+      enrich_prepare/apply, backed by an in-process proposal cache
+- [x] `mcp-coordinator` skill for low-friction capture, also served as the
+      `wakil://skill/mcp-coordinator` MCP resource
+- [ ] Memory lifecycle transition tools (promote/reject/archive) —
+      deliberately deferred, not silently bundled into the initial read set
+- [ ] Verify the QMD JSON field-name TODO above (Phase 2) also covers the
+      `search`/`query` MCP tools, once verified against a real qmd install
+
 ## Ingestion/entity refactor (docs/ingestion-refactor-spec.md)
 
 - [x] Phase A: entity schema layer — `schema/entities/*.yaml` (13 types

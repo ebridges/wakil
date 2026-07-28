@@ -129,7 +129,11 @@ When contributing to this repo:
 8. Update docs when behavior changes.
 9. Respect the distinction between raw sources, durable notes, and memory.
 10. Treat sensitive content carefully.
-11. Show reviewable diffs for knowledge-base modifications.
+11. Show reviewable diffs for knowledge-base modifications — a pre-write
+    preview for direct CLI/tool use, or the resulting pull request for an
+    agent following the `mcp-coordinator` skill over MCP (docs/adr/0019).
+    Both satisfy this item; it does not mean every write must block on a
+    human immediately before it happens, in every context.
 12. Do not silently rewrite user knowledge.
 
 The project should feel like a careful local knowledge assistant, not a sprawling agent platform.
