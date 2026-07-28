@@ -191,6 +191,7 @@ def test_resolve_context_joins_context_then_context_files_in_order(tmp_path: Pat
         workspace_root=tmp_path,
     )
 
+    assert resolved is not None
     assert resolved.text == "\n\n---\n\n".join(
         ["piece one", "piece two", "file one content", "file two content"]
     )
@@ -223,6 +224,7 @@ def test_resolve_context_digest_excludes_attached_context_block(tmp_path: Path):
 
     resolved, _ = resolve_context(context=[], context_files=[context_file], workspace_root=tmp_path)
 
+    assert resolved is not None
     assert resolved.digest == "Background:"
     assert "Other note content." not in resolved.digest
     assert "--- Attached Context ---" not in resolved.digest
@@ -238,6 +240,7 @@ def test_resolve_context_returns_referenced_file_paths(tmp_path: Path):
         workspace_root=tmp_path,
     )
 
+    assert resolved is not None
     assert resolved.referenced_paths == ["notes/other.md"]
 
 
@@ -250,6 +253,7 @@ def test_resolve_context_referenced_paths_deduped_across_pieces(tmp_path: Path):
         workspace_root=tmp_path,
     )
 
+    assert resolved is not None
     assert resolved.referenced_paths == ["shared.md"]
 
 

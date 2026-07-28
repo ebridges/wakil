@@ -112,6 +112,8 @@ def test_worktree_anchors_shared_across_linked_worktree(git_kb, tmp_path):
 
     main_anchors = git.worktree_anchors(root)
     linked_anchors = git.worktree_anchors(worktree)
+    assert main_anchors is not None
+    assert linked_anchors is not None
     assert linked_anchors.toplevel == worktree.resolve()
     # The whole point: the common-dir is identical across worktrees, even
     # though each has its own top-level directory.
@@ -179,6 +181,7 @@ def test_land_ingestion_commits_only_named_files_and_returns_to_branch(git_kb):
         phase="capture",
     )
 
+    assert landing.branch is not None
     assert outcome.commit_sha == _git(root, "log", "-1", "--format=%H", landing.branch)
     assert outcome.pr_url is None  # no gh/remote configured in this fixture
     assert outcome.returned_to == "main"
@@ -190,8 +193,10 @@ def test_land_ingestion_commits_only_named_files_and_returns_to_branch(git_kb):
 
     with open_session(git_kb) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         assert source.git_branch == landing.branch
         change = session.scalar(select(GitChange))
+        assert change is not None
         assert change.operation == "source-commit"
         assert change.branch_name == landing.branch
 
@@ -262,6 +267,7 @@ def test_land_ingestion_opens_draft_pr_on_capture(git_kb, monkeypatch):
 
     with open_session(git_kb) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         assert source.git_pr_url == "https://pr.url/1"
 
 
@@ -342,6 +348,7 @@ def test_resume_source_branch_fetches_from_origin_when_deleted_locally(git_kb, m
     source_id = _insert_source(git_kb, "Cross Session")
     landing = prepare_landing(git_kb, source_id=None, title="Cross Session", local=False)
     branch = landing.branch
+    assert branch is not None
     (root / "drafts").mkdir(exist_ok=True)
     (root / "drafts" / "raw.md").write_text("raw\n")
     monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: False)
@@ -390,6 +397,7 @@ def test_resume_source_branch_starts_revision_when_branch_gone_everywhere(git_kb
         source_id = source.id
 
     landing = prepare_landing(git_kb, source_id=source_id, title="Gone Branch", local=False)
+    assert landing.branch is not None
     assert landing.branch != "wakil/ingest/2026-01-01-gone-branch"
     assert "revision" in landing.branch
     assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == landing.branch

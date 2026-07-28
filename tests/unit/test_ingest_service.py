@@ -222,10 +222,14 @@ def test_capture_writes_source_and_run(workspace, transcript):
 
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         assert source.status == "raw"
+        assert source.metadata_json is not None
         assert "Jane Doe" in source.metadata_json
         assert "2026-07-09" in source.metadata_json  # meeting date recorded
         run = session.scalar(select(IngestRun))
+        assert run is not None
+        assert run.metadata_json is not None
         assert "capture" in run.metadata_json
         # Raw capture is indexed as a note.
         paths = set(session.scalars(select(Note.path)))
@@ -239,6 +243,7 @@ def test_transcript_frontmatter_template_from_schema_catalog(workspace):
     # `transcript` origin sub-schema, in that order -- no workspace SCHEMA.md
     # involved.
     template = transcript_frontmatter_template(workspace)
+    assert template is not None
 
     assert list(template) == [
         "type",
@@ -509,6 +514,8 @@ def test_capture_persists_title_and_abstract_to_source_metadata(workspace, trans
     source_id = _capture(workspace, transcript)
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
+        assert source.metadata_json is not None
         metadata = json.loads(source.metadata_json)
         assert metadata["title"] == CAPTURE_METADATA_JSON["title"]
         assert metadata["abstract"] == CAPTURE_METADATA_JSON["abstract"]
@@ -589,6 +596,7 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
     assert all("sources/transcripts" not in hit.ref for hit in proposal.related_notes)
     assert proposal.title == "Claims Kickoff Meeting"
     assert len(proposal.memories) == 3
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.path == "meetings/2026/2026-07-09-claims-kickoff.md"
     # Resolution results: one stub for the new person, none for update/skip.
     assert [r.action for r in proposal.entity_resolutions] == ["create", "update", "skip"]
@@ -608,6 +616,7 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
 
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         assert source.status == "enriched"
         assert source.title == "Claims Kickoff Meeting"
         memories = list(session.scalars(select(Memory)))
@@ -659,6 +668,7 @@ def test_reconcile_corrects_note_link_to_match_entity_resolution(workspace, tran
         workspace, source_id, FakeClient([payload, resolution, REVISION_JSON, STUB_SYNTHESIS_JSON])
     )
 
+    assert proposal.proposed_note is not None
     assert "[[companies/mosaic-private-markets.md|Mosaic]]" in proposal.proposed_note.content
     assert "[[companies/mosaic-app|Mosaic]]" not in proposal.proposed_note.content
     assert any(
@@ -697,6 +707,7 @@ def test_reconcile_leaves_already_matching_link_untouched(workspace, transcript)
         workspace, source_id, FakeClient([payload, resolution, REVISION_JSON, STUB_SYNTHESIS_JSON])
     )
 
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.content == markdown
     assert not any("Corrected" in warning for warning in proposal.warnings)
 
@@ -733,6 +744,7 @@ def test_reconcile_ignores_md_suffix_when_comparing_the_same_target(workspace, t
         workspace, source_id, FakeClient([payload, resolution, REVISION_JSON, STUB_SYNTHESIS_JSON])
     )
 
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.content == markdown
     assert not any("Corrected" in warning for warning in proposal.warnings)
 
@@ -768,6 +780,7 @@ def test_reconcile_does_not_touch_unresolved_display_text(workspace, transcript)
         workspace, source_id, FakeClient([payload, resolution, REVISION_JSON, STUB_SYNTHESIS_JSON])
     )
 
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.content == markdown
     assert not any("Corrected" in warning for warning in proposal.warnings)
 
@@ -962,6 +975,7 @@ def test_merge_entity_note_only_changes_specified_frontmatter_fields(workspace):
     )
     new_content = _merge_entity_note(REAL_SHAPED_PERSON, revision, "2026-07-16")
 
+    assert new_content is not None
     assert "status: former" in new_content
     assert "name: Priya Shah" in new_content  # untouched field survives
     assert "- job-search" in new_content  # untouched list field survives
@@ -2494,6 +2508,7 @@ def test_enrichment_prioritizes_context_referenced_notes(workspace, transcript, 
         context_files=[],
         workspace_root=workspace.root_path,
     )
+    assert resolved is not None
     capture_proposal = prepare_capture(
         workspace,
         "transcript",
@@ -2538,6 +2553,7 @@ def test_enrichment_related_search_uses_digest_not_raw_attachment_dump(
         context_files=[],
         workspace_root=workspace.root_path,
     )
+    assert resolved is not None
     capture_proposal = prepare_capture(
         workspace,
         "transcript",
@@ -2576,6 +2592,7 @@ def test_enrichment_unsafe_note_path_falls_back_to_drafts(workspace, transcript)
     payload = dict(MODEL_JSON, proposed_note={"path": "../escape.md", "markdown": "# Escape\n"})
     client = FakeClient([payload, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON])
     proposal = prepare_enrichment(workspace, source_id, client)
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.path.startswith("drafts/")
 
 
@@ -2586,6 +2603,7 @@ def test_sanitize_note_leaves_well_formed_dated_path_unchanged(workspace, transc
     source_id = _capture(workspace, transcript)
     client = FakeClient([MODEL_JSON, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON])
     proposal = prepare_enrichment(workspace, source_id, client)
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.path == "meetings/2026/2026-07-09-claims-kickoff.md"
     assert proposal.warnings == []
     assert validate_proposal(proposal) == []
@@ -2607,6 +2625,7 @@ def test_sanitize_note_corrects_unslugified_filename_and_self_link(workspace, tr
     client = FakeClient([payload, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON])
     proposal = prepare_enrichment(workspace, source_id, client)
 
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.path == "concepts/guns-germs.md"
     # The H1 and `name:` frontmatter stay exactly as authored -- only the
     # filename (and a self-link that pointed at the old, unslugged filename)
@@ -2718,6 +2737,7 @@ def test_proposed_note_carries_frontmatter_confidence_through_to_proposal(worksp
         FakeClient([payload, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON]),
     )
 
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.confidence == 0.2
 
 
@@ -2727,6 +2747,7 @@ def test_proposed_note_confidence_defaults_to_none(workspace, transcript):
 
     # MODEL_JSON's proposed_note has no frontmatter_confidence — must not be
     # coerced to a spurious value.
+    assert proposal.proposed_note is not None
     assert proposal.proposed_note.confidence is None
 
 
@@ -3187,6 +3208,7 @@ def test_prepare_enrichment_sets_source_captured_date_from_retrieved_at(workspac
 
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         expected = (source.retrieved_at or source.created_at).date().isoformat()
 
     assert proposal.source_captured_date == expected
@@ -3394,6 +3416,7 @@ def test_plan_abstract_backfill_finds_sources_missing_abstract(workspace, transc
     # Simulate a pre-ADR-0010 source: metadata_json has no `abstract` key.
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         source.metadata_json = json.dumps({"meeting_date": "2026-07-09"})
         session.commit()
 
@@ -3412,6 +3435,7 @@ def test_apply_abstract_backfill_rewrites_frontmatter_and_source_row(workspace, 
     source_id = _capture(workspace, transcript)
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         raw_path = source.raw_text_path
         source.metadata_json = json.dumps({"meeting_date": "2026-07-09"})
         source.title = "old filename title"
@@ -3434,7 +3458,9 @@ def test_apply_abstract_backfill_rewrites_frontmatter_and_source_row(workspace, 
 
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         assert source.title == "2026-07-20 Backfilled Title"
+        assert source.metadata_json is not None
         metadata = json.loads(source.metadata_json)
         assert metadata["title"] == "2026-07-20 Backfilled Title"
         assert metadata["abstract"] == "A freshly backfilled abstract."
@@ -3444,6 +3470,7 @@ def test_apply_abstract_backfill_never_touches_memories_or_status(workspace, tra
     source_id = _capture(workspace, transcript)
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         source.metadata_json = json.dumps({})
         session.commit()
 
@@ -3452,6 +3479,7 @@ def test_apply_abstract_backfill_never_touches_memories_or_status(workspace, tra
 
     with open_session(workspace) as session:
         source = session.get(Source, source_id)
+        assert source is not None
         assert source.status == "raw"  # unchanged -- backfill never enriches
         assert session.scalar(select(Memory)) is None
 

@@ -53,6 +53,7 @@ def _add_memory(
 def test_list_memories_filters_by_state(workspace):
     with open_session(workspace) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         _add_memory(session, ws, "a candidate", state="candidate")
         _add_memory(session, ws, "a durable", state="durable")
         session.commit()
@@ -67,6 +68,7 @@ def test_list_memories_filters_by_state(workspace):
 def test_list_memories_filters_by_type(workspace):
     with open_session(workspace) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         _add_memory(session, ws, "an opinion", memory_type="opinion")
         _add_memory(session, ws, "a fact", memory_type="fact")
         session.commit()
@@ -79,6 +81,7 @@ def test_list_memories_filters_by_type(workspace):
 def test_list_memories_filters_by_stance(workspace):
     with open_session(workspace) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         _add_memory(session, ws, "a hot take", stance="casual")
         _add_memory(session, ws, "a formal claim", stance="formal")
         _add_memory(session, ws, "an untagged claim")
@@ -91,23 +94,29 @@ def test_list_memories_filters_by_stance(workspace):
 def test_valid_transitions(workspace):
     with open_session(workspace) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         candidate = _add_memory(session, ws, "x", state="candidate")
         session.commit()
 
         results = transition_memories(session, ws, [candidate], "durable")
         session.commit()
         assert results[0].old_state == "candidate"
-        assert session.get(Memory, candidate).state == "durable"
-        assert session.get(Memory, candidate).last_seen_at is not None
+        memory = session.get(Memory, candidate)
+        assert memory is not None
+        assert memory.state == "durable"
+        assert memory.last_seen_at is not None
 
         results = transition_memories(session, ws, [candidate], "archived")
         session.commit()
-        assert session.get(Memory, candidate).state == "archived"
+        memory = session.get(Memory, candidate)
+        assert memory is not None
+        assert memory.state == "archived"
 
 
 def test_invalid_transitions_rejected(workspace):
     with open_session(workspace) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         durable = _add_memory(session, ws, "x", state="durable")
         rejected = _add_memory(session, ws, "y", state="rejected")
         session.commit()
@@ -125,6 +134,7 @@ def test_invalid_transitions_rejected(workspace):
 def test_transition_is_all_or_nothing_per_call(workspace):
     with open_session(workspace) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         good = _add_memory(session, ws, "ok", state="candidate")
         bad = _add_memory(session, ws, "no", state="rejected")
         session.commit()
@@ -132,7 +142,9 @@ def test_transition_is_all_or_nothing_per_call(workspace):
         with pytest.raises(MemoryError):
             transition_memories(session, ws, [good, bad], "durable")
         session.rollback()
-        assert session.get(Memory, good).state == "candidate"
+        memory = session.get(Memory, good)
+        assert memory is not None
+        assert memory.state == "candidate"
 
 
 def test_retrieval_rank_orders_states():
@@ -202,7 +214,11 @@ def test_touch_memories_updates_last_seen(workspace):
         ws = session.scalar(select(Workspace.id))
         memory_id = _add_memory(session, ws, "touched", state="durable")
         session.commit()
-        assert session.get(Memory, memory_id).last_seen_at is None
+        memory = session.get(Memory, memory_id)
+        assert memory is not None
+        assert memory.last_seen_at is None
         memory_service.touch_memories(session, [memory_id, 9999])  # unknown id ignored
         session.commit()
-        assert session.get(Memory, memory_id).last_seen_at is not None
+        memory = session.get(Memory, memory_id)
+        assert memory is not None
+        assert memory.last_seen_at is not None

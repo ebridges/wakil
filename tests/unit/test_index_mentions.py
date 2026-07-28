@@ -48,6 +48,7 @@ def _mentions(session, workspace_id: int) -> list[tuple[str, str]]:
 def _reindex(config: WorkspaceConfig, root: Path) -> None:
     with open_session(config) as session:
         ws = session.scalar(select(Workspace).where(Workspace.root_path == str(config.state_root)))
+        assert ws is not None
         index_notes(session, ws.id, root)
         session.commit()
 
@@ -62,6 +63,7 @@ def test_fresh_index_populates_mentions_edges(tmp_path: Path):
     config = WorkspaceConfig.load(root)
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         assert set(_mentions(session, ws)) == {
             ("people/alice.md", "people/bob.md"),
             ("people/bob.md", "people/alice.md"),
@@ -95,6 +97,7 @@ def test_removed_link_prunes_its_row(tmp_path: Path):
     config = WorkspaceConfig.load(root)
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         assert {edge[1] for edge in _mentions(session, ws)} == {
             "people/bob.md",
             "people/carol.md",
@@ -105,6 +108,7 @@ def test_removed_link_prunes_its_row(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         assert _mentions(session, ws) == [("people/alice.md", "people/bob.md")]
 
 
@@ -123,6 +127,7 @@ def test_both_wikilink_forms_resolve(tmp_path: Path):
     config = WorkspaceConfig.load(root)
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         assert set(_mentions(session, ws)) == {
             ("concepts/topic.md", "people/alice.md"),
             ("concepts/topic.md", "sources/paper.md"),
@@ -144,6 +149,7 @@ def test_dead_link_target_is_skipped_cleanly(tmp_path: Path):
     config = WorkspaceConfig.load(root)
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         assert _mentions(session, ws) == [("people/alice.md", "people/bob.md")]
 
 
@@ -180,6 +186,7 @@ def test_deleting_a_note_purges_edges_touching_it(tmp_path: Path):
     config = WorkspaceConfig.load(root)
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         assert _mentions(session, ws) == []
 
 

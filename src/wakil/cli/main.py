@@ -228,12 +228,15 @@ def relationships(
         workspace = session.scalar(
             select(Workspace).where(Workspace.root_path == str(config.state_root))
         )
+        if workspace is None:
+            console.print("[red]Workspace database is not initialized; run wakil init first.[/red]")
+            raise typer.Exit(code=1)
         try:
             result = traverse(
                 session,
                 workspace.id,
                 note_path,
-                direction=direction,  # type: ignore[arg-type]
+                direction=direction,
                 predicate=predicate,
                 depth=depth,
             )

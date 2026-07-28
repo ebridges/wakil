@@ -839,7 +839,12 @@ def _title_terms(title: str) -> set[str]:
 
 
 def _candidate_entity_notes(
-    session, workspace_id: int, text: str, schemas: dict, *, extra_terms: set[str] = frozenset()
+    session,
+    workspace_id: int,
+    text: str,
+    schemas: dict,
+    *,
+    extra_terms: set[str] | None = None,
 ) -> list[tuple[str, str]]:
     """Direct title lookup for proper nouns against known entity directories.
 
@@ -863,7 +868,7 @@ def _candidate_entity_notes(
         for phrase in _PROPER_NOUN_RE.findall(text)
         if len(phrase) > 2 and not _is_noise_candidate(phrase)
     }
-    candidates |= extra_terms
+    candidates |= extra_terms or set()
     if not candidates:
         return []
     notes = session.scalars(
@@ -902,10 +907,13 @@ def _run_extraction(
         skill = load_skill("text", config.root_path)
     system = build_system_prompt(skill, ExtractionOutput)
     schemas = load_entity_schemas(config.root_path)
-    page_shapes = {
-        schema.page_shape: resolve_page_shape_template(schema.page_shape, config.root_path)[0]
-        for schema in schemas.values()
-    }
+    page_shapes: dict[str, str] = {}
+    for schema in schemas.values():
+        # Every non-disabled loaded schema is validated to require page_shape.
+        assert schema.page_shape is not None
+        page_shapes[schema.page_shape] = resolve_page_shape_template(
+            schema.page_shape, config.root_path
+        )[0]
     prompt = build_extraction_prompt(
         source_type,
         origin,
@@ -1067,7 +1075,7 @@ def _correct_proposed_note_type(
     if old_type == resolution.entity_type:
         return proposed_note
 
-    existing_label = metadata.get("name") or metadata.get("title") or resolution.name
+    existing_label = str(metadata.get("name") or metadata.get("title") or resolution.name)
     today = datetime.now(UTC).date().isoformat()
     new_metadata = _populate_type_frontmatter(
         schema, resolution.entity_type, resolution.proposed_frontmatter, existing_label, today
@@ -1191,6 +1199,10 @@ def _build_stub_entities(
                 if proposal.proposed_note.path != old_path:
                     taken.discard(old_path)
                     taken.add(proposal.proposed_note.path)
+            # proposed_note_slug is not None implies proposal.proposed_note was
+            # set when computed above, and it's only ever reassigned (never
+            # cleared) inside this loop.
+            assert proposal.proposed_note is not None
             proposal.warnings.append(
                 f"{resolution.name}: already represented by the proposed note "
                 f"({proposal.proposed_note.path}) — not creating a duplicate page"
@@ -1930,7 +1942,12 @@ def _revise_candidates(
     `_MAX_BISECTION_DEPTH` (ADR 0015, Decision 2 Step B). A validation
     failure (not a truncation) never triggers a split — it would recur
     identically on a smaller batch for an unrelated reason."""
-    targets = [(res.target_note_path, content) for res, _, content in candidates]
+    targets: list[tuple[str, str]] = []
+    for res, _, content in candidates:
+        # candidates only ever holds action=="update" resolutions with a
+        # target_note_path (filtered when candidates are built).
+        assert res.target_note_path is not None
+        targets.append((res.target_note_path, content))
     skill = load_skill("note-revision", config.root_path)
     system = build_system_prompt(skill, EntityRevisionOutput)
     cacheable_prefix, prompt = build_revision_prompt(

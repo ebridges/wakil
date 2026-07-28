@@ -73,6 +73,9 @@ class WorkspaceConfig(BaseModel):
 
     @property
     def wakil_dir(self) -> Path:
+        # state_root is always set by _default_state_root above; still
+        # typed `Path | None` since the field itself allows it pre-validation.
+        assert self.state_root is not None
         return self.state_root / WAKIL_DIR
 
     @property
