@@ -237,4 +237,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release create "$NEW_TAG" dist/* --title "$NEW_TAG" --notes-file release-notes.md
+          gh release create "$NEW_TAG" dist/* --repo "${{ github.repository }}" \
+            --title "$NEW_TAG" --notes-file release-notes.md
