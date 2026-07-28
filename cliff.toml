@@ -36,7 +36,16 @@ trim = true
 # Render body even when there are no releases to process.
 render_always = false
 # An array of regex based postprocessors to modify the changelog.
-postprocessors = []
+# GitHub's release-page renderer treats any bare `@word` as a user mention
+# and lists matches in a "Contributors" widget -- even ones that don't name
+# a real account (e.g. a commit describing wakil's own `@file:`/`@url:`
+# context-reference syntax produced two bogus contributor avatars on the
+# v0.1.0 release). Wrap any `@word` in backticks so it renders as code
+# instead of being mention-parsed; this is a single-user project, so there's
+# no real contributor mention this could ever suppress.
+postprocessors = [
+    { pattern = '@([A-Za-z0-9_-]+)', replace = "`@${1}`" },
+]
 
 [git]
 # The project's commits are gitmoji-prefixed Conventional Commits

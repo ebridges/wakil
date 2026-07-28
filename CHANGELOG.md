@@ -1,6 +1,15 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+## [Unreleased]
+
+### 🐛 Bug Fixes
+- 🐛 fix(release): the publish job's gh release create had no repo context
+
+
+### 📝 Documentation
+- 📝 docs(troubleshooting): record the gh release create missing-repo-context gotcha
+
 ## [0.1.0] - 2026-07-28
 
 ### ♻️ Refactoring
@@ -44,7 +53,7 @@ All notable changes to this project are documented in this file.
 - ✨ feat(git): default-on branch/commit/PR landing per source
 - ✨ feat(workspace): share workspace identity across git worktrees
 - ✨ feat(skills): add development-docs maintenance skill + pre-commit reminder
-- ✨ feat(context): expand @file:/@url: references in context text
+- ✨ feat(context): expand `@file`:/`@url`: references in context text
 - ✨ feat(cli): support repeatable --context/--context-file with reference expansion
 - ✨ feat(agents): add pr-reviewer subagent
 - ✨ feat(cli): add wakil sources list/show (#31)
@@ -125,5 +134,6 @@ All notable changes to this project are documented in this file.
 - 📝 docs(readme): document installing from a tagged release
 - 📝 docs(troubleshooting): record the git-cliff commit.message full-body gotcha
 - 📝 docs(troubleshooting): record the upload/download-artifact v6 Node-24 mismatch
+- 📝 docs(changelog): v0.1.0
 
 
