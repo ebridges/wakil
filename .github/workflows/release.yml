@@ -21,8 +21,8 @@ permissions:
   contents: read
 
 jobs:
-  gate:
-    name: Lint & test
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,13 +39,28 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check .
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
       - name: Test (pytest)
         run: uv run pytest -q
         env:
           NO_COLOR: "1"
 
-  ty:
-    name: Type check (ty, non-blocking)
+  type-check:
+    name: Type check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -60,17 +75,11 @@ jobs:
         run: uv sync --locked
 
       - name: Type check (ty)
-        # Non-blocking: ty (issue #98) has never been enforced against this
-        # codebase before and surfaced a large pre-existing, untriaged
-        # backlog on first run. continue-on-error keeps this check visible
-        # per-release without blocking releases on that backlog -- flip to
-        # blocking once issue #98's triage lands.
         run: uvx ty check .
-        continue-on-error: true
 
   version:
     name: Compute version & changelog
-    needs: [gate, ty]
+    needs: [lint, test, type-check]
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.compute.outputs.new_version }}
