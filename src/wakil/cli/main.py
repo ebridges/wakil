@@ -68,6 +68,8 @@ sources_app = typer.Typer(help="Maintain captured sources.", no_args_is_help=Tru
 app.add_typer(sources_app, name="sources")
 entities_app = typer.Typer(help="Maintain compiled entity pages.", no_args_is_help=True)
 app.add_typer(entities_app, name="entities")
+mcp_app = typer.Typer(help="Run wakil as an MCP server.", no_args_is_help=True)
+app.add_typer(mcp_app, name="mcp")
 
 
 @app.callback()
@@ -1556,6 +1558,22 @@ def qmd_embed(ctx: typer.Context) -> None:
     if not result.success:
         raise typer.Exit(code=1)
     console.print("[green]Done.[/green]")
+
+
+@mcp_app.command("serve")
+def mcp_serve(ctx: typer.Context) -> None:
+    """Run an MCP server (stdio) bound to this workspace (docs/adr/0018).
+
+    Point an MCP client's config (Claude Desktop, Claude Code, ...) at
+    `wakil -w <workspace> mcp serve`. Tool calls run against exactly this
+    workspace for the life of the process — same resolution as every other
+    command's `-w/--workspace`.
+    """
+    from wakil.mcp.server import run_stdio
+
+    root = _resolve_workspace(ctx)
+    config = WorkspaceConfig.load(root)
+    run_stdio(config)
 
 
 @app.command()
