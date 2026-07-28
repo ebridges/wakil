@@ -193,6 +193,8 @@ def land_ingestion(
     """
     if context.local:
         raise GitServiceError("land_ingestion called with a local (no-git) context")
+    # prepare_landing only ever leaves branch unset when local=True.
+    assert context.branch is not None
     if not files:
         raise GitServiceError("Nothing to commit: no files were written.")
     if phase not in PHASES:
@@ -245,6 +247,8 @@ def _load_source_git_state(config: WorkspaceConfig, source_id: int) -> "_SourceG
 
 def _resume_source_branch(config: WorkspaceConfig, state: "_SourceGitState") -> str:
     root = config.root_path
+    # Only called when state.git_branch is truthy (see prepare_landing's guard).
+    assert state.git_branch is not None
     name = state.git_branch
     if git.branch_exists(root, name):
         try:

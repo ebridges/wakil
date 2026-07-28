@@ -12,7 +12,10 @@ variables so no credentials are ever stored in the workspace:
 """
 
 import os
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from anthropic.types import TextBlockParam
 
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -79,7 +82,7 @@ class AnthropicClient:
         cacheable_prefix: str | None = None,
     ) -> str:
         if cacheable_prefix:
-            content: str | list[dict[str, object]] = [
+            content: str | list[TextBlockParam] = [
                 {"type": "text", "text": cacheable_prefix, "cache_control": {"type": "ephemeral"}},
                 {"type": "text", "text": prompt},
             ]

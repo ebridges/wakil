@@ -255,6 +255,10 @@ def _sync_note_mentions(
             Relationship.object_note_id.is_not(None),
         )
     ):
+        # subject_note_id is filtered by .in_(subject_ids) and object_note_id
+        # by is_not(None) in the query above -- neither is ever null here.
+        assert edge.subject_note_id is not None
+        assert edge.object_note_id is not None
         existing_edges.setdefault(edge.subject_note_id, {})[edge.object_note_id] = edge
 
     for note in notes:

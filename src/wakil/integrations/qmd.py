@@ -312,5 +312,9 @@ def qmd_embed(qmd_dir: Path, root: Path | None = None) -> QmdCommandResult:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return QmdCommandResult(success=False, message=str(exc))
-    output = (result.stdout or result.stderr or "").strip()
+    # Unlike the other qmd_* commands, this isn't run with text=True (see
+    # docstring above), so a real subprocess.run() leaves stdout/stderr as
+    # None -- but callers (tests included) may still hand back str/bytes.
+    raw_output = result.stdout or result.stderr or ""
+    output = (raw_output.decode() if isinstance(raw_output, bytes) else raw_output).strip()
     return QmdCommandResult(success=result.returncode == 0, message=output)

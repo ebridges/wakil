@@ -118,7 +118,9 @@ def test_memory_promote_and_archive(kb_with_memories):
     result = runner.invoke(app, ["-w", str(kb_with_memories), "memory", "archive", "1"])
     assert result.exit_code == 0
     with open_session(config) as session:
-        assert session.get(Memory, 1).state == "archived"
+        memory = session.get(Memory, 1)
+        assert memory is not None
+        assert memory.state == "archived"
 
 
 def test_memory_reject_invalid_transition(kb_with_memories):

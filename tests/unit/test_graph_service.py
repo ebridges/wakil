@@ -56,6 +56,7 @@ def test_out_traversal_one_hop(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "a.md", direction="out", depth=1)
 
     assert _paths(result) == [("b.md", 1), ("c.md", 1)]
@@ -73,6 +74,7 @@ def test_in_traversal_finds_backlinks(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "c.md", direction="in", depth=1)
 
     assert _paths(result) == [("a.md", 1), ("b.md", 1)]
@@ -89,6 +91,7 @@ def test_both_direction_merges_and_dedupes(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "a.md", direction="both", depth=1)
 
     # b is reachable both ways at depth 1 — one row, marked 'both'.
@@ -107,6 +110,7 @@ def test_asymmetric_link_reports_the_singleton_direction(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "a.md", direction="both", depth=1)
 
     by_path = {hit.path: hit.direction for hit in result.hits}
@@ -124,6 +128,7 @@ def test_multi_hop_walk(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "a.md", direction="out", depth=3)
 
     assert _paths(result) == [("b.md", 1), ("c.md", 2), ("d.md", 3)]
@@ -140,6 +145,7 @@ def test_depth_bound_cuts_walk(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "a.md", direction="out", depth=2)
 
     assert _paths(result) == [("b.md", 1), ("c.md", 2)]
@@ -155,6 +161,7 @@ def test_predicate_filter(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         only_mentions = traverse(
             session, ws, "a.md", direction="out", depth=1, predicate="mentions"
         )
@@ -177,6 +184,7 @@ def test_cycle_terminates_at_shortest_depth(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "a.md", direction="out", depth=5)
 
     # a→b (1), b→c (2). The b→a cycle back to the anchor is filtered out;
@@ -189,6 +197,7 @@ def test_missing_anchor_raises(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         with pytest.raises(TraversalError, match="no note"):
             traverse(session, ws, "does/not/exist.md")
 
@@ -198,6 +207,7 @@ def test_bad_depth_raises(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         with pytest.raises(TraversalError, match="depth"):
             traverse(session, ws, "a.md", depth=0)
 
@@ -207,8 +217,9 @@ def test_bad_direction_raises(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         with pytest.raises(TraversalError, match="direction"):
-            traverse(session, ws, "a.md", direction="sideways")  # type: ignore[arg-type]
+            traverse(session, ws, "a.md", direction="sideways")  # ty: ignore[invalid-argument-type]
 
 
 def test_depth_is_clamped_to_max(tmp_path: Path):
@@ -217,6 +228,7 @@ def test_depth_is_clamped_to_max(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "a.md", direction="out", depth=999)
 
     assert result.depth == MAX_TRAVERSAL_DEPTH
@@ -258,6 +270,7 @@ def test_note_only_edges_ignore_memory_only_rows(tmp_path: Path):
 
     with open_session(config) as session:
         ws = session.scalar(select(Workspace.id))
+        assert ws is not None
         result = traverse(session, ws, "a.md", direction="out", depth=1)
 
     assert _paths(result) == [("b.md", 1)]

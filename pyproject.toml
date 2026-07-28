@@ -39,6 +39,12 @@ packages = ["src/wakil"]
 [tool.hatch.version]
 source = "vcs"
 
+[tool.ty.environment]
+# scripts/*.py sys.path.insert into tests/ at runtime to reuse the eval
+# harness (evals.runner etc.) -- give ty the same extra root so it can
+# resolve those imports instead of reporting them as unresolved.
+extra-paths = ["tests"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

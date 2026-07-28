@@ -306,3 +306,13 @@ Future release tags for this repo must be plain PEP 440-compatible strings (`vX.
 Fixed by rendering `{{ commit.message | split(pat="\n") | first | trim | upper_first }}` instead — Tera's `split`/`first` filters, not a `commit_preprocessors` regex, since the full body is still useful context available elsewhere if ever needed and this only affects the changelog's own rendering. Also needed `{% for commit in commits -%}` (a trailing `-` trim marker) to close a blank-line-per-entry gap the split introduced, since a plain `{% for %}` tag leaves its own newline in the rendered output.
 
 The general lesson: git-cliff's default template variables reflect the *raw* commit data, not an assumed "changelog-appropriate" projection of it — verify generated *output* against real multi-line commits (this repo's commits routinely carry bodies and trailers) before trusting a template that looks correct by inspection.
+
+### `ty` does not honor mypy-style `# type: ignore[code]` — it silently keeps reporting the error
+
+**Date:** 2026-07-28 · **Source:** issue #98 triage, `fix-98-ty-type-check` branch
+
+Two pre-existing call sites (`tests/unit/test_graph_service.py`, `src/wakil/cli/main.py`) had `# type: ignore[arg-type]` comments — the standard mypy suppression syntax — on lines that `ty` still flagged as findings in the first full `uvx ty check .` run. `ty` parses its own suppression syntax (bare `# type: ignore` or `# ty: ignore[rule-name]`); a bracketed mypy-style code (`# type: ignore[arg-type]`) is not recognized and the diagnostic fires exactly as if no comment were there at all — no warning that the suppression itself is malformed, it just silently doesn't suppress.
+
+One of the two turned out to be a live finding that needed the correct `# ty: ignore[invalid-argument-type]` form (a test deliberately passing an invalid literal to assert runtime rejection); the other no longer corresponded to any real error and was removed outright as dead.
+
+The general lesson: a codebase migrating from mypy (or copying patterns from mypy-checked code) needs its `# type: ignore[...]` comments converted to `ty`'s own syntax, not just left in place — `ty` will not error on the unrecognized directive, so a stale mypy-style comment reads as "suppressed" while actually doing nothing.

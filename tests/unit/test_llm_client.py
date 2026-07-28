@@ -31,7 +31,9 @@ def test_resolve_client_prefers_anthropic(monkeypatch):
 def test_resolve_client_model_override(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("WAKIL_MODEL", "claude-haiku-4-5")
-    assert llm_client.resolve_client().model == "claude-haiku-4-5"
+    client = llm_client.resolve_client()
+    assert client is not None
+    assert client.model == "claude-haiku-4-5"
 
 
 def test_resolve_client_openai_requires_model(monkeypatch):
@@ -63,7 +65,7 @@ def test_anthropic_complete_raises_truncated_on_max_tokens(monkeypatch):
         stop_reason="max_tokens",
         content=[SimpleNamespace(type="text", text='{"partial": "cut off')],
     )
-    client._client = SimpleNamespace(
+    client._client = SimpleNamespace(  # ty: ignore[invalid-assignment]  # fake client double, not the real SDK type
         messages=SimpleNamespace(create=lambda **kwargs: fake_response)
     )
     with pytest.raises(llm_client.ModelTruncatedError) as exc_info:
@@ -79,7 +81,7 @@ def test_anthropic_complete_returns_text_when_not_truncated(monkeypatch):
         stop_reason="end_turn",
         content=[SimpleNamespace(type="text", text='{"ok": true}')],
     )
-    client._client = SimpleNamespace(
+    client._client = SimpleNamespace(  # ty: ignore[invalid-assignment]  # fake client double, not the real SDK type
         messages=SimpleNamespace(create=lambda **kwargs: fake_response)
     )
     assert client.complete("sys", "prompt") == '{"ok": true}'

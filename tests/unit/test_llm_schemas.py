@@ -141,7 +141,12 @@ def test_entity_resolution_accepts_valid_relevance_values():
 
 def test_entity_resolution_rejects_invalid_relevance():
     with pytest.raises(ValidationError):
-        EntityResolution(name="X", entity_type="person", action="update", relevance="urgent")
+        EntityResolution(
+            name="X",
+            entity_type="person",
+            action="update",
+            relevance="urgent",  # ty: ignore[invalid-argument-type]  # deliberately invalid: asserts runtime rejection
+        )
 
 
 def test_entity_resolution_proposed_frontmatter_confidence_defaults_to_none():
@@ -228,6 +233,7 @@ def test_extraction_output_carries_proposed_note_frontmatter_confidence():
             frontmatter_confidence=0.3,
         )
     )
+    assert output.proposed_note is not None
     assert output.proposed_note.frontmatter_confidence == 0.3
 
 
@@ -238,7 +244,11 @@ def test_candidate_memory_model_accepts_valid_stance_values():
 
 def test_candidate_memory_model_rejects_invalid_stance():
     with pytest.raises(ValidationError):
-        CandidateMemoryModel(type="fact", content="X", stance="urgent")
+        CandidateMemoryModel(
+            type="fact",
+            content="X",
+            stance="urgent",  # ty: ignore[invalid-argument-type]  # deliberately invalid: asserts runtime rejection
+        )
 
 
 def test_entity_compile_output_accepts_compiled_truth():
@@ -248,7 +258,7 @@ def test_entity_compile_output_accepts_compiled_truth():
 
 def test_entity_compile_output_rejects_missing_compiled_truth():
     with pytest.raises(ValidationError):
-        EntityCompileOutput()
+        EntityCompileOutput()  # ty: ignore[missing-argument]  # deliberately omitted: asserts runtime rejection
 
 
 def test_entity_revision_confidence_defaults_to_none():

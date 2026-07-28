@@ -55,6 +55,7 @@ def test_query_records_query_run(kb_path: Path):
     assert run.id == result.query_run_id
     assert run.status == "completed"
     assert run.answer == result.answer
+    assert run.notes_used_json is not None
     assert "concepts/graph-memory.md" in run.notes_used_json
 
 
@@ -85,6 +86,7 @@ def test_query_records_error_when_model_fails(kb_path: Path):
 
     with open_session(config) as session:
         run = session.scalar(select(QueryRun))
+    assert run is not None
     assert run.status == "error"
 
 

@@ -32,6 +32,7 @@ def test_init_creates_default_user_and_workspace(kb_path: Path):
     with open_session(config) as session:
         assert session.scalar(select(User)) is not None
         workspace = session.scalar(select(Workspace))
+        assert workspace is not None
         assert workspace.name == "my-kb"
         assert workspace.root_path == str(kb_path.resolve())
 

@@ -83,7 +83,9 @@ def test_category_split_matches_entity_metadata_doc():
 
 def test_source_schema_has_origin_sub_schemas():
     source = load_entity_schemas()["source"]
-    assert set(source.origins) <= set(source.fields["origin"].values)
+    origin_field = source.fields["origin"]
+    assert origin_field.values is not None
+    assert set(source.origins) <= set(origin_field.values)
     assert "readwise_id" in source.origins["export"]
 
 

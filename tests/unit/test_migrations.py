@@ -116,6 +116,7 @@ def test_legacy_database_data_survives_migration(tmp_path: Path, kb_path: Path):
 
     with open_session(config) as session:  # init_db runs the migration here
         memory = session.scalar(select(Memory))
+        assert memory is not None
         assert memory.content == "kept"
         assert memory.event_date is None
         memory.event_date = dt.date(2026, 7, 9)
@@ -170,6 +171,7 @@ def test_migration_dedupes_existing_content_hash_collisions(kb_path: Path):
         assert [row.id for row in remaining] == [survivor_id]
         assert duplicate_id not in [row.id for row in remaining]
         memory = session.scalar(select(Memory))
+        assert memory is not None
         assert memory.source_id == survivor_id
 
     index_names = {row["name"] for row in inspect(engine).get_indexes("sources")}
@@ -255,6 +257,7 @@ def test_event_date_roundtrip(kb_path: Path):
         )
         session.commit()
         stored = session.scalar(select(Memory).where(Memory.memory_type == "event"))
+        assert stored is not None
         assert stored.event_date == dt.date(2026, 7, 1)
 
 
@@ -275,6 +278,7 @@ def test_stance_roundtrip(kb_path: Path):
         )
         session.commit()
         stored = session.scalar(select(Memory).where(Memory.stance == "casual"))
+        assert stored is not None
         assert stored.stance == "casual"
 
 
