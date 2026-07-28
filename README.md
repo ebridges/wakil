@@ -1,5 +1,9 @@
 # Wakil
 
+[![CI](https://github.com/ebridges/wakil/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ebridges/wakil/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ebridges/wakil)](https://github.com/ebridges/wakil/releases/latest)
+[![License](https://img.shields.io/github/license/ebridges/wakil)](LICENSE.md)
+
 > [!NOTE]
 > **wakīl** /wa-KĪL/
 > *noun* · Arabic **وكيل**
