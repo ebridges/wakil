@@ -254,6 +254,43 @@ content hash), detects whether the directory is a git repository, checks for
 QMD on the PATH, and records high-priority context files (`README.md`,
 `AGENTS.md`, `RESOLVER.md`) when present.
 
+## MCP server
+
+`wakil mcp serve` runs wakil as an [MCP](https://modelcontextprotocol.io)
+server over stdio, bound to one workspace for the life of the process (same
+`-w/--workspace` resolution as every other command). It exposes read tools
+(`status`, `search`, `query`, `memory_list`/`show`, `relationships`,
+`sources_list`/`show`, `git_summary`/`history`, `skills_list`) plus two
+prepare/apply tool pairs for writes — `ingest_prepare`/`ingest_apply` and
+`enrich_prepare`/`enrich_apply` — mirroring the CLI's own preview-then-
+confirm flow: `*_prepare` returns a preview and nothing is written until a
+separate `*_apply` call. See ADR 0018 for the full tool list and design.
+
+Point an MCP client's config at it, e.g. for Claude Desktop
+(`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "wakil": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/wakil", "wakil", "-w", "kb", "mcp", "serve"]
+    }
+  }
+}
+```
+
+For fast, low-friction capture (useful when you're moving between meetings
+and don't want to review every field), have the connected agent follow
+`skills/mcp-coordinator/SKILL.md` — also served live by the running server
+as the `wakil://skill/mcp-coordinator` MCP resource, so no manual install
+is needed. It chains `*_prepare` straight into `*_apply` for routine cases
+and only pauses for a human on genuine ambiguity (a plausible
+entity-duplicate, a low-confidence/peripheral flag, a validation issue);
+everything still lands on a branch and a pull request, which remains the
+review checkpoint either way. See ADR 0019 for why that's an acceptable
+substitute for a pre-write pause, not a bypass of one.
+
 ## Development
 
 ```bash

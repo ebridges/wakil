@@ -58,6 +58,16 @@ The core use case is knowledge work:
 
 The platform should be built for one local user first, while keeping the data model ready for multiple users later.
 
+That single user is not always sitting still with time to review every
+step. A recurring version of this user is a busy operator — someone moving
+between meetings across a high-meeting-volume day — who needs the
+*interruption cost* of getting a transcript or a note into the knowledge
+base to stay low, even though the underlying mechanism (prepare a change,
+review it, land it on a branch/PR) doesn't change. `wakil mcp serve`
+(docs/adr/0018) plus the `mcp-coordinator` skill (docs/adr/0019) exist for
+this version of the user: the same prepare/apply checkpoints as the CLI,
+chained quickly for routine cases and paused only for genuine ambiguity.
+
 ---
 
 ## Explicit Non-Goals
@@ -107,7 +117,14 @@ It should be rich and pleasant to use:
 
 The first version should not require a server, browser UI, or remote runtime.
 
-However, the design should not prevent additional interfaces later.
+However, the design should not prevent additional interfaces later. The
+first such interface is `wakil mcp serve` (docs/adr/0018) — an MCP server,
+still local, still bound to one workspace, that lets an MCP-speaking agent
+call the same prepare/apply operations the CLI exposes. "Human review"
+means either a pre-write preview (direct CLI/tool use) or the resulting
+pull request (an agent following the `mcp-coordinator` skill,
+docs/adr/0019) — both are the same underlying checkpoint at a different
+tempo, not two different standards.
 
 ---
 
