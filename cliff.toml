@@ -1,0 +1,93 @@
+# git-cliff configuration for wakil
+# https://git-cliff.org/docs/configuration
+#
+# Commit convention: gitmoji-prefixed Conventional Commits, e.g.
+#   "✨ feat(ingest): synthesize real content on entity create"
+# `conventional_commits = false` because the leading emoji makes the raw
+# messages not strictly conventional; commit_parsers below match on the
+# `type(scope)?:` part after the emoji instead.
+
+[changelog]
+# A Tera template to be rendered for each release in the changelog.
+# See https://keats.github.io/tera/docs/#introduction
+header = """
+# Changelog
+
+All notable changes to this project are documented in this file.
+"""
+body = """
+{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+            {% if commit.breaking %}[**breaking**] {% endif %}\
+            {{ commit.message | upper_first }}
+    {% endfor %}
+{% endfor %}
+"""
+footer = ""
+# Remove leading and trailing whitespaces from the changelog's body.
+trim = true
+# Render body even when there are no releases to process.
+render_always = false
+# An array of regex based postprocessors to modify the changelog.
+postprocessors = []
+
+[git]
+# The project's commits are gitmoji-prefixed Conventional Commits
+# (e.g. "✨ feat(ingest): ..."), not bare Conventional Commits, so the
+# built-in conventional-commit parser is disabled in favor of the
+# emoji-tolerant regexes in `commit_parsers` below.
+conventional_commits = false
+# Do not filter on conventional-commit shape; grouping/skipping is handled
+# entirely by commit_parsers.
+filter_unconventional = false
+require_conventional = false
+split_commits = false
+commit_preprocessors = []
+protect_breaking_commits = false
+
+# Regexes are tolerant of a leading emoji (`^.{0,3}`, i.e. up to a couple of
+# UTF-16-ish code points for the emoji + variation selector + space) before
+# the `type(scope)?:` token. Order matters: skip rules must come before the
+# catch-all, and specific skips (merge commits, chore/build/ci/test/style)
+# come first so they never fall through into a feature/fix group.
+commit_parsers = [
+    { message = "^Merge pull request", skip = true },
+    { message = "^.{0,3}feat(\\(.+\\))?!?:", group = "✨ Features" },
+    { message = "^.{0,3}fix(\\(.+\\))?!?:", group = "🐛 Bug Fixes" },
+    { message = "^.{0,3}perf(\\(.+\\))?!?:", group = "⚡ Performance" },
+    { message = "^.{0,3}refactor(\\(.+\\))?!?:", group = "♻️ Refactoring" },
+    { message = "^.{0,3}docs(\\(.+\\))?!?:", group = "📝 Documentation" },
+    { message = "^.{0,3}chore(\\(.+\\))?!?:", skip = true },
+    { message = "^.{0,3}build(\\(.+\\))?!?:", skip = true },
+    { message = "^.{0,3}ci(\\(.+\\))?!?:", skip = true },
+    { message = "^.{0,3}test(\\(.+\\))?!?:", skip = true },
+    { message = "^.{0,3}style(\\(.+\\))?!?:", skip = true },
+    { message = "^.{0,3}revert(\\(.+\\))?!?:", group = "⏪️ Reverts" },
+]
+# Exclude commits that are not matched by any commit parser (e.g. merge
+# commits from feature branches into topic branches, WIP noise) so the
+# changelog only ever shows user-facing, categorized commits.
+filter_commits = true
+# Only consider release tags of the form v1.2.3 (matches the release
+# workflow's `$NEW_TAG`), so stray tags don't confuse release boundaries.
+tag_pattern = "v[0-9]*"
+link_parsers = []
+use_branch_tags = false
+topo_order = false
+topo_order_commits = true
+sort_commits = "oldest"
+recurse_submodules = false
+
+[bump]
+# hatch-vcs derives the package version from git tags directly; git-cliff
+# is not used to compute the next version (the release workflow does that
+# from `inputs.bump`), only to render the changelog for a tag that's
+# already been decided.
+initial_tag = "v0.1.0"
