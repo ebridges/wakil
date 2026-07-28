@@ -50,6 +50,15 @@ connected, ask — don't guess.
    wait for the user to ask for it separately; capture without enrichment
    isn't useful on its own. Use the *same* server for `enrich_*` as you
    used for `ingest_*` — never mix servers for one source.
+   `enrich_prepare` runs two real LLM calls (extraction, then entity
+   resolution) and can take several minutes on a long source. Tell the
+   user up front that this will take a while. If your environment lets
+   you run a tool call non-blockingly instead of fully blocking the
+   conversation on it, use that for `enrich_prepare` and `enrich_apply` —
+   many agent harnesses will do this once they know a call is slow, even
+   without being asked explicitly. If yours doesn't, just wait: a long
+   `enrich_*` call is expected, not a failure — don't retry it, cancel it,
+   or fall back to something else mid-flow because it's taking a while.
 5. Look at what `enrich_prepare` returned:
    - If `issues` is non-empty, stop. Report the issues plainly; nothing was
      written and the source's branch/PR (if any) is untouched. This is a
