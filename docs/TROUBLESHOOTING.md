@@ -316,3 +316,11 @@ Two pre-existing call sites (`tests/unit/test_graph_service.py`, `src/wakil/cli/
 One of the two turned out to be a live finding that needed the correct `# ty: ignore[invalid-argument-type]` form (a test deliberately passing an invalid literal to assert runtime rejection); the other no longer corresponded to any real error and was removed outright as dead.
 
 The general lesson: a codebase migrating from mypy (or copying patterns from mypy-checked code) needs its `# type: ignore[...]` comments converted to `ty`'s own syntax, not just left in place — `ty` will not error on the unrecognized directive, so a stale mypy-style comment reads as "suppressed" while actually doing nothing.
+
+### `actions/upload-artifact@v6` and `actions/download-artifact@v6` are not equivalent Node-24 milestones despite the matching major version
+
+**Date:** 2026-07-28 · **Source:** `.github/workflows/release.yml`, a real `workflow_dispatch` dry run
+
+Bumping `actions/upload-artifact` from v4 to v6 (an earlier fix) cleared the "Node.js 20 is deprecated" warning for every job using it. `actions/download-artifact`, pinned to the same `v6`, kept surfacing the identical warning on the `build` and `publish` jobs. Per each action's own release notes, the two repos' major-version numbers don't track the same underlying milestone: `upload-artifact@v6` is the release where the action's default runtime actually switched to Node 24; `download-artifact@v6` only added "preliminary" Node 24 support and still defaults to Node 20 — the switch to Node-24-by-default didn't land in `download-artifact` until v7 (v8 is current latest, also Node 24 by default).
+
+Fixed by bumping `actions/download-artifact` to v8. The general lesson: sibling GitHub-authored actions (upload/download-artifact, or similarly-paired actions) don't necessarily reach the same milestone at the same major-version number — check each action's own release notes for "runs on Node.js 24" language rather than assuming a shared version number implies shared runtime status.
