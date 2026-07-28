@@ -1,6 +1,6 @@
 ---
 name: mcp-coordinator
-description: Coordinate wakil's MCP ingest/enrich tools for fast, low-friction capture that still lands on a reviewable pull request.
+description: Ingest a transcript, article, or note into the wakil KB
 tags:
   - ingest
   - mcp
@@ -21,23 +21,31 @@ branch and a pull request. What this skill changes is *when you pause to
 ask the human* — routine cases should not require a manual confirmation at
 every step; only genuinely ambiguous ones should.
 
+Tool names below are wakil's own (`ingest_prepare`, `ingest_apply`,
+`enrich_prepare`, `enrich_apply`), as registered by an MCP server named
+`wakil`. Hermes prefixes every MCP tool as `mcp_<server_name>_<tool_name>`,
+so call these as `mcp_wakil_ingest_prepare`, `mcp_wakil_ingest_apply`,
+`mcp_wakil_enrich_prepare`, and `mcp_wakil_enrich_apply` — check your own
+tool list if the server was registered under a different name, and adjust
+the prefix to match.
+
 ## The flow
 
 1. When the user shares something to capture and wants it in the KB
-   quickly, call `ingest_prepare` with the right `kind` (`transcript`,
-   `article`, or `text`) and the file path or URL.
+   quickly, call `mcp_wakil_ingest_prepare` with the right `kind`
+   (`transcript`, `article`, or `text`) and the file path or URL.
 2. If the result has `duplicate_of` set, stop and tell the user it's
    already in the KB (cite the existing source id). Nothing else to do.
 3. Otherwise, look at the preview (`title`, `abstract`, `origin`). If
-   nothing looks wrong, call `ingest_apply` immediately — don't ask the
-   user to re-confirm fields that are already visible and routine. Report
-   one line back: `Captured as source #<id>, branch <branch>, draft PR:
-   <pr_url>` (omit `pr_url` if none was opened, e.g. no `gh`/remote
+   nothing looks wrong, call `mcp_wakil_ingest_apply` immediately — don't
+   ask the user to re-confirm fields that are already visible and routine.
+   Report one line back: `Captured as source #<id>, branch <branch>, draft
+   PR: <pr_url>` (omit `pr_url` if none was opened, e.g. no `gh`/remote
    configured).
-4. Immediately continue to `enrich_prepare` for that same source id — don't
-   wait for the user to ask for it separately; capture without enrichment
-   isn't useful on its own.
-5. Look at what `enrich_prepare` returned:
+4. Immediately continue to `mcp_wakil_enrich_prepare` for that same source
+   id — don't wait for the user to ask for it separately; capture without
+   enrichment isn't useful on its own.
+5. Look at what `mcp_wakil_enrich_prepare` returned:
    - If `issues` is non-empty, stop. Report the issues plainly; nothing was
      written and the source's branch/PR (if any) is untouched. This is a
      hard stop, not something to work around.
@@ -50,7 +58,7 @@ every step; only genuinely ambiguous ones should.
      - a `confidence` or `relevance` that reads as low/`peripheral` for
        something the resolution otherwise treats as significant,
      - anything in `warnings`.
-     If none of that applies, call `enrich_apply` right away.
+     If none of that applies, call `mcp_wakil_enrich_apply` right away.
 6. Report the final result as one line with the PR url (now
    ready-for-review, not a draft) and a short list of files written. If
    `files_to_write`/`files_written` was empty, say so plainly — an
@@ -64,9 +72,9 @@ every step; only genuinely ambiguous ones should.
 
 - It never skips `*_prepare`. A proposal is always generated and inspected
   (by you, on the human's behalf) before `*_apply` is called.
-- It never bypasses `enrich_prepare`'s validation issues — those are a hard
-  stop in wakil's own code (`validate_proposal`), not a judgment call this
-  skill can override.
+- It never bypasses `mcp_wakil_enrich_prepare`'s validation issues — those
+  are a hard stop in wakil's own code (`validate_proposal`), not a
+  judgment call this skill can override.
 - It doesn't decide *whether* to capture something — only how much to
   narrate and confirm once the human has already asked for it.
 
