@@ -89,3 +89,16 @@ def test_version():
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert "wakil" in result.output
+
+
+def test_version_flag():
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert "wakil" in result.output
+
+
+def test_version_flag_short_circuits_without_a_workspace(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert "wakil" in result.output
