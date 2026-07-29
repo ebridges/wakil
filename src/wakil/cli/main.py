@@ -72,12 +72,27 @@ mcp_app = typer.Typer(help="Run wakil as an MCP server.", no_args_is_help=True)
 app.add_typer(mcp_app, name="mcp")
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"wakil {wakil.__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
     workspace: Annotated[
         str | None,
         typer.Option("--workspace", "-w", envvar="WAKIL_WORKSPACE", help=WORKSPACE_HELP),
+    ] = None,
+    version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show the wakil version and exit.",
+        ),
     ] = None,
 ) -> None:
     """Local-first agent for a personal Markdown knowledge base."""
