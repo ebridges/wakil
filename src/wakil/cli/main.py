@@ -37,6 +37,7 @@ from wakil.ui.console import (
 
 if TYPE_CHECKING:
     from wakil.app.context_references import ResolvedContext
+    from wakil.app.ingest_service import EntityUpdate
 
 WORKSPACE_HELP = (
     "Workspace directory or registered workspace name "
@@ -799,6 +800,97 @@ def sources_backfill_abstract(
     console.print(f"[green]Updated {len(updated)} source(s).[/green]")
 
 
+def _resolve_oversized_compiled_truth(
+    update: "EntityUpdate",
+    text: str,
+    size: int,
+    *,
+    run_full_resynthesis,
+) -> "EntityUpdate":
+    """Interactive a/e/f/c menu for a Compiled Truth over the size target.
+
+    Returns the (possibly edited) update once the user applies as-is or an
+    edit brings the text back under the target. Choosing 'f' runs full
+    resynthesis — which writes/commits its own result — and then must exit
+    the whole `entities compile` command via typer.Exit rather than
+    returning, since a plain return here would only exit this helper and
+    let the caller's own preview/confirm/apply tail re-apply a stale,
+    pre-loop `update` over a file resynthesis already wrote.
+    """
+    import click
+
+    from wakil.app.ingest_service import (
+        _COMPILED_TRUTH_TARGET_CHARS,
+        _TIMELINE_HEADING_RE,
+        rebuild_entity_update_with_compiled_truth,
+    )
+
+    while True:
+        console.print(
+            f"[yellow]Compiled Truth is {size} chars, over the "
+            f"{_COMPILED_TRUTH_TARGET_CHARS}-char target.[/yellow]"
+        )
+        choice = (
+            typer.prompt("Apply as-is / Edit / Full resynthesis / Cancel [a/e/f/c]", default="c")
+            .strip()
+            .lower()
+        )
+        if choice == "a":
+            return update
+        if choice == "f":
+            run_full_resynthesis()
+            raise typer.Exit(code=0)
+        if choice == "c":
+            console.print("Aborted; nothing was written.")
+            raise typer.Exit(code=0)
+        if choice != "e":
+            console.print("[red]Please answer a, e, f, or c.[/red]")
+            continue
+
+        # Every reject-and-retry case here returns to this same outer
+        # a/e/f/c menu, deliberately, not an automatic re-invocation of
+        # click.edit(). An earlier version of this code auto-retried the
+        # editor directly for an empty/colliding edit (a literal reading
+        # of ADR 0017's "return to the edit choice") -- but click.edit()
+        # can return the same invalid content on every call (a
+        # misconfigured $EDITOR, or simply a user re-saving the same
+        # mistake), and an automatic retry loop has no bound and no way
+        # out short of eventually producing valid text or closing the
+        # editor unsaved. Bouncing back to an explicit menu the user must
+        # actively respond to (including "c" to cancel outright) is
+        # simpler and cannot loop forever; the one extra keystroke to
+        # reselect "e" is a small cost for removing a real hang risk.
+        edited = click.edit(text=text)
+        if edited is None:
+            console.print("[dim]Edit cancelled; nothing changed.[/dim]")
+            continue
+        if not edited.strip():
+            console.print(
+                "[red]Compiled Truth can't be emptied via edit — write real content, "
+                "or cancel.[/red]"
+            )
+            continue
+        if _TIMELINE_HEADING_RE.search(edited):
+            console.print(
+                "[red]That text contains a '## Timeline' heading, which would collide "
+                "with the note's real Timeline section — remove it, or cancel.[/red]"
+            )
+            continue
+        rebuilt = rebuild_entity_update_with_compiled_truth(update, edited)
+        if rebuilt is None:
+            console.print("[red]Could not merge the edited text — try again, or cancel.[/red]")
+            continue
+        update = rebuilt
+        text = edited
+        size = len(edited)
+        if size <= _COMPILED_TRUTH_TARGET_CHARS:
+            return update
+        console.print(
+            f"[yellow]Still {size} chars, over the {_COMPILED_TRUTH_TARGET_CHARS}-char "
+            "target.[/yellow]"
+        )
+
+
 @entities_app.command("compile")
 def entities_compile(
     ctx: typer.Context,
@@ -818,19 +910,15 @@ def entities_compile(
     ] = False,
 ) -> None:
     """Re-synthesize an entity note's Compiled Truth from its own Timeline."""
-    import click
-
     from wakil.app.git_service import GitServiceError, commit_change
     from wakil.app.ingest_service import (
         _COMPILED_TRUTH_TARGET_CHARS,
-        _TIMELINE_HEADING_RE,
         EntityUpdate,
         IngestError,
         apply_entity_compile,
         compiled_truth_text,
         prepare_entity_compile,
         prepare_entity_full_resynthesis,
-        rebuild_entity_update_with_compiled_truth,
     )
     from wakil.llm.client import resolve_client
     from wakil.llm.schemas import ModelContractError
@@ -907,73 +995,11 @@ def entities_compile(
         raise typer.Exit(code=1) from exc
 
     text = compiled_truth_text(update.new_content)
-    size = len(text) if text is not None else None
-    if size is not None and size > _COMPILED_TRUTH_TARGET_CHARS:
-        while True:
-            console.print(
-                f"[yellow]Compiled Truth is {size} chars, over the "
-                f"{_COMPILED_TRUTH_TARGET_CHARS}-char target.[/yellow]"
-            )
-            choice = (
-                typer.prompt(
-                    "Apply as-is / Edit / Full resynthesis / Cancel [a/e/f/c]", default="c"
-                )
-                .strip()
-                .lower()
-            )
-            if choice == "a":
-                break
-            if choice == "f":
-                _run_full_resynthesis()
-                return
-            if choice == "c":
-                console.print("Aborted; nothing was written.")
-                raise typer.Exit(code=0)
-            if choice != "e":
-                console.print("[red]Please answer a, e, f, or c.[/red]")
-                continue
-
-            # Every reject-and-retry case here returns to this same outer
-            # a/e/f/c menu, deliberately, not an automatic re-invocation of
-            # click.edit(). An earlier version of this code auto-retried the
-            # editor directly for an empty/colliding edit (a literal reading
-            # of ADR 0017's "return to the edit choice") -- but click.edit()
-            # can return the same invalid content on every call (a
-            # misconfigured $EDITOR, or simply a user re-saving the same
-            # mistake), and an automatic retry loop has no bound and no way
-            # out short of eventually producing valid text or closing the
-            # editor unsaved. Bouncing back to an explicit menu the user must
-            # actively respond to (including "c" to cancel outright) is
-            # simpler and cannot loop forever; the one extra keystroke to
-            # reselect "e" is a small cost for removing a real hang risk.
-            edited = click.edit(text=text)
-            if edited is None:
-                console.print("[dim]Edit cancelled; nothing changed.[/dim]")
-                continue
-            if not edited.strip():
-                console.print(
-                    "[red]Compiled Truth can't be emptied via edit — write real content, "
-                    "or cancel.[/red]"
-                )
-                continue
-            if _TIMELINE_HEADING_RE.search(edited):
-                console.print(
-                    "[red]That text contains a '## Timeline' heading, which would collide "
-                    "with the note's real Timeline section — remove it, or cancel.[/red]"
-                )
-                continue
-            rebuilt = rebuild_entity_update_with_compiled_truth(update, edited)
-            if rebuilt is None:
-                console.print("[red]Could not merge the edited text — try again, or cancel.[/red]")
-                continue
-            update = rebuilt
-            text = edited
-            size = len(edited)
-            if size <= _COMPILED_TRUTH_TARGET_CHARS:
-                break
-            console.print(
-                f"[yellow]Still {size} chars, over the {_COMPILED_TRUTH_TARGET_CHARS}-char "
-                "target.[/yellow]"
+    if text is not None:
+        size = len(text)
+        if size > _COMPILED_TRUTH_TARGET_CHARS:
+            update = _resolve_oversized_compiled_truth(
+                update, text, size, run_full_resynthesis=_run_full_resynthesis
             )
 
     print_entity_update_preview(update)
