@@ -17,8 +17,51 @@
 `wakil` is a local-first Python CLI agent for working with a personal Markdown
 knowledge base (GBrain / Obsidian style): ingest, search, connect, revise, and
 reason over Markdown notes. Markdown is the source of truth; SQLite is the
-operational index; git provides history and review. See `PROMPT.md` for the
-full plan and `TODO.md` for what's next.
+operational index; git provides history and review. Design decisions are
+recorded as ADRs under `docs/adr/`. `wakil` doesn't require a specific
+knowledge-base layout, but understands one when present — see
+`docs/knowledge-base-conventions.md` for the directory/file conventions it's
+designed around (`RESOLVER.md` for routing, entity schemas for page shape).
+
+## Why wakil?
+
+You keep notes, meeting transcripts, and articles in a folder of Markdown
+files, and you want that folder to actually get smarter over time — without
+handing it to a black box that silently rewrites your knowledge or requires
+a hosted service. `wakil` is for that gap. Concretely:
+
+- **"I just got out of a meeting and don't want to write it up."**
+  `wakil ingest transcript ./raw/meeting.txt --context "Weekly claims sync"`
+  captures the raw transcript, then `wakil enrich <id>` summarizes it,
+  extracts candidate memories and relationships, links it to people/company
+  pages it mentions, and proposes a durable meeting note — all as a reviewable
+  diff, never a silent rewrite.
+- **"What did we actually decide about X?"**
+  `wakil query "What did we decide about the FNOL routing changes?"` searches
+  your notes, memories, and sources, and answers with citations back to the
+  specific note or source — if the knowledge base doesn't support an answer,
+  it says so instead of guessing.
+- **"I don't want every AI-proposed fact to just merge into my notes."**
+  Ingested facts land as `candidate` memories first. `wakil memory list
+  --state candidate` reviews them; `promote`/`reject`/`archive` decide their
+  fate. Nothing becomes durable, query-grounding truth without you deciding.
+- **"I want to see (and revert) exactly what an agent changed."**
+  Every ingest and enrichment lands on a `wakil/ingest/<date>-<slug>` branch,
+  commits with a clear convention (`🧠 wakil ingest: ...`), and can open a
+  pull request (`--pr`) — a real git diff is always the review surface, not
+  a trust-me summary.
+- **"I want to capture on the go, between meetings, without reviewing every
+  field."** Point an MCP-speaking agent (Claude Desktop, Claude Code, a
+  Hermes agent) at `wakil mcp serve` and have it follow the
+  [`mcp-coordinator`](#mcp-server) skill: it captures and enriches in one
+  chained pass, pausing only for genuine ambiguity, and still lands
+  everything on a branch + PR for you to review. See [MCP server](#mcp-server)
+  below for a full walkthrough.
+- **"An entity page (a person, a project) has grown into an unreadable wall
+  of history."** `wakil entities compile <slug>` re-synthesizes just the
+  Compiled Truth section from the page's own Timeline, so the durable
+  "current state" stays readable even as the evidence log underneath it
+  grows indefinitely.
 
 ## Install
 
@@ -44,6 +87,32 @@ pip install ./wakil-X.Y.Z-py3-none-any.whl
 uv tool install "git+https://github.com/ebridges/wakil@vX.Y.Z"
 pip install "git+https://github.com/ebridges/wakil@vX.Y.Z"
 ```
+
+## Command reference
+
+Every command group in one place — jump to the section below for detail on
+any of them. All commands accept the global `-w`/`--workspace` option; see
+[Selecting a workspace](#selecting-a-workspace).
+
+| Command | What it does |
+| --- | --- |
+| `wakil init <dir>` | Create a `.wakil/` workspace (config + SQLite db), index existing notes, register the workspace name. |
+| `wakil status` | Notes indexed, git state, QMD availability. |
+| `wakil index` | Re-index Markdown files after manual edits. |
+| `wakil search <query>` | [QMD](#search) + SQLite FTS5 search over notes, memories, and sources. |
+| `wakil query <question>` | [Grounded, cited answer](#query) from a model over search results + memory. |
+| `wakil ingest transcript\|article\|text <path>` | [Step 1: capture](#ingest) a raw source. |
+| `wakil enrich <source-id>` | [Step 2: analyze](#ingest) a capture and link it into the KB. |
+| `wakil sources list\|show\|backfill-abstract` | Inspect captured sources; backfill title/abstract on old ones. |
+| `wakil entities compile <slug>` | [Re-synthesize](#entities-compiled-pages) an entity page's Compiled Truth from its Timeline. |
+| `wakil schema migrate\|validate\|list\|which` | [Entity frontmatter schema](#schema-tools) tools. |
+| `wakil relationships <note-path>` | Walk the [note/memory relationship graph](#relationships) from an anchor note. |
+| `wakil memory list\|show\|promote\|reject\|archive` | Review and manage the [memory lifecycle](#memory-lifecycle). |
+| `wakil git summary\|history <path>` | [Git awareness](#git-native-changes): branch/PR state, file history. |
+| `wakil skills list\|which\|validate` | Discover, inspect, and validate [skills](#skills). |
+| `wakil qmd sync\|embed`, `wakil qmd collection add\|list\|remove` | Manage the QMD index/collections directly. |
+| `wakil mcp serve` | Run wakil as an [MCP server](#mcp-server) for an MCP-speaking agent. |
+| `wakil version` / `wakil --version` | Print the installed version. |
 
 ## Usage
 
@@ -163,13 +232,14 @@ apart from one small model call that titles and abstracts the source (see
 ADR 0010) — the raw file's path/filename is never model-derived. Text is
 extracted (transcripts get light cleanup: bracketed and line-leading
 timestamps removed, whitespace normalized — never model rewriting), deduped
-by content hash, and written under `sources/` as a raw capture. Transcript
-frontmatter is derived from the `source` entity schema
-(`schema/entities/source.yaml`) — its base fields plus its `transcript`
-origin sub-schema; known fields (title, abstract, meeting date, create date,
-origin, url) are filled in, the rest are left as blank placeholders.
-`--context`/`-C` accepts a few lines about the source (attendees, company,
-purpose) and is stored on the source record for step 2.
+by content hash, and written under `sources/` as a raw capture. `transcript`
+also accepts a `.whisper` zip archive (Apple's diarized JSON export) in
+addition to plain text/`.srt`. Transcript frontmatter is derived from the
+`source` entity schema (`schema/entities/source.yaml`) — its base fields plus
+its `transcript` origin sub-schema; known fields (title, abstract, meeting
+date, create date, origin, url) are filled in, the rest are left as blank
+placeholders. `--context`/`-C` accepts a few lines about the source
+(attendees, company, purpose) and is stored on the source record for step 2.
 
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:
@@ -204,9 +274,10 @@ as `🧠 wakil ingest:`. Proposed notes fall back to `drafts/` when routing is
 unclear or the path collides; existing files are never overwritten. Extracted
 memories are stored as `candidate` state for review with `wakil memory`.
 
-`wakil sources backfill-abstract` retroactively adds a title/abstract to
-sources captured before this feature existed — metadata-only, it never
-re-runs enrichment.
+`wakil sources list`/`show <id>` inspect captured sources (status, git
+branch/PR landing state); `wakil sources backfill-abstract` retroactively
+adds a title/abstract to sources captured before this feature existed —
+metadata-only, it never re-runs enrichment.
 
 ## Git-native changes
 
@@ -225,13 +296,41 @@ commit is recorded in the workspace database (`git_changes`). `wakil git
 summary` shows the current branch, pending changes, recent commits, and
 wakil-created branches; `wakil git history <path>` shows one file's history.
 
+## Entities: compiled pages
+
+An entity page's `## Compiled Truth` section is meant to hold the current,
+synthesized state; its `## Timeline / Log` is an append-only evidence trail
+that only ever grows. Over enough `enrich` passes, Compiled Truth itself can
+grow unwieldy. `wakil entities compile <slug>` re-synthesizes just the
+Compiled Truth section from the page's own Timeline (never from external
+sources), previews the rewrite, and — if it's still over the target size —
+offers an interactive menu to apply as-is, hand-edit, force a full
+resynthesis, or cancel. `--commit` records the rewrite as a
+`♻️ wakil chore:` commit. See ADR 0017 for the full design.
+
+## Schema tools
+
+Entity frontmatter shape lives in `schema/entities/*.yaml` (13 built-in
+types), resolved with the same override precedence as skills (kb-local, then
+user config, then built-in). `wakil schema list` shows effective types and
+their source; `wakil schema which <type>` shows which root wins for one
+type; `wakil schema validate <paths>` checks arbitrary files' frontmatter
+against the schemas — the same check `wakil enrich` runs before writing,
+useful against files a skill wrote by hand outside the enrichment pipeline.
+`wakil schema migrate` applies cheap, mechanical fixes (field renames,
+exact-duplicate drops, type normalization) across existing notes, behind
+`--dry-run`/`--yes`/`--commit`.
+
 ## Search
 
 `wakil search` combines two engines: [QMD](https://github.com/tobi/qmd) over
 the Markdown knowledge base when the `qmd` binary is installed (`--mode
 search|vsearch|query` selects BM25, vector, or hybrid), and SQLite FTS5
 indexes over note metadata, memories, and sources. QMD results take
-precedence; FTS fills in workspace records QMD doesn't cover.
+precedence; FTS fills in workspace records QMD doesn't cover. `wakil qmd
+sync`/`embed` and `wakil qmd collection add|list|remove` manage the
+underlying QMD index directly, when you need more control than `wakil init`'s
+automatic setup gives you.
 
 ## Query
 
@@ -253,6 +352,14 @@ Configure a provider via environment variables (see `.env.example`):
 content hash), detects whether the directory is a git repository, checks for
 QMD on the PATH, and records high-priority context files (`README.md`,
 `AGENTS.md`, `RESOLVER.md`) when present.
+
+### Relationships
+
+`wakil relationships <note-path>` walks the same note/memory relationship
+graph query grounding draws from — a SQLite recursive CTE over `mentions`
+(automatic, from `[[wikilinks]]` found at index time) and model-proposed
+relationship edges. `--direction out|in|both`, `--predicate`, and `--depth`
+narrow the walk from a single anchor note.
 
 ## MCP server
 
@@ -280,21 +387,43 @@ Point an MCP client's config at it, e.g. for Claude Desktop
 }
 ```
 
+### Using the mcp-coordinator skill for fast capture
+
 For fast, low-friction capture (useful when you're moving between meetings
 and don't want to review every field), have the connected agent follow
 `skills/mcp-coordinator/SKILL.md` — also served live by the running server
-as the `wakil://skill/mcp-coordinator` MCP resource, so no manual install
-is needed. It chains `*_prepare` straight into `*_apply` for routine cases
-and only pauses for a human on genuine ambiguity (a plausible
-entity-duplicate, a low-confidence/peripheral flag, a validation issue);
-everything still lands on a branch and a pull request, which remains the
-review checkpoint either way. See ADR 0019 for why that's an acceptable
-substitute for a pre-write pause, not a bypass of one.
+as the `wakil://skill/mcp-coordinator` MCP resource, so **no manual
+install is needed**: any MCP client that can read resources from a connected
+server can load the skill directly from `wakil mcp serve` itself.
+
+In practice, once `wakil` is configured as an MCP server, you just tell your
+agent what you want in plain language, e.g.:
+
+> Follow the wakil mcp-coordinator skill and capture this transcript, then
+> enrich it: `~/Downloads/2026-07-30-claims-sync.txt`. Attendees: Jane Doe,
+> Bob (Acme Corp).
+
+The agent reads the coordinator skill, then chains `ingest_prepare` straight
+into `ingest_apply`, and `enrich_prepare` straight into `enrich_apply`, for
+the routine case — it only stops to ask you something when it hits genuine
+ambiguity (a plausible entity-duplicate, a low-confidence/peripheral flag, a
+validation issue). Either way, everything still lands on a branch and a pull
+request, which remains the review checkpoint whether a human or an agent
+drove the capture. See ADR 0019 for why that's an acceptable substitute for
+a pre-write pause, not a bypass of one.
 
 ## Development
 
 ```bash
 uv run pytest             # tests
 uv run ruff check         # lint
+uv run ty check           # type-check (uvx ty check if ty isn't installed locally)
 uv run pytest -m eval     # live-model skill evals (needs ANTHROPIC_API_KEY or another configured provider; skipped if none is set)
 ```
+
+Design decisions are recorded as ADRs under `docs/adr/`; recurring dev
+patterns and known gotchas live in `docs/DEVELOPMENT.md` and
+`docs/TROUBLESHOOTING.md` — see `CLAUDE.md` for when/how those get updated.
+Releases are cut via the `Release` GitHub Actions workflow
+(`workflow_dispatch`, choose a `patch`/`minor`/`major` bump); see
+`CHANGELOG.md` for release history.
