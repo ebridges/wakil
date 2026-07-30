@@ -321,6 +321,50 @@ useful against files a skill wrote by hand outside the enrichment pipeline.
 exact-duplicate drops, type normalization) across existing notes, behind
 `--dry-run`/`--yes`/`--commit`.
 
+### Page shapes: how a note's body is structured
+
+Frontmatter fields are only half of an entity schema — each entity type also
+declares a `page_shape` naming which body template `wakil enrich` must
+follow when it writes or updates that type's note. There are two shapes,
+each a template file under
+[`src/wakil/schema/templates/`](src/wakil/schema/templates/):
+
+- [`compiled-truth-timeline.md`](src/wakil/schema/templates/compiled-truth-timeline.md)
+  — for an accumulating subject touched by multiple sources over time (a
+  `person`, `company`, `project`, `concept`, `index`, `journal`,
+  `assessment`). A `## Compiled Truth` section is *re-synthesized* on every
+  update to cover everything known so far — never replaced with just the
+  newest source's content — while `## Timeline / Log` is *append-only*:
+  new dated entries are added, existing ones are never deleted, rewritten,
+  or reordered. `wakil entities compile` (see
+  [above](#entities-compiled-pages)) only ever touches this shape's
+  Compiled Truth section.
+- [`single-occurrence.md`](src/wakil/schema/templates/single-occurrence.md)
+  — for a note describing one dated event or standalone artifact, not an
+  accumulating subject (a `meeting`, `reflection`, `idea`, `organization`,
+  `meta`, `source`). There's no Timeline here — a running log of a single
+  occurrence would just be the occurrence restated — so the template is a
+  flat `Summary`/`Key Decisions`/`Action Items`/`Discussion Notes`/`Open
+  Questions` skeleton, with guidance on which sections are optional per type.
+
+Which built-in type uses which shape (`wakil schema list` shows this for
+your workspace's actual resolved set, including any kb-local overrides):
+
+| Shape | Types |
+| --- | --- |
+| `compiled-truth-timeline` | `person`, `company`, `project`, `concept`, `index`, `journal`, `assessment` |
+| `single-occurrence` | `meeting`, `reflection`, `idea`, `organization`, `meta`, `source` |
+
+Templates resolve with the same kb-local → user-config → built-in override
+precedence as skills and entity schemas (`resolve_page_shape_template` in
+`schema/loader.py`) — a workspace can supply its own
+`schema/templates/<shape>.md` to change the narrative structure a shape
+enforces, without touching wakil's own code. The resolved template body is
+injected directly into `wakil enrich`'s model prompt, so this isn't just
+documentation — it's the actual instruction the model follows for body
+structure, the same way frontmatter fields are the instruction for metadata
+shape.
+
 ## Search
 
 `wakil search` combines two engines: [QMD](https://github.com/tobi/qmd) over
