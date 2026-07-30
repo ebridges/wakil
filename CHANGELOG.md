@@ -1,14 +1,33 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
-## [Unreleased]
+## [0.2.0] - 2026-07-30
+
+### ♻️ Refactoring
+- ♻️ refactor(ingest): split apply_enrichment into write/update/persist helpers (#109)
+- ♻️ refactor(ingest): extract duplicate/stub-build branches from _build_stub_entities (#110)
+- ♻️ refactor(ingest): split validate_proposal into per-collection validators (#111)
+- ♻️ refactor(cli): extract oversized-compiled-truth menu loop from entities_compile (#108)
+- ♻️ refactor(graph): extract validate/resolve/build-sql/map helpers from traverse (#112)
+- ♻️ refactor(mcp): split build_server into per-category registration helpers (#113)
+- ♻️ refactor(cli): split enrich into prepare/confirm-and-apply helpers (#114)
+- ♻️ refactor(ingest): split prepare_enrichment into related-notes/model-population helpers (#115)
+
+
+### ✨ Features
+- ✨ feat(cli): add --version flag alongside the version subcommand (#107)
+
 
 ### 🐛 Bug Fixes
 - 🐛 fix(release): the publish job's gh release create had no repo context
+- 🐛 fix(release): escape `@mentions` in generated changelog/release notes
 
 
 ### 📝 Documentation
 - 📝 docs(troubleshooting): record the gh release create missing-repo-context gotcha
+- 📝 docs(troubleshooting): record the `@mention-parsing` release-page gotcha
+- 📝 docs(readme): add CI, release, and license status badges
+- 📝 docs(development): note that stacked same-file refactor PRs conflict on merge
 
 ## [0.1.0] - 2026-07-28
 
