@@ -2056,32 +2056,26 @@ def _is_unpopulated_stub(content: str) -> bool:
     return top_section.strip() == _STUB_TOP_SECTION
 
 
-def validate_proposal(
-    proposal: EnrichmentProposal, kb_root: Path | None = None
+def _entity_type_of(metadata: object) -> str | None:
+    entity_type = metadata.get("type") if isinstance(metadata, dict) else None
+    return entity_type if isinstance(entity_type, str) and entity_type else None
+
+
+def _validate_proposed_files(
+    proposed_files: list[ProposedFile],
+    schemas: dict[str, EntitySchema],
+    kb_root: Path | None,
 ) -> list[ProposalIssue]:
-    """Invariant gate between prepare and apply; any issue blocks the write.
-
-    Implements entity-resolution.md's constraints plus the schema check:
-    every proposed new file must carry frontmatter valid against its entity
-    schema; a pending create for a type with no schema at all is a hard
-    stop, not a best-guess write (types that have a schema but no canonical
-    directory, e.g. `index`, are instead warned about and dropped from
-    proposal.entity_resolutions upstream in _build_stub_entities, so this
-    loop never sees them); no two proposed files may share a path. Routing
-    is 1:N by construction (proposed_note + stub_entities), and content-hash
-    dedup is already enforced upstream at capture time.
-
-    `kb_root` should be the workspace root so a kb-local schema override
-    validates against the same schema extraction/entity-resolution used —
-    omitted only by tests that don't exercise the override mechanism.
+    """No two proposed files may share a path; every proposed new file must
+    carry frontmatter valid against its entity schema and land under its
+    type's canonical directory (a subdirectory is fine, e.g.
+    "meetings/2026/...") — `_build_stub_entities` already routes stubs this
+    way by construction, but the model-chosen primary note gets no such
+    guarantee, so it's checked here. A real routing bug, not cosmetic drift,
+    so this is a hard stop rather than an auto-correction — unlike a
+    filename/H1 slug mismatch.
     """
     issues: list[ProposalIssue] = []
-    schemas = load_entity_schemas(kb_root)
-
-    proposed_files = list(proposal.stub_entities)
-    if proposal.proposed_note is not None:
-        proposed_files.insert(0, proposal.proposed_note)
-
     seen_paths: set[str] = set()
     for proposed in proposed_files:
         if proposed.path in seen_paths:
@@ -2091,20 +2085,13 @@ def validate_proposal(
             metadata = frontmatter_lib.loads(proposed.content).metadata
         except Exception:
             metadata = {}
-        entity_type = metadata.get("type") if isinstance(metadata, dict) else None
-        if not isinstance(entity_type, str) or not entity_type:
+        entity_type = _entity_type_of(metadata)
+        if entity_type is None:
             issues.append(ProposalIssue(proposed.path, "proposed file has no `type:` frontmatter"))
             continue
         for error in validate_frontmatter(entity_type, metadata, kb_root):
             issues.append(ProposalIssue(proposed.path, str(error)))
 
-        # Placement: a new page's directory must sit under its own type's
-        # schema.directory (a subdirectory is fine, e.g. "meetings/2026/...")
-        # — `_build_stub_entities` already routes stubs this way by
-        # construction; the model-chosen primary note gets no such
-        # guarantee, so it's checked here instead. A real routing bug, not
-        # cosmetic drift, so this is a hard stop rather than an
-        # auto-correction — unlike a filename/H1 slug mismatch.
         schema = schemas.get(entity_type)
         if schema is not None and schema.directory is not None:
             schema_dir = schema.directory.rstrip("/")
@@ -2117,10 +2104,16 @@ def validate_proposal(
                         f"not {proposed_dir}/",
                     )
                 )
+    return issues
 
-    # Edits to existing notes must still satisfy their type's schema —
-    # frontmatter_updates could otherwise merge in a value that breaks it.
-    for update in proposal.entity_updates:
+
+def _validate_entity_updates(
+    entity_updates: list[EntityUpdate], kb_root: Path | None
+) -> list[ProposalIssue]:
+    """Edits to existing notes must still satisfy their type's schema —
+    frontmatter_updates could otherwise merge in a value that breaks it."""
+    issues: list[ProposalIssue] = []
+    for update in entity_updates:
         try:
             metadata = frontmatter_lib.loads(update.new_content).metadata
         except Exception:
@@ -2128,17 +2121,23 @@ def validate_proposal(
                 ProposalIssue(update.target_note_path, "merged content is not valid frontmatter")
             )
             continue
-        entity_type = metadata.get("type") if isinstance(metadata, dict) else None
-        if not isinstance(entity_type, str) or not entity_type:
+        entity_type = _entity_type_of(metadata)
+        if entity_type is None:
             issues.append(
                 ProposalIssue(update.target_note_path, "merged file has no `type:` frontmatter")
             )
             continue
         for error in validate_frontmatter(entity_type, metadata, kb_root):
             issues.append(ProposalIssue(update.target_note_path, str(error)))
+    return issues
 
-    # Creates that could not even build a stub: missing schema or directory.
-    for resolution in proposal.entity_resolutions:
+
+def _validate_unroutable_creates(
+    entity_resolutions: list[EntityResolution], schemas: dict[str, EntitySchema]
+) -> list[ProposalIssue]:
+    """Creates that could not even build a stub: missing schema or directory."""
+    issues: list[ProposalIssue] = []
+    for resolution in entity_resolutions:
         if resolution.action != "create":
             continue
         schema = schemas.get(resolution.entity_type)
@@ -2159,6 +2158,38 @@ def validate_proposal(
                 )
             )
     return issues
+
+
+def validate_proposal(
+    proposal: EnrichmentProposal, kb_root: Path | None = None
+) -> list[ProposalIssue]:
+    """Invariant gate between prepare and apply; any issue blocks the write.
+
+    Implements entity-resolution.md's constraints plus the schema check:
+    every proposed new file must carry frontmatter valid against its entity
+    schema; a pending create for a type with no schema at all is a hard
+    stop, not a best-guess write (types that have a schema but no canonical
+    directory, e.g. `index`, are instead warned about and dropped from
+    proposal.entity_resolutions upstream in _build_stub_entities, so this
+    loop never sees them); no two proposed files may share a path. Routing
+    is 1:N by construction (proposed_note + stub_entities), and content-hash
+    dedup is already enforced upstream at capture time.
+
+    `kb_root` should be the workspace root so a kb-local schema override
+    validates against the same schema extraction/entity-resolution used —
+    omitted only by tests that don't exercise the override mechanism.
+    """
+    schemas = load_entity_schemas(kb_root)
+
+    proposed_files = list(proposal.stub_entities)
+    if proposal.proposed_note is not None:
+        proposed_files.insert(0, proposal.proposed_note)
+
+    return [
+        *_validate_proposed_files(proposed_files, schemas, kb_root),
+        *_validate_entity_updates(proposal.entity_updates, kb_root),
+        *_validate_unroutable_creates(proposal.entity_resolutions, schemas),
+    ]
 
 
 def _write_new_proposed_files(config: WorkspaceConfig, proposal: EnrichmentProposal) -> list[str]:
