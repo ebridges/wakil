@@ -578,100 +578,85 @@ def get_source(config: WorkspaceConfig, source_id: int) -> SourceSummary:
 # Step 2: enrichment
 
 
-def prepare_enrichment(
+def _gather_related_notes(
+    session: Session,
     config: WorkspaceConfig,
-    source_id: int,
-    client: ModelClient,
-    context: str | None = None,
-    context_digest: str | None = None,
-    context_referenced_paths: list[str] | None = None,
-    force: bool = False,
-) -> EnrichmentProposal:
-    with open_session(config) as session:
-        source = session.get(Source, source_id)
-        if source is None:
-            raise IngestError(f"No source with id {source_id}. See capture output for ids.")
-        if source.status == "enriched" and not force:
-            raise IngestError(
-                f"Source {source_id} is already enriched; pass --force to re-analyze."
-            )
-        metadata = json.loads(source.metadata_json or "{}")
-        # Fallback for a Timeline heading with no real date of its own
-        # (issue #77) — retrieved_at is set at capture time for every
-        # source; created_at covers the rare row without it.
-        captured_at = source.retrieved_at or source.created_at
-        source_captured_date = captured_at.date().isoformat() if captured_at else None
-        context = context or metadata.get("context")
-        context_digest = context_digest or metadata.get("context_digest")
-        context_referenced_paths = (
-            context_referenced_paths or metadata.get("context_referenced_paths") or []
+    source: Source,
+    workspace_id: int,
+    title: str,
+    search_context: str | None,
+    text: str,
+    context_referenced_paths: list[str],
+) -> list[SearchHit]:
+    """Related-note candidates for enrichment, in priority order: user
+    `@file:` references (guaranteed, ahead of and not subject to
+    RELATED_NOTE_LIMIT — the user pointed at them explicitly, so relevance
+    ranking shouldn't get a vote), then relevance search, then a direct
+    entity-title lookup. Deduped by path via a shared `seen_paths` set so
+    the same note is never offered twice under different engines."""
+    related_notes: list[SearchHit] = []
+    seen_paths: set[str] = set()
+    for path in context_referenced_paths:
+        if path == source.raw_text_path or path in seen_paths:
+            continue
+        seen_paths.add(path)
+        note = session.scalar(
+            select(Note).where(Note.workspace_id == workspace_id, Note.path == path)
         )
-        # Sources captured before context_digest existed have none stored —
-        # fall back to the raw context so query-building still works.
-        search_context = context_digest or context
-        text = _load_source_text(config, source)
-        title = source.title or f"source {source_id}"
-        workspace_id, _ = _require_workspace_ids(session, config)
-
-        # @file:-referenced notes are guaranteed related notes, ahead of and
-        # not subject to RELATED_NOTE_LIMIT: the user pointed at them
-        # explicitly, so relevance ranking shouldn't get a vote.
-        related_notes: list[SearchHit] = []
-        seen_paths: set[str] = set()
-        for path in context_referenced_paths:
-            if path == source.raw_text_path or path in seen_paths:
-                continue
-            seen_paths.add(path)
-            note = session.scalar(
-                select(Note).where(Note.workspace_id == workspace_id, Note.path == path)
+        related_notes.append(
+            SearchHit(
+                kind="note",
+                ref=path,
+                title=note.title if note and note.title else _deslug(path),
+                snippet="",
+                engine="user-referenced",
             )
-            related_notes.append(
-                SearchHit(
-                    kind="note",
-                    ref=path,
-                    title=note.title if note and note.title else _deslug(path),
-                    snippet="",
-                    engine="user-referenced",
-                )
-            )
+        )
 
-        related_query = " ".join(filter(None, [title, search_context, text[:300]]))
-        for hit in search_workspace(
-            config=config, session=session, query=related_query, limit=RELATED_NOTE_LIMIT
-        ):
-            if hit.kind != "note" or hit.ref == source.raw_text_path or hit.ref in seen_paths:
-                continue
-            seen_paths.add(hit.ref)
-            related_notes.append(hit)
+    related_query = " ".join(filter(None, [title, search_context, text[:300]]))
+    for hit in search_workspace(
+        config=config, session=session, query=related_query, limit=RELATED_NOTE_LIMIT
+    ):
+        if hit.kind != "note" or hit.ref == source.raw_text_path or hit.ref in seen_paths:
+            continue
+        seen_paths.add(hit.ref)
+        related_notes.append(hit)
 
-        # Relevance search optimizes for "notes that talk about X" and reliably
-        # buries a short entity stub (title literally "Mosaic") behind longer
-        # notes that just mention the name often. Entity resolution needs the
-        # opposite question answered — "does a page named X already exist" —
-        # so supplement with a direct title lookup against known entity
-        # directories, independent of QMD/FTS ranking.
-        for path, note_title in _candidate_entity_notes(
-            session,
-            workspace_id,
-            " ".join(filter(None, [search_context, text])),
-            load_entity_schemas(config.root_path),
-            extra_terms=_title_terms(title),
-        ):
-            if path in seen_paths or path == source.raw_text_path:
-                continue
-            seen_paths.add(path)
-            related_notes.append(
-                SearchHit(kind="note", ref=path, title=note_title, snippet="", engine="entity-name")
-            )
+    # Relevance search optimizes for "notes that talk about X" and reliably
+    # buries a short entity stub (title literally "Mosaic") behind longer
+    # notes that just mention the name often. Entity resolution needs the
+    # opposite question answered — "does a page named X already exist" —
+    # so supplement with a direct title lookup against known entity
+    # directories, independent of QMD/FTS ranking.
+    for path, note_title in _candidate_entity_notes(
+        session,
+        workspace_id,
+        " ".join(filter(None, [search_context, text])),
+        load_entity_schemas(config.root_path),
+        extra_terms=_title_terms(title),
+    ):
+        if path in seen_paths or path == source.raw_text_path:
+            continue
+        seen_paths.add(path)
+        related_notes.append(
+            SearchHit(kind="note", ref=path, title=note_title, snippet="", engine="entity-name")
+        )
 
-    proposal = EnrichmentProposal(
-        source_id=source_id,
-        title=title,
-        context=context,
-        related_notes=related_notes,
-        source_captured_date=source_captured_date,
-    )
-    proposal.model = client.model
+    return related_notes
+
+
+def _populate_proposal_from_models(
+    config: WorkspaceConfig,
+    client: ModelClient,
+    source: Source,
+    text: str,
+    title: str,
+    related_notes: list[SearchHit],
+    proposal: EnrichmentProposal,
+) -> None:
+    """Run both DAG model calls (extraction, then entity resolution),
+    mutating `proposal` in place with their results -- mirrors this file's
+    `_run_extraction`/`_run_entity_resolution` mutate-in-place convention."""
     guides = load_workspace_guides(config)
     related_pairs = [(hit.ref, hit.title) for hit in related_notes]
     source_text = text[:MAX_SOURCE_CHARS]
@@ -729,7 +714,64 @@ def prepare_enrichment(
 
     # DAG node 2: entity resolution — always invoked, never optional.
     _run_entity_resolution(config, client, source_text, related_pairs, proposal, guides)
-    _warn_if_nothing_produced(source_id, proposal)
+    _warn_if_nothing_produced(source.id, proposal)
+
+
+def prepare_enrichment(
+    config: WorkspaceConfig,
+    source_id: int,
+    client: ModelClient,
+    context: str | None = None,
+    context_digest: str | None = None,
+    context_referenced_paths: list[str] | None = None,
+    force: bool = False,
+) -> EnrichmentProposal:
+    with open_session(config) as session:
+        source = session.get(Source, source_id)
+        if source is None:
+            raise IngestError(f"No source with id {source_id}. See capture output for ids.")
+        if source.status == "enriched" and not force:
+            raise IngestError(
+                f"Source {source_id} is already enriched; pass --force to re-analyze."
+            )
+        metadata = json.loads(source.metadata_json or "{}")
+        # Fallback for a Timeline heading with no real date of its own
+        # (issue #77) — retrieved_at is set at capture time for every
+        # source; created_at covers the rare row without it.
+        captured_at = source.retrieved_at or source.created_at
+        source_captured_date = captured_at.date().isoformat() if captured_at else None
+        context = context or metadata.get("context")
+        context_digest = context_digest or metadata.get("context_digest")
+        context_referenced_paths = (
+            context_referenced_paths or metadata.get("context_referenced_paths") or []
+        )
+        # Sources captured before context_digest existed have none stored —
+        # fall back to the raw context so query-building still works.
+        search_context = context_digest or context
+        text = _load_source_text(config, source)
+        title = source.title or f"source {source_id}"
+        workspace_id, _ = _require_workspace_ids(session, config)
+
+        related_notes = _gather_related_notes(
+            session,
+            config,
+            source,
+            workspace_id,
+            title,
+            search_context,
+            text,
+            context_referenced_paths,
+        )
+
+    proposal = EnrichmentProposal(
+        source_id=source_id,
+        title=title,
+        context=context,
+        related_notes=related_notes,
+        source_captured_date=source_captured_date,
+    )
+    proposal.model = client.model
+    _populate_proposal_from_models(config, client, source, text, title, related_notes, proposal)
     return proposal
 
 
