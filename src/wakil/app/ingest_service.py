@@ -40,6 +40,7 @@ import frontmatter as frontmatter_lib
 import yaml
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
@@ -2129,12 +2130,7 @@ def validate_proposal(
     return issues
 
 
-def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> EnrichmentResult:
-    issues = validate_proposal(proposal, config.root_path)
-    if issues:
-        detail = "; ".join(str(issue) for issue in issues)
-        raise IngestError(f"Proposal failed validation, nothing was written: {detail}")
-
+def _write_new_proposed_files(config: WorkspaceConfig, proposal: EnrichmentProposal) -> list[str]:
     files_written: list[str] = []
     proposed_files = list(proposal.stub_entities)
     if proposal.proposed_note is not None:
@@ -2146,10 +2142,16 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(proposed.content, encoding="utf-8")
         files_written.append(proposed.path)
+    return files_written
 
+
+def _apply_entity_updates(
+    config: WorkspaceConfig, proposal: EnrichmentProposal
+) -> tuple[list[str], list[str]]:
     # Edits to existing notes: re-read immediately before writing and skip
     # (rather than overwrite blind) any file that changed since prepare —
     # mirrors schema_migrate_service.apply_migrations' stale-file guard.
+    updated_files: list[str] = []
     stale_updates_skipped: list[str] = []
     for update in proposal.entity_updates:
         target = config.root_path / update.target_note_path
@@ -2164,7 +2166,59 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
             )
             continue
         target.write_text(update.new_content, encoding="utf-8")
-        files_written.append(update.target_note_path)
+        updated_files.append(update.target_note_path)
+    return updated_files, stale_updates_skipped
+
+
+def _persist_candidate_memories(
+    session: Session,
+    workspace_id: int,
+    user_id: int,
+    source: Source,
+    proposal: EnrichmentProposal,
+) -> tuple[list[Memory], int]:
+    memory_rows: list[Memory] = []
+    for candidate in proposal.memories:
+        memory = Memory(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            memory_type=candidate.memory_type,
+            content=candidate.content,
+            confidence=candidate.confidence,
+            stance=candidate.stance,
+            event_date=candidate.event_date,
+            state="candidate",
+            source_id=source.id,
+        )
+        session.add(memory)
+        memory_rows.append(memory)
+    session.flush()
+
+    relationships_created = 0
+    for rel in proposal.relationships:
+        if 0 <= rel.subject_index < len(memory_rows) and 0 <= rel.object_index < len(memory_rows):
+            session.add(
+                Relationship(
+                    workspace_id=workspace_id,
+                    subject_memory_id=memory_rows[rel.subject_index].id,
+                    predicate=rel.predicate,
+                    object_memory_id=memory_rows[rel.object_index].id,
+                    source_id=source.id,
+                )
+            )
+            relationships_created += 1
+    return memory_rows, relationships_created
+
+
+def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> EnrichmentResult:
+    issues = validate_proposal(proposal, config.root_path)
+    if issues:
+        detail = "; ".join(str(issue) for issue in issues)
+        raise IngestError(f"Proposal failed validation, nothing was written: {detail}")
+
+    files_written = _write_new_proposed_files(config, proposal)
+    updated_files, stale_updates_skipped = _apply_entity_updates(config, proposal)
+    files_written += updated_files
 
     with open_session(config) as session:
         workspace_id, user_id = _require_workspace_ids(session, config)
@@ -2172,38 +2226,9 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
         if source is None:
             raise IngestError(f"No source with id {proposal.source_id}.")
 
-        memory_rows: list[Memory] = []
-        for candidate in proposal.memories:
-            memory = Memory(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                memory_type=candidate.memory_type,
-                content=candidate.content,
-                confidence=candidate.confidence,
-                stance=candidate.stance,
-                event_date=candidate.event_date,
-                state="candidate",
-                source_id=source.id,
-            )
-            session.add(memory)
-            memory_rows.append(memory)
-        session.flush()
-
-        relationships_created = 0
-        for rel in proposal.relationships:
-            if 0 <= rel.subject_index < len(memory_rows) and 0 <= rel.object_index < len(
-                memory_rows
-            ):
-                session.add(
-                    Relationship(
-                        workspace_id=workspace_id,
-                        subject_memory_id=memory_rows[rel.subject_index].id,
-                        predicate=rel.predicate,
-                        object_memory_id=memory_rows[rel.object_index].id,
-                        source_id=source.id,
-                    )
-                )
-                relationships_created += 1
+        memory_rows, relationships_created = _persist_candidate_memories(
+            session, workspace_id, user_id, source, proposal
+        )
 
         source.status = "enriched"
         source.title = proposal.title
