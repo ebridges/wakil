@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+## [0.2.1] - 2026-07-30
+
+### 📝 Documentation
+- 📝 docs(readme): rewrite with upfront use cases, full command reference, mcp-coordinator walkthrough
+- 📝 docs(claude): add repo map, dev workflow, and mandatory dev-docs guidance
+- 📝 docs: preserve KB directory/routing conventions from PROMPT.md
+- 📝 docs(readme): link and explain the two page-shape templates
+
 ## [0.2.0] - 2026-07-30
 
 ### ♻️ Refactoring
@@ -28,6 +36,7 @@ All notable changes to this project are documented in this file.
 - 📝 docs(troubleshooting): record the `@mention-parsing` release-page gotcha
 - 📝 docs(readme): add CI, release, and license status badges
 - 📝 docs(development): note that stacked same-file refactor PRs conflict on merge
+- 📝 docs(changelog): v0.2.0
 
 ## [0.1.0] - 2026-07-28
 
