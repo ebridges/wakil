@@ -37,7 +37,8 @@ from wakil.ui.console import (
 
 if TYPE_CHECKING:
     from wakil.app.context_references import ResolvedContext
-    from wakil.app.ingest_service import EntityUpdate
+    from wakil.app.ingest_service import EnrichmentProposal, EnrichmentResult, EntityUpdate
+    from wakil.llm.client import ModelClient
 
 WORKSPACE_HELP = (
     "Workspace directory or registered workspace name "
@@ -415,6 +416,65 @@ def _resolve_context_or_exit(
     return resolved
 
 
+def _prepare_enrichment_or_exit(
+    config: WorkspaceConfig,
+    *,
+    source_id: int,
+    client: "ModelClient",
+    resolved_context: "ResolvedContext | None",
+    force: bool,
+    landing,
+) -> "EnrichmentProposal":
+    from wakil.app.git_service import abandon_landing
+    from wakil.app.ingest_service import IngestError, prepare_enrichment
+    from wakil.llm.client import ModelError
+
+    try:
+        with console.status(f"Analyzing source #{source_id} with {client.model}..."):
+            return prepare_enrichment(
+                config,
+                source_id,
+                client,
+                context=resolved_context.text if resolved_context else None,
+                context_digest=resolved_context.digest if resolved_context else None,
+                context_referenced_paths=(
+                    resolved_context.referenced_paths if resolved_context else None
+                ),
+                force=force,
+            )
+    except (IngestError, ModelError) as exc:
+        console.print(f"[red]Enrichment failed:[/red] {exc}")
+        abandon_landing(config, landing)
+        raise typer.Exit(code=1) from exc
+
+
+def _confirm_and_apply_enrichment(
+    config: WorkspaceConfig, *, proposal: "EnrichmentProposal", landing, yes: bool
+) -> "EnrichmentResult":
+    from wakil.app.git_service import abandon_landing
+    from wakil.app.ingest_service import IngestError, apply_enrichment, validate_proposal
+
+    print_enrichment_proposal(proposal)
+    issues = validate_proposal(proposal, kb_root=config.root_path)
+    if issues:
+        print_proposal_issues(issues)
+        abandon_landing(config, landing)
+        raise typer.Exit(code=1)
+    if not yes and not typer.confirm("Apply this enrichment (write files, record memories)?"):
+        console.print("Aborted; nothing was written.")
+        abandon_landing(config, landing)
+        raise typer.Exit(code=0)
+
+    try:
+        result = apply_enrichment(config, proposal)
+    except IngestError as exc:
+        console.print(f"[red]Enrichment failed:[/red] {exc}")
+        abandon_landing(config, landing)
+        raise typer.Exit(code=1) from exc
+    print_enrichment_result(result)
+    return result
+
+
 def _run_ingest(
     ctx: typer.Context,
     kind: str,
@@ -551,13 +611,7 @@ def enrich(
     review. --local writes files only, with no git operations.
     """
     from wakil.app.git_service import GitServiceError, abandon_landing, prepare_landing
-    from wakil.app.ingest_service import (
-        IngestError,
-        apply_enrichment,
-        prepare_enrichment,
-        validate_proposal,
-    )
-    from wakil.llm.client import ModelError, resolve_client
+    from wakil.llm.client import resolve_client
 
     root = _resolve_workspace(ctx)
     config = WorkspaceConfig.load(root)
@@ -583,42 +637,15 @@ def enrich(
         console.print(f"[red]Enrichment failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    try:
-        with console.status(f"Analyzing source #{source_id} with {client.model}..."):
-            proposal = prepare_enrichment(
-                config,
-                source_id,
-                client,
-                context=resolved_context.text if resolved_context else None,
-                context_digest=resolved_context.digest if resolved_context else None,
-                context_referenced_paths=(
-                    resolved_context.referenced_paths if resolved_context else None
-                ),
-                force=force,
-            )
-    except (IngestError, ModelError) as exc:
-        console.print(f"[red]Enrichment failed:[/red] {exc}")
-        abandon_landing(config, landing)
-        raise typer.Exit(code=1) from exc
-
-    print_enrichment_proposal(proposal)
-    issues = validate_proposal(proposal, kb_root=config.root_path)
-    if issues:
-        print_proposal_issues(issues)
-        abandon_landing(config, landing)
-        raise typer.Exit(code=1)
-    if not yes and not typer.confirm("Apply this enrichment (write files, record memories)?"):
-        console.print("Aborted; nothing was written.")
-        abandon_landing(config, landing)
-        raise typer.Exit(code=0)
-
-    try:
-        result = apply_enrichment(config, proposal)
-    except IngestError as exc:
-        console.print(f"[red]Enrichment failed:[/red] {exc}")
-        abandon_landing(config, landing)
-        raise typer.Exit(code=1) from exc
-    print_enrichment_result(result)
+    proposal = _prepare_enrichment_or_exit(
+        config,
+        source_id=source_id,
+        client=client,
+        resolved_context=resolved_context,
+        force=force,
+        landing=landing,
+    )
+    result = _confirm_and_apply_enrichment(config, proposal=proposal, landing=landing, yes=yes)
 
     if result.files_written:
         _land_written_files(
