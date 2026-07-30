@@ -10,10 +10,12 @@ design bias for this feature).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import TextClause, bindparam, text
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 Direction = Literal["out", "in", "both"]
@@ -59,29 +61,21 @@ class TraversalResult:
     hits: list[TraversalHit]
 
 
-def traverse(
-    session: Session,
-    workspace_id: int,
-    anchor_path: str,
-    *,
-    direction: Direction = "both",
-    predicate: str | None = None,
-    depth: int = 1,
-) -> TraversalResult:
-    """Walk Note↔Note edges from `anchor_path` out to `depth` hops.
-
-    Raises `TraversalError` if the anchor doesn't resolve to a real note or
-    if arguments are out of range. Depth is clamped to `MAX_TRAVERSAL_DEPTH`
-    to guard against runaway queries on a densely-linked kb.
-    """
+def _validate_and_clamp_depth(depth: int, direction: str) -> int:
+    """Validate `depth`/`direction` and clamp depth to `MAX_TRAVERSAL_DEPTH`."""
     if depth < 1:
         raise TraversalError(f"depth must be >= 1 (got {depth})")
     if direction not in ("out", "in", "both"):
         raise TraversalError(
             f"direction must be one of out|in|both (got {direction!r})"
         )
-    depth = min(depth, MAX_TRAVERSAL_DEPTH)
+    return min(depth, MAX_TRAVERSAL_DEPTH)
 
+
+def _resolve_anchor(
+    session: Session, workspace_id: int, anchor_path: str
+) -> tuple[int, str | None]:
+    """Look up the anchor note's id and title, or raise `TraversalError`."""
     anchor_row = session.execute(
         text("SELECT id, title FROM notes WHERE workspace_id = :ws AND path = :path"),
         {"ws": workspace_id, "path": anchor_path},
@@ -89,11 +83,17 @@ def traverse(
     if anchor_row is None:
         raise TraversalError(f"no note in this workspace at path {anchor_path!r}")
     anchor_id, anchor_title = anchor_row
+    return anchor_id, anchor_title
 
-    # One recursive CTE, two seed halves (outgoing / incoming), unioned by
-    # direction. We keep the shortest hop count per reached note by
-    # aggregating in the outer SELECT — SQLite's UNION in a recursive CTE
-    # dedupes exact rows, so per-hit MIN(depth) gives us the shortest path.
+
+def _build_traversal_sql(direction: Direction) -> TextClause:
+    """Build the single `WITH RECURSIVE` traversal query for `direction`.
+
+    One recursive CTE, two seed halves (outgoing / incoming), unioned by
+    direction. We keep the shortest hop count per reached note by
+    aggregating in the outer SELECT — SQLite's UNION in a recursive CTE
+    dedupes exact rows, so per-hit MIN(depth) gives us the shortest path.
+    """
     seeds: list[str] = []
     if direction in ("out", "both"):
         seeds.append(
@@ -149,7 +149,7 @@ def traverse(
     # direction promoted to 'both' when the note is reachable both ways at
     # the same depth (otherwise the singleton). Doing this all in one
     # subquery hits SQLite's "misuse of aggregate MIN()" — hence the split.
-    sql = text(
+    return text(
         f"""
         WITH RECURSIVE walk(note_id, depth, via_predicate, direction) AS (
             {seed_sql}
@@ -180,17 +180,10 @@ def traverse(
         bindparam("predicate"),
     )
 
-    rows = session.execute(
-        sql,
-        {
-            "ws": workspace_id,
-            "anchor_id": anchor_id,
-            "depth": depth,
-            "predicate": predicate,
-        },
-    ).all()
 
-    hits = [
+def _hits_from_rows(rows: Sequence[Row]) -> list[TraversalHit]:
+    """Map raw `(id, path, title, depth, via_predicate, direction)` rows."""
+    return [
         TraversalHit(
             note_id=row[0],
             path=row[1],
@@ -201,11 +194,42 @@ def traverse(
         )
         for row in rows
     ]
+
+
+def traverse(
+    session: Session,
+    workspace_id: int,
+    anchor_path: str,
+    *,
+    direction: Direction = "both",
+    predicate: str | None = None,
+    depth: int = 1,
+) -> TraversalResult:
+    """Walk Note↔Note edges from `anchor_path` out to `depth` hops.
+
+    Raises `TraversalError` if the anchor doesn't resolve to a real note or
+    if arguments are out of range. Depth is clamped to `MAX_TRAVERSAL_DEPTH`
+    to guard against runaway queries on a densely-linked kb.
+    """
+    depth = _validate_and_clamp_depth(depth, direction)
+    anchor_id, anchor_title = _resolve_anchor(session, workspace_id, anchor_path)
+
+    sql = _build_traversal_sql(direction)
+    rows = session.execute(
+        sql,
+        {
+            "ws": workspace_id,
+            "anchor_id": anchor_id,
+            "depth": depth,
+            "predicate": predicate,
+        },
+    ).all()
+
     return TraversalResult(
         anchor_path=anchor_path,
         anchor_title=anchor_title,
         direction=direction,
         predicate=predicate,
         depth=depth,
-        hits=hits,
+        hits=_hits_from_rows(rows),
     )
