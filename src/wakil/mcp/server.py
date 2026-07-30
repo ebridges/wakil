@@ -33,10 +33,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 COORDINATOR_SKILL_PATH = _REPO_ROOT / "skills" / "mcp-coordinator" / "SKILL.md"
 
 
-def build_server(config: WorkspaceConfig) -> FastMCP:
-    mcp = FastMCP("wakil")
-    cache = ProposalCache()
-
+def _register_coordinator_resource(mcp: FastMCP) -> None:
     @mcp.resource(
         "wakil://skill/mcp-coordinator",
         name="mcp-coordinator",
@@ -53,6 +50,8 @@ def build_server(config: WorkspaceConfig) -> FastMCP:
                 f"Could not read the coordinator skill at {COORDINATOR_SKILL_PATH}: {exc}"
             ) from exc
 
+
+def _register_read_tools(mcp: FastMCP, config: WorkspaceConfig) -> None:
     @mcp.tool()
     def status() -> dict:
         """Workspace status: note/source/memory counts, git state, QMD availability."""
@@ -112,6 +111,13 @@ def build_server(config: WorkspaceConfig) -> FastMCP:
         return tools.sources_show(config, source_id)
 
     @mcp.tool()
+    def skills_list() -> list[dict]:
+        """List effective wakil skills (DAG-internal extraction skills) and their source."""
+        return tools.skills_list(config)
+
+
+def _register_git_tools(mcp: FastMCP, config: WorkspaceConfig) -> None:
+    @mcp.tool()
     def git_summary() -> dict:
         """Current branch, uncommitted changes, recent commits, wakil branches."""
         return tools.git_summary(config)
@@ -121,11 +127,8 @@ def build_server(config: WorkspaceConfig) -> FastMCP:
         """Commit history for one workspace-relative file path."""
         return tools.git_history(config, path, limit=limit)
 
-    @mcp.tool()
-    def skills_list() -> list[dict]:
-        """List effective wakil skills (DAG-internal extraction skills) and their source."""
-        return tools.skills_list(config)
 
+def _register_write_tools(mcp: FastMCP, config: WorkspaceConfig, cache: ProposalCache) -> None:
     @mcp.tool()
     def ingest_prepare(
         kind: str, file_path: str | None = None, url: str | None = None, context: str | None = None
@@ -155,6 +158,16 @@ def build_server(config: WorkspaceConfig) -> FastMCP:
         records memories/relationships, and flips the source's PR to
         ready-for-review."""
         return tools.enrich_apply(config, cache, proposal_id)
+
+
+def build_server(config: WorkspaceConfig) -> FastMCP:
+    mcp = FastMCP("wakil")
+    cache = ProposalCache()
+
+    _register_coordinator_resource(mcp)
+    _register_read_tools(mcp, config)
+    _register_git_tools(mcp, config)
+    _register_write_tools(mcp, config, cache)
 
     return mcp
 
