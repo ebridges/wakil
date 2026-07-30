@@ -31,13 +31,13 @@ handing it to a black box that silently rewrites your knowledge or requires
 a hosted service. `wakil` is for that gap. Concretely:
 
 - **"I just got out of a meeting and don't want to write it up."**
-  `wakil ingest transcript ./raw/meeting.txt --context "Weekly claims sync"`
+  `wakil ingest transcript ./raw/meeting.txt --context "Weekly product/engineering sync"`
   captures the raw transcript, then `wakil enrich <id>` summarizes it,
   extracts candidate memories and relationships, links it to people/company
   pages it mentions, and proposes a durable meeting note — all as a reviewable
   diff, never a silent rewrite.
 - **"What did we actually decide about X?"**
-  `wakil query "What did we decide about the FNOL routing changes?"` searches
+  `wakil query "What did we decide about the priority of the changes to planset review?"` searches
   your notes, memories, and sources, and answers with citations back to the
   specific note or source — if the knowledge base doesn't support an answer,
   it says so instead of guessing.
