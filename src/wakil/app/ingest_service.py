@@ -1127,6 +1127,71 @@ def _is_source_self_mirror(resolution: EntityResolution, proposal: EnrichmentPro
     return len(overlap) / min(len(name_words), len(title_words)) >= 0.5
 
 
+def _suppress_duplicate_of_proposed_note(
+    resolution: EntityResolution,
+    schema: EntitySchema,
+    proposal: EnrichmentProposal,
+    taken: set[str],
+    proposed_note_slug: str | None,
+) -> bool:
+    """Suppress `resolution` when its subject duplicates proposal.proposed_note
+    (see issue #36). Returns True when suppressed, in which case the caller
+    should treat the resolution as handled (kept in entity_resolutions,
+    no stub built).
+    """
+    resolution_slug = slugify(resolution.name)
+    if proposed_note_slug is None or resolution_slug != proposed_note_slug:
+        return False
+    if proposal.proposed_note is not None:
+        old_path = proposal.proposed_note.path
+        proposal.proposed_note = _correct_proposed_note_type(
+            proposal.proposed_note, resolution, schema, proposal
+        )
+        if proposal.proposed_note.path != old_path:
+            taken.discard(old_path)
+            taken.add(proposal.proposed_note.path)
+    # proposed_note_slug is not None implies proposal.proposed_note was set
+    # when computed by the caller, and it's only ever reassigned (never
+    # cleared) above.
+    assert proposal.proposed_note is not None
+    proposal.warnings.append(
+        f"{resolution.name}: already represented by the proposed note "
+        f"({proposal.proposed_note.path}) — not creating a duplicate page"
+    )
+    return True
+
+
+def _build_stub_or_skip(
+    resolution: EntityResolution,
+    schema: EntitySchema,
+    proposal: EnrichmentProposal,
+    taken: set[str],
+    today: str,
+    config: WorkspaceConfig,
+) -> ProposedFile | None:
+    """Build the stub page for `resolution`, or return None (recording a
+    warning) when its path already exists on disk or is already taken by
+    another proposed file in this same proposal.
+    """
+    path = f"{schema.directory}/{slugify(resolution.name)}.md"
+    if (config.root_path / path).exists():
+        proposal.warnings.append(
+            f"{resolution.name}: {path} already exists — not creating a duplicate page"
+        )
+        return None
+    if path in taken:
+        return None
+    taken.add(path)
+    metadata = _populate_type_frontmatter(
+        schema, resolution.entity_type, resolution.proposed_frontmatter, resolution.name, today
+    )
+    return ProposedFile(
+        path=path,
+        content=_stub_content(metadata, resolution.name),
+        confidence=resolution.proposed_frontmatter_confidence,
+    )
+
+
 def _build_stub_entities(
     config: WorkspaceConfig, proposal: EnrichmentProposal
 ) -> list[ProposedFile]:
@@ -1190,24 +1255,9 @@ def _build_stub_entities(
                 "directory to route into — needs manual placement"
             )
             continue
-        resolution_slug = slugify(resolution.name)
-        if proposed_note_slug is not None and resolution_slug == proposed_note_slug:
-            if proposal.proposed_note is not None:
-                old_path = proposal.proposed_note.path
-                proposal.proposed_note = _correct_proposed_note_type(
-                    proposal.proposed_note, resolution, schema, proposal
-                )
-                if proposal.proposed_note.path != old_path:
-                    taken.discard(old_path)
-                    taken.add(proposal.proposed_note.path)
-            # proposed_note_slug is not None implies proposal.proposed_note was
-            # set when computed above, and it's only ever reassigned (never
-            # cleared) inside this loop.
-            assert proposal.proposed_note is not None
-            proposal.warnings.append(
-                f"{resolution.name}: already represented by the proposed note "
-                f"({proposal.proposed_note.path}) — not creating a duplicate page"
-            )
+        if _suppress_duplicate_of_proposed_note(
+            resolution, schema, proposal, taken, proposed_note_slug
+        ):
             kept_resolutions.append(resolution)
             continue
         if _is_source_self_mirror(resolution, proposal):
@@ -1218,29 +1268,10 @@ def _build_stub_entities(
             )
             kept_resolutions.append(resolution)
             continue
-        path = f"{schema.directory}/{slugify(resolution.name)}.md"
-        if (config.root_path / path).exists():
-            proposal.warnings.append(
-                f"{resolution.name}: {path} already exists — not creating a duplicate page"
-            )
-            kept_resolutions.append(resolution)
-            continue
-        if path in taken:
-            kept_resolutions.append(resolution)
-            continue
-        taken.add(path)
+        stub = _build_stub_or_skip(resolution, schema, proposal, taken, today, config)
         kept_resolutions.append(resolution)
-
-        metadata = _populate_type_frontmatter(
-            schema, resolution.entity_type, resolution.proposed_frontmatter, resolution.name, today
-        )
-        stubs.append(
-            ProposedFile(
-                path=path,
-                content=_stub_content(metadata, resolution.name),
-                confidence=resolution.proposed_frontmatter_confidence,
-            )
-        )
+        if stub is not None:
+            stubs.append(stub)
 
     proposal.entity_resolutions = kept_resolutions
     return stubs
