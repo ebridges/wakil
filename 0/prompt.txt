@@ -1,0 +1,1 @@
+should the slug include the directory prefix?  what if there's a company named "edward-bridges" in the future (odd example, but you get what i mean).
