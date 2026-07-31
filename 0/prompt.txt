@@ -1,0 +1,31 @@
+<task-notification>
+<task-id>a949f2c3418731aa0</task-id>
+<tool-use-id>toolu_01XwPNSdX7ipZeH81N4id6ui</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2/tasks/a949f2c3418731aa0.output</output-file>
+<status>completed</status>
+<summary>Agent "Survey wakil's existing skill infrastructure" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Summary
+
+**(a) Two distinct "skill" populations**
+
+1. **Internal DAG-judgment skills** — `src/wakil/skills/{article,text,transcript,entity-resolve}/SKILL.md`, loaded by `src/wakil/llm/skill_loader.py`. These are pure prose (frontmatter: only `name` + `description` — **no** `skill_api`/`version`), read directly by path (`SKILLS_DIR/&lt;name&gt;/SKILL.md`), cached via `lru_cache`, and concatenated into a system prompt with a JSON-schema contract auto-derived from a Pydantic model (`build_system_prompt`). They are hardcoded into `ingest_service.py`'s two-node enrichment DAG and aren't part of the general resolver at all — no root search, no `skill_api` validation.
+
+2. **General resolver population** — `src/wakil/skills/{resolver,models,errors}.py`, implementing `docs/skill-resolution-specification.md`. This is the target home for the 12-skill catalog. Roots searched in order: `WAKIL_SKILL_PATH` → `&lt;kb-root&gt;/skills` → `&lt;user-config&gt;/skills` → `builtin_skill_root` (`Path(__file__).resolve().parent / "builtin"`, i.e. `src/wakil/skills/builtin/`). **`src/wakil/skills/builtin/` does not exist yet** — confirmed via `ls` (no such file or directory). Nothing currently populates it; `resolve_skill()`/`discover_skill_names()` would simply find zero builtin skills today. This is the directory the 12-skill migration target needs to populate.
+
+**(b) Deterministic/code-owned vs. open judgment**
+
+Already deterministic, in code, not to be re-litigated as skill prose:
+- **Capture** (`wakil ingest`): dedupe by content hash, raw-text write, `clean_transcript()`, `infer_meeting_date()` — mechanical, no model call.
+- **Entity schema validation**: `src/wakil/schema/loader.py` (`load_entity_schemas`, `EntitySchema`) reads `src/wakil/schema/entities/*.yaml` (person, company, project, meeting, concept, source, journal, assessment, reflection, idea, organization, meta, index — 13 types), and `src/wakil/schema/validate.py::validate_frontmatter()` enforces required/typed/enum/ref fields. This is a **working, code-owned validation system** — largely supersedes what a `note-conformance`/parts of `entity-resolution` catalog skill would otherwise need to encode as judgment.
+- **Routing/path construction**: `_build_stub_entities()` computes destination path from `schema.directory + slugify(name)`, builds Compiled-Truth/Timeline stub skeletons — mechanical.
+- **Invariant gate**: `validate_proposal()` — duplicate-path check, frontmatter-schema check, hard-stop on unknown type/no directory (implements `entity-resolution.md`'s three constraints: no first-match-wins, 1:N routing, hard-stop on missing schema).
+- Docs `entity-model.md`/`entity-metadata.md`/`entity-resolution.md`/`ingestion-model.md` are **design-rationale/critique documents**, not specs to reimplement — `ingestion-refactor-spec.md` states their content is "already shipped" as the schema YAMLs, `validate_proposal()`, and the two-command split.
+
+Genuinely open judgment (where new catalog skills add value): what a source *means* (extraction — same shape as existing `article`/`text`/`transcript` skills), create/update/skip entity decisions and disambiguation (`entity-resolve` already covers this for the 2-node DAG, but catalog skills like `note-routing`, `knowledge-research`, `note-revision`, `content-synthesis`, `skill-authoring` have no code-side deterministic counterpart yet — the DAG only has extraction + entity-resolution nodes today, nothing for revision, research, or routing beyond schema-based path construction).
+
+**(c) File/frontmatter contract for new catalog skills** (spec §4/§8): directory `&lt;skill-root&gt;/&lt;skill-name&gt;/SKILL.md` plus optional `templates/`, `examples/`, `references/`, `schemas/`, `scripts/`. Frontmatter must include `name` (matches directory, kebab-case) and `skill_api: 1`; `version` optional/informational. Whole-directory selection — no cross-directory file borrowing.
+
+**(d)** `src/wakil/skills/builtin/` does **not** exist — confirmed empty/absent. It's the resolver's lowest-precedence root but has no content yet; populating it is presumably part of the migration deliverable.</result>
+<usage><subagent_tokens>49408</subagent_tokens><tool_uses>22</tool_uses><duration_ms>44653</duration_ms></usage>
+</task-notification>
