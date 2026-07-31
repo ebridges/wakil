@@ -1,0 +1,66 @@
+Base directory for this skill: /Users/ebridges/Projects/wakil/.claude/skills/development-docs
+
+# development-docs
+
+Keep `docs/DEVELOPMENT.md` and `docs/TROUBLESHOOTING.md` high-signal. The default,
+expected outcome of running this skill is **no change to either file** — most
+sessions produce nothing worth recording. Padding these files to "have something
+to show" is a violation of their purpose.
+
+## When to use
+
+- As a step inside the `commit` skill's procedure, before finalizing commits.
+- When reminded by the pre-commit hook.
+- When the user explicitly says something like "note this gotcha", "add this
+  pattern to the dev docs", or "record this for next time".
+
+## Procedure
+
+1. **Review what happened.** Look at the session's diff and the problem(s) actually
+   solved — not what was attempted or discussed, only what landed.
+2. **Apply the bar** (below) to each candidate. Be skeptical by default: if you're
+   unsure whether it clears the bar, it doesn't.
+3. **If something clears the bar**, write a dated entry in the format below, citing
+   a concrete source. Include the doc edit as part of the commit's change sets
+   rather than a separate follow-up.
+4. **If nothing clears the bar**, do nothing. Don't note that you "considered and
+   rejected" anything — just proceed.
+
+## Bar for inclusion
+
+- **`docs/TROUBLESHOOTING.md`** — a bug or gotcha that (a) cost real debugging
+  time, (b) wasn't obvious from reading the code, and (c) would plausibly recur or
+  mislead someone again.
+- **`docs/DEVELOPMENT.md`** — a pattern that was established or reinforced that
+  should generalize to *future, different* work — not a one-off fix specific to
+  this change.
+- **Default: no entry.**
+
+## Entry format
+
+`docs/TROUBLESHOOTING.md`:
+
+```markdown
+### <short, specific title>
+**Date:** YYYY-MM-DD · **Source:** <commit SHA / PR # / brief pointer>
+
+<2-5 sentences: symptom, root cause, fix or workaround.>
+```
+
+`docs/DEVELOPMENT.md`:
+
+```markdown
+### <pattern name>
+**Established:** YYYY-MM-DD · **Source:** <commit SHA / PR # / brief pointer>
+
+<2-5 sentences: what the pattern is, when to apply it, where else it's used.>
+```
+
+## Rules
+
+- Every entry must cite a concrete source (commit SHA, PR #, or a specific, checkable
+  detail) — no vague or unattributed claims.
+- Keep entries short: 2-5 sentences. Link to the relevant code or doc rather than
+  duplicating it.
+- Append only. Never rewrite or delete an existing entry without the user's
+  explicit go-ahead.
