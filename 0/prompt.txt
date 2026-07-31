@@ -1,0 +1,3 @@
+I'm most interested in ensuring troubleshooting techniques, patterns of development, and approaches for how to develop in the future are maintained.
+
+also, what about non-claude techniques, in case I end up working with other coding platforms or sharing with a team?  Would it work to start tracking these in ADRs within this repo, or some other approach?  or would it make sense to build out a separate memory platform?
