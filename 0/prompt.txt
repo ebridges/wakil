@@ -1,0 +1,1 @@
+update ISSUES.jsonl so that all issues have a status.  If those 6 you mention are ready to be confirmed then specify that.  for #39, add an "open" comment to the feedback to that effect, and close previous feedback comments.
