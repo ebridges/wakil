@@ -1,0 +1,41 @@
+<task-notification>
+<task-id>ad43e98d214310213</task-id>
+<tool-use-id>toolu_013oijG7XNNkSsV7rKM3CMtH</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/ad43e98d214310213.output</output-file>
+<status>completed</status>
+<summary>Agent "Review PR #109 apply_enrichment refactor" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Review: PR #109 — Split `apply_enrichment` into write/update/persist helpers
+
+**Verdict: Approve.** This is a clean, low-risk extraction that does exactly what it says and nothing more.
+
+### What I checked
+
+- Read the live diff (`gh pr diff 109`) plus the full `apply_enrichment` region on `main` vs. the PR branch to line up old/new code directly.
+- Checked out the PR into a worktree and ran `uv run ruff check .`, `uvx ty check .`, and `uv run pytest -q -m "not eval"` myself: ruff clean, ty clean, **621 passed, 62 deselected**, matching the PR description. Also ran the specific `test_apply_enrichment_skips_stale_entity_update_without_clobbering` test the description calls out — passes.
+- Read `docs/adr/0003`, `0007`, `0008` titles/status (none touched — this PR doesn't change git-landing, the Markdown/SQLite split, or ingestion dispatch) and confirmed `apply_enrichment`'s public signature/callers (`src/wakil/cli/main.py:615`, `src/wakil/mcp/tools.py:500`) are untouched, so this is fully internal.
+
+### Correctness of the extraction
+
+- **File-list ordering preserved.** `files_written = _write_new_proposed_files(...)` then `files_written += updated_files` reproduces the original single-loop ordering (new proposed files first, then entity updates), which is what feeds `IngestRun.metadata_json` and `EnrichmentResult.files_written`. No reordering bug.
+- **Staleness guard preserved verbatim**, including the explanatory comment ("mirrors schema_migrate_service.apply_migrations' stale-file guard") — that comment survived the extraction into `_apply_entity_updates` rather than getting dropped, which is easy to lose in a mechanical refactor and wasn't here.
+- **Sequencing preserved.** File writes still happen before the `with open_session(config)` block, same as on `main` — no change in when disk writes vs. DB writes occur, so no new partial-write/transaction interaction was introduced.
+- **`user_id` threading claim in the PR description is slightly misleading, not a bug.** On `main`, `user_id` was already correctly fetched via `_require_workspace_ids` *inside* the `with open_session` block and already used in `Memory(user_id=user_id, ...)` — it was never missing in the shipped code. The description's "fixing a gap in the original extraction draft" appears to refer to an issue in an intermediate, never-committed draft during the author's own development process, not a fix to behavior that existed on `main`. Not a problem with the PR itself, just worth flagging so nobody reads the description as "this PR fixes a `user_id` bug that shipped" — it doesn't; `main` was already correct.
+
+### Fit with file convention / proportionality
+
+- The file already has 45 private helpers (`grep -n "^def _"` on `main`); adding 3 more (`_write_new_proposed_files`, `_apply_entity_updates`, `_persist_candidate_memories`) is squarely consistent with the established small-composable-function style, not a new pattern.
+- No new abstractions, config knobs, or generalizations — this is a straight line-for-line move of existing logic into named functions. Fits the Prime Directive: it reduces `apply_enrichment` from 111 to ~55 lines without adding indirection beyond what the file already does elsewhere (e.g., `_apply_entity_revisions`, `_revise_candidates` follow the same `config`-then-`proposal`/`session` parameter-ordering convention).
+- Return-tuple style (`tuple[list[str], list[str]]` for `_apply_entity_updates`, `tuple[list[Memory], int]` for `_persist_candidate_memories`) matches the file's existing convention of positional tuple returns rather than named result objects — consistent, not a new smell, and not worth a dataclass for two elements.
+
+### Type-checking note
+
+CI in this repo now actually runs `ty check` (`.github/workflows/ci.yml`, job `type-check`) — this contradicts the general note that "no type checker runs in CI" (that may be stale general guidance; the live workflow file shows it does run). I verified this diff passes `ty` regardless. The new `_persist_candidate_memories(session: Session, workspace_id: int, user_id: int, source: Source, proposal: EnrichmentProposal)` signature is properly typed, an incremental improvement over the pre-existing (untyped, out-of-scope-here) `_require_workspace_ids(session, config)`.
+
+### Files touched
+
+- `/Users/ebridges/Projects/wakil/src/wakil/app/ingest_service.py` (only file in the diff)
+
+No correctness, safety, or ADR-fit issues found. Only optional/cosmetic note is the one above about the PR description's framing of the `user_id` fix, which is worth a one-line correction in the PR description but doesn't block merge.</result>
+<usage><subagent_tokens>37154</subagent_tokens><tool_uses>21</tool_uses><duration_ms>224846</duration_ms></usage>
+</task-notification>
