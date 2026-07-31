@@ -1,0 +1,27 @@
+> 1. A target size for Compiled Truth, surfaced as a warning first, not silently enforced. Directly from source 2's "target token budget."
+
+
+Let's do this, but as part of the warning present to the user an option to review & revise the compiled truth directly and opening an opportunity to the user to do a "full resynthesis" of that entity.
+
+
+> 2. Two distinct compile modes, not one, mirroring source 2's incremental-merge vs. periodic-full-rewrite split: keep today's safe additive mode as the default/frequent operation, and introduce a separate, rarer "full resynthesis" mode as the only place lossy compression is ever allowed to happen — gated behind its own trust-building, not bolted onto the existing pilot.
+
+Confirmed, I think this is a good approach.
+
+
+> 3. Frequency-of-mention as the salience signal for that eventual compression judgment, from Chain-of-Key — "does this fact recur across multiple Timeline entries" is testable and calibratable in a way "is this still relevant" alone isn't; it gives eval scenarios something concrete to check.
+
+Confirmed, I think this is a good idea.
+
+
+> 4. A size/growth trigger, not a time-based one, for when full resynthesis runs — consistent with Anthropic's compaction trigger and with the due-check ADR 0016 already deferred (this makes that deferred due-check better-specified when it's picked up, rather than replacing it).
+
+Confirmed, I think this is a good idea.
+
+---
+
+Let's go ahead and do Stages 1 & 2 -- integrating my feedback from above. Use ultracode in "auto accept" mode to implement this most efficiently
+
+Write it up as an ADR, moving relevant information from ADR 16 where necessary. Analyze ADR 16 and compare it to what is being incorporated here, and note in the new ADR what is being superseded from previous ADRs  Include in the ADR references to these sources I cited, along with your summary of each and how they have influenced (or not) the decisions in the ADR.  Run the ADR through an adversarial review.
+
+After the ADR has been approved go ahead and begin work on Stages 1 & 2 in one PR.  Conduct a distinct adversarial review of that PR, looping at least 2 and not more than 5 rounds.
