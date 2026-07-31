@@ -1,0 +1,6 @@
+can you double check?  this is what I see in @../kb-personal/ISSUES.jsonl :
+
+```
+> jq -r '.status' ISSUES.jsonl | grep -i confirm | wc -l
+       0
+```
