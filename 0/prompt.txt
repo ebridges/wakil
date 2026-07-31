@@ -1,0 +1,4 @@
+Let's adopt each of those.  To facilitate that, let's do the following:
+
+- analyze historical sessions related to this project and backfill as many ADRs as possible while also maintaining integrity and accuracy.
+- create skill(s) that will trigger the work of continuing to maintain DEVELOPMENT.md and TROUBLESHOOTING.md -- this is absolutely essential and needs to not be skipped when we're in the midst of developing.  analyze historical sessions and backfill development patterns and troubleshooting techniques/events.
