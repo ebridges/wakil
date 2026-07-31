@@ -1,0 +1,53 @@
+<task-notification>
+<task-id>a17b3a22bf01d7549</task-id>
+<tool-use-id>toolu_015iwNvc98pHvxJvJGoHNWjw</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/a17b3a22bf01d7549.output</output-file>
+<status>completed</status>
+<summary>Agent "Review PR #110 _build_stub_entities refactor" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I've done a full review of PR #110: fetched the diff/description, checked out the branch as a worktree, independently ran ruff and the full non-eval test suite, ran `ty check` (via `uvx`, since `ty` isn't a project dependency despite being configured in `pyproject.toml`), and manually traced the extracted control flow against the pre-PR version of the function line by line.
+
+## Verification of the core claim (kept_resolutions.append invariant)
+
+I checked this directly against `main`'s `_build_stub_entities` (not just the diff hunks) and confirmed the PR description's claim holds:
+
+- **`_build_stub_or_skip` region**: in the caller, `stub = _build_stub_or_skip(...)` is followed unconditionally by `kept_resolutions.append(resolution)`, and only then `if stub is not None: stubs.append(stub)`. This exactly mirrors `main`'s original three-way branch (path-exists, path-in-`taken`, success), where all three sub-paths called `kept_resolutions.append(resolution)` exactly once before differing on whether a stub got built. Confirmed behavior-preserving.
+- **`_suppress_duplicate_of_proposed_note` region**: the caller does `if _suppress_duplicate_of_proposed_note(...): kept_resolutions.append(resolution); continue`, which matches `main`'s original `if proposed_note_slug is not None and resolution_slug == proposed_note_slug: ... kept_resolutions.append(resolution); continue`. When the function returns `False`, control correctly falls through to the next check (`_is_source_self_mirror`), same as the original `if` being skipped — no double-append, no dropped append.
+
+Mutation of shared state (`proposal.warnings`, `proposal.proposed_note`, `taken`) is preserved correctly since these are passed by reference into the extracted functions and mutated in place, identical to inline behavior.
+
+I did not find a bug in the extraction. The refactor is behavior-preserving.
+
+## Verification of test/lint claims
+
+- `uv run ruff check .` → clean, matches PR description.
+- `uv run pytest -q -m "not eval"` → 621 passed (broader than the PR description's `test_ingest_service.py`-only run of 143, but consistent — no failures anywhere in the non-eval suite).
+- `uvx ty check` → clean. Worth noting: `ty` is not an actual project dependency (only `pytest`/`ruff` are in `dependency-groups.dev`) and there's no CI job for it, so "ty check — clean" in the PR description is not something CI verifies — I ran it manually via `uvx` to check the claim myself, and the new function signatures (`config: WorkspaceConfig`, `taken: set[str]`, `proposed_note_slug: str | None`, `-&gt; ProposedFile | None`) all type-check correctly.
+
+## Minor finding: docstring slightly overstates behavior
+
+`src/wakil/app/ingest_service.py:1171-1174` (in the new `_build_stub_or_skip`):
+
+```python
+"""Build the stub page for `resolution`, or return None (recording a
+warning) when its path already exists on disk or is already taken by
+another proposed file in this same proposal.
+"""
+```
+
+This claims a warning is recorded in both skip cases, but only the "already exists on disk" branch appends to `proposal.warnings`; the "already taken by another proposed file" branch (`if path in taken: return None`) silently returns with no warning — this matches `main`'s original behavior (which also warned only for the on-disk case), so it's not a new bug, but the new docstring is more assertive than the code it describes and could mislead a future reader debugging why a "taken" collision produces no visible warning in `enrich preview`. Small wording fix, not a blocker.
+
+## Fit and proportionality (CLAUDE.md / prime directive)
+
+- This is a pure, mechanical, behavior-preserving decomposition of a deterministic (no model call, no prompt, no Pydantic-validated LLM output) 117-line function into two named helpers plus the original entry point (117 → 83 lines), motivated by genuine readability pressure (the original docstring alone is 33 lines documenting non-obvious business rules for issues #36/#58). This is squarely a "small composable services" improvement the project's design biases favor, not a speculative abstraction — no new config knobs, no new classes, no plugin surface.
+- The 5-6 positional-parameter signatures on both new helpers (`resolution, schema, proposal, taken, ...`) are a little heavy, but that reflects the genuinely tight coupling of the original inline code (all of those locals were already in scope and used together) — introducing a context/bundle object for two call sites would be the over-engineered choice here, not the restrained one. Leaving them as explicit params is the right call for this codebase's stated bias toward "explicit" over "abstract."
+- No ADR conflict: this doesn't touch ingestion DAG sequencing (ADR 0008), git-native landing (ADR 0003), or the Markdown/SQLite split (ADR 0007) — it's internal refactoring of one already-deterministic function.
+- No test file changes — acceptable here since this is a pure extraction with no behavior change, and the existing `tests/unit/test_ingest_service.py` suite (which exercises both extracted branches, e.g. `test_stub_suppressed_when_matches_proposed_note_subject`, `test_stub_match_with_different_type_corrects_proposed_note`) continues to pass unmodified, which is itself decent evidence of behavior preservation. I did note in passing that there's no existing unit test specifically for the "path already exists on disk" or "path already taken within this proposal" skip branches in `_build_stub_or_skip` — a pre-existing gap, not introduced by this PR, so not a blocker here, but worth a follow-up if that logic gets touched again.
+
+## Summary
+
+No correctness issues found; the specific invariant you asked me to double-check holds under manual trace against `main` and under the full test run. One minor docstring-accuracy nit (`_build_stub_or_skip`'s docstring overstates that both skip paths record a warning). The extraction itself is proportionate and fits the project's stated engineering bias — a case where refactor-for-readability is earning its complexity, not adding speculative structure.
+
+Files reviewed: `/Users/ebridges/Projects/wakil` (PR branch checked out at `/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/scratchpad/pr110/src/wakil/app/ingest_service.py`), plus `docs/adr/0008-ingestion-decomposition-reject-multi-agent-mechanism.md`, `docs/adr/0003-git-native-change-tracking.md`, `docs/adr/0007-markdown-source-of-truth-sqlite-operational-store.md`, `docs/adr/0004-exclude-live-model-skill-evals-from-default-ci.md`, and `tests/unit/test_ingest_service.py` for existing coverage.</result>
+<usage><subagent_tokens>32041</subagent_tokens><tool_uses>15</tool_uses><duration_ms>269063</duration_ms></usage>
+</task-notification>
