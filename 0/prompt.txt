@@ -1,0 +1,1 @@
+All of your commit messages are suffixed with: `Co-authored-by: test <test@test.com>`  what is "test"?
