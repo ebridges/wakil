@@ -1,0 +1,20 @@
+I ran this ingest command:
+
+```
+uv run wakil -w ~/Projects/kb ingest transcript --context 'Phone call transcript in "whisper" format (a zip file, with transcript in `metadata.json`).  Meeting is with Eleni Karahalios from Riviera Partners to get backchannel feedback on the opportunity at Mosaic and on Ian Gutwinski; I was connected with her via Chett Garcia, as she had actually reached out to me in October 2025 for the same role' ~/Projects/kb/sources/audio/2026-07-16-mosaic-eleni-karahalios.whisper
+```
+
+Which captured the file: @sources/transcripts/2026-07-16-mosaic-eleni-karahalios.md 
+
+I then ran `uv run wakil -w ~/Projects/kb enrich 1` on that which resulted in this file: 
+@drafts/mosaic-backchannel-reference-call-with-eleni-karahalios-rivi.md
+
+
+---
+
+Issues with the enriched file:
+
+- Ended up in `drafts` instead of `meetings/yyyy`
+- Created an entity for `companies/mosaic.md` instead of `companies/mosaic-private-markets.md`
+- Missing "source" frontmatter with path to source capture with raw transcript
+- Did not link to entities for "Ian Gutwinski" and "Mosaic" -- "enrich" must ensure that notable entities are detected.  See "## Notability gate" in @../kb/.hermes/skills/_brain-filing-rules.md
