@@ -1,0 +1,30 @@
+I have some issues that underlie how the context refs are being used, and in analyzing the code I surfaced a couple other things.  The way we're currently passing the context refs are bloating context and (as you point out) being ignored where relevant.
+
+The linked files should be passed through as related files, but with a higher priority than those found by `search_workspace()` since they are files that are distinctly identified by the user.  Confirm whether that would address the gap you point out.
+
+Specifically here are the three issues:
+
+---
+
+We're bloating the context with too much irrelevant information.
+
+The `search_workspace()` function returns a **lot** of files, most of which are irrelevant.  This is due to the fact that we're passing the entire contents of the `@` referenced files in the query.
+
+When ingesting a transcript, it should create a relevant title, and an abstract of about 300 chars, both saved in the sources/transcript note frontmatter.
+
+Then, the title and the abstract should be used in enrich for QMD search.
+
+
+Related: the `candidates` regexp search in `_candidate_entity_notes` in `ingest_service.py` ends up including a lot of irrelevant terms -- e.g. small talk, speech terms (e.g. Mm-hmm, Very, etc.): is there a way to filter those out? Because candidates ends up with a lot of noise, "matches" ends up having a lot of irrelevant stuff and that function's returned collection bloats the context.
+
+---
+
+Should we add something to transcript/SKILL.md to handle prep docs if they're passed? Would there be a better place to provide guidance on how to work with related documents?
+
+e.g. "Attached prep documents contain agenda and questions intended to be answered in this meeting. Resolve prep against what actually happened in the meeting."
+
+---
+
+Can we get rid of SCHEMA.md & RESOLVER.md now?  instead, we should pass specific guidance for this type of source, based on results of `load_entity_schemas` in `_run_extraction` for the Source type of this ingest.
+
+---
