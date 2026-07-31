@@ -1,0 +1,1 @@
+when MCP runs in stdio mode, would it be beneficial for the interactions with the cli commands to be in a structured format like JSON (e.g. add a `--json` flag) -- versus how it is now rendering in a user-friendly CLI UX (e.g. colors, ascii tables etc.)?
