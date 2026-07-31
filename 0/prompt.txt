@@ -1,0 +1,1 @@
+Update @src/wakil/skills/builtin/kb-commit/SKILL.md to include relevant emojis in each commit message as part of the commit.  See @.claude/skills/commit/SKILL.md for guidance on which emoji to use; but customize that list to suit the types of commits that the KB will use.
