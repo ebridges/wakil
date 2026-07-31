@@ -1,0 +1,26 @@
+<task-notification>
+<task-id>ade31226e537efaa6</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/ade31226e537efaa6.output</output-file>
+<status>completed</status>
+<summary>Agent "Refactor apply_enrichment in ingest_service.py" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Applied the skill's bar: this session was a straightforward, single-function refactor (extracting three helpers from `apply_enrichment`) with no behavior change. The one wrinkle — `ty` catching that `workspace_id`/`user_id` are `int` not `str` — was caught and fixed in the same pass with no real debugging cost, and it's specific to this one function's signature, not a generalizable pattern or a gotcha likely to mislead someone else later. Nothing here clears the bar for `docs/DEVELOPMENT.md` or `docs/TROUBLESHOOTING.md`, so no doc changes were made.
+
+Summary of the completed task:
+
+**Diff** (`src/wakil/app/ingest_service.py`, 1 file, +64/-39): Added `from sqlalchemy.orm import Session` import; extracted three helpers ahead of `apply_enrichment`:
+- `_write_new_proposed_files(config, proposal) -&gt; list[str]`
+- `_apply_entity_updates(config, proposal) -&gt; tuple[list[str], list[str]]` (local var renamed to `updated_files`, staleness-check comment preserved)
+- `_persist_candidate_memories(session, workspace_id, user_id, source, proposal) -&gt; tuple[list[Memory], int]` (takes `user_id` explicitly, per the required fix)
+
+`apply_enrichment` now just validates, calls the three helpers in original order, opens the session, fetches `source`/ids, updates `source` fields, builds `IngestRun`, indexes, commits, and returns `EnrichmentResult` — now ~55 lines (2213–2267), well under the 100-line target.
+
+**Tests**: `uv run pytest tests/unit/test_ingest_service.py tests/unit/test_entity_resolution.py -v` — 152 passed, 0 failed (including `test_apply_enrichment_skips_stale_entity_update_without_clobbering`).
+
+**Lint/type**: `uv run ruff check` — passed. `ty` wasn't on PATH directly, so ran via `uv run --with ty ty check` — it initially flagged `_persist_candidate_memories`'s `workspace_id`/`user_id` params as `str` when `_require_workspace_ids` actually returns `tuple[int, int]`; fixed the type hints to `int`, then it passed clean. (Note: `ruff format --diff` shows some pre-existing formatting drift elsewhere in the file at lines 480/1115/1711/2327/2393 — unrelated to this change, left untouched.)
+
+**Commit**: `e263dfd` — `♻️ refactor(ingest): split apply_enrichment into write/update/persist helpers` (on branch `worktree-agent-ade31226e537efaa6` in the isolated worktree, not pushed).</result>
+<usage><subagent_tokens>53739</subagent_tokens><tool_uses>27</tool_uses><duration_ms>209259</duration_ms></usage>
+<worktree><worktreePath>/Users/ebridges/Projects/wakil/.claude/worktrees/agent-ade31226e537efaa6</worktreePath><worktreeBranch>worktree-agent-ade31226e537efaa6</worktreeBranch></worktree>
+</task-notification>
