@@ -1,0 +1,3 @@
+analyze the document @docs/memory-opinion-and-register.md critically as it came from a third party suggestion.  
+
+If we were to build this how would it be integrated into the current thinking around memory promotion & durability?
