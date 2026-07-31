@@ -1,0 +1,3 @@
+Thing 1: let's introduce another override mechanism for page-shape.  I'm fine with it being a part of the schema definition, or we could also maintain a set of templates within wakil keyed by entity type, and allow the KB to override with its own templates.  Help me weigh the tradeoffs of having them coupled vs. decoupled.
+
+Thing 2: help to better understand what decision you need from me on this.
