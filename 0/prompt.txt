@@ -1,0 +1,1 @@
+link to the two templates in @src/wakil/schema/templates/ from the @README.md to provide guidance on how wakil expects the markdown files to be formatted.
