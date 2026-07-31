@@ -1,0 +1,5 @@
+where might a "reflection" end up?  In the model KB, they're stored under @../kb/wiki/personal/reflections but it seems like another source of inputs, so maybe under a "sources/reflections"?
+
+as a separate matter, perhaps "concepts" can be considered "consumed knowledge" and "ideas" as "produced knowledge"?  in which case a reflection is another form of "produced knowledge"?
+
+reflect on these, consider them within the larger context of general purpose knowledge bases and best practices of knowledge management.
