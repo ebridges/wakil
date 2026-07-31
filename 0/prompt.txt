@@ -1,0 +1,1 @@
+RE: #10 (title/slug generation includes marketing subtitle) -- that is not an issue, and wakil is operating correctly: just use the title provided by Kindle metadata "as-is"
