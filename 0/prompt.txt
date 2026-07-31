@@ -1,0 +1,368 @@
+<task-notification>
+<task-id>a0e64e669bfb51ecf</task-id>
+<tool-use-id>toolu_0142F71PoyJmS7W6AAyLQhft</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/2b074d35-4bb7-4b7d-b00f-b4d58a00d8a8/tasks/a0e64e669bfb51ecf.output</output-file>
+<status>completed</status>
+<summary>Agent "Design implementation plan for opinion type + confidence ranking" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Implementation Plan: `opinion` Memory Type + Confidence-Weighted Ranking (Phase 1)
+
+All line numbers verified against current `main` (commit `d8a441c`). No draft ADR exists yet — `docs/adr/` runs `0001`-`0012` sequentially in both the working tree and full git history (checked `git log --all --oneline | grep 0013`, no hits), so `0013` is free and uncontested.
+
+---
+
+### 1. `opinion` in the type vocabulary + fact-vs-opinion prompt guidance
+
+**`src/wakil/llm/schemas.py:31-35`** — current:
+```python
+type: str = Field(
+    default="fact",
+    description="fact | summary | relationship | question | hypothesis | decision "
+    "| theme | event (event = something dated that happened)",
+)
+```
+Change the description string only (no `Literal`, matching ADR 0005's free-string precedent and `Memory.memory_type: Mapped[str] = mapped_column(String(30))` in `src/wakil/storage/schema.py:88`, which has no DB enum/CHECK):
+```python
+description="fact | opinion | summary | relationship | question | hypothesis | decision "
+"| theme | event (event = something dated that happened; opinion = a subjective "
+"value judgment, stance, or interpretation attributed to a speaker, distinct from "
+"fact — an observed/stated actuality)",
+```
+
+**`src/wakil/llm/prompts.py`** — there is no separate "extraction system prompt" constant in this file (the extraction *system* prompt is assembled in `src/wakil/llm/skill_loader.py:build_system_prompt` from `BASE_SYSTEM` + the resolved skill's `SKILL.md` body + the JSON schema; `prompts.py` only builds the *user* message via `build_extraction_prompt`, lines 84-132). Since `build_extraction_prompt` is shared across all extraction skills (article/text/transcript) and is deliberately source-type-agnostic (entity types, page shapes, related notes — no type-vs-opinion judgment content today), the natural place for a fact/opinion distinction rule that's meant to be extractor-wide is a short new paragraph in the generic instruction block at lines 109-119, right after the frontmatter-type instruction and before `describe_entity_types_full`:
+```python
+"When tagging a memory's `type`, distinguish observed fact from subjective "
+"judgment: a claim asserting what *is* (a number, an event, a stated position) "
+"is `fact`; a claim asserting what is good/bad/worth-it, or a causal 'because' "
+"clause the source doesn't itself establish, is interpretation and belongs as "
+"`opinion`, not `fact`.",
+```
+This composes as one more entry appended to the `parts` list already being built in `build_extraction_prompt`.
+
+**`src/wakil/skills/transcript/SKILL.md`** — add a new bullet after the existing "Separate decisions from open questions" bullet (line 24-26), since that's the closest existing judgment call about memory classification:
+```markdown
+- Separate stated fact from speaker opinion. A number, event, or stated
+  position is a `fact`-type memory; a value judgment ("reasonable,"
+  "worth it," "should") or an unestablished causal "because" clause is the
+  speaker's interpretation, not an observed fact — tag it `opinion`, not
+  `fact`. Casually-asserted 1:1 claims (an off-the-cuff metric, a
+  provocative aside, something hedged or jokey) get low `confidence`
+  (guidance: ≤0.4) even when phrased fact-like — never silently upgrade a
+  hot take to a confident fact.
+```
+This is scoped to `transcript/SKILL.md` only, per the agreed scope (not `article/SKILL.md` — see Open Questions).
+
+---
+
+### 2. Extractor confidence guidance for low-commitment claims
+
+Covered by the same `transcript/SKILL.md` bullet above and the `prompts.py` addition — no separate mechanism. `article/SKILL.md:14-17` already has adjacent (but narrower) guidance ("your own connection to the knowledge base is a hypothesis or theme, and its confidence should say so") — not touched per scope.
+
+---
+
+### 3. Tighten `CandidateMemoryModel.confidence`
+
+**`src/wakil/llm/schemas.py:37`** — current: `confidence: float | None = None` (bare, no `Field`). Change to:
+```python
+confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+```
+Behavior change to note: today an out-of-range value from the model silently passes Pydantic and gets clamped later by `_clamp01()` in `src/wakil/app/ingest_service.py:1621-1625`. After this change, an out-of-range `confidence` fails Pydantic validation *at parse time*, which `complete_with_contract` (`schemas.py:142-173`) catches as a `ValidationError` and retries once with the error appended to the prompt — consistent with the existing "visible failure over silent coercion" design stated in the module docstring (`schemas.py:8-10`). `_clamp01()` remains as a second line of defense (e.g. for non-numeric junk) and needs no code change itself.
+
+---
+
+### 4. Wire `confidence` into retrieval ranking (required)
+
+**`src/wakil/storage/fts.py:74-92`** — `search_memories()` currently:
+```sql
+SELECT 'memory:' || m.id AS ref,
+       coalesce(m.summary, substr(m.content, 1, 80)) AS title,
+       snippet(memories_fts, -1, '', '', '…', 12) AS snippet,
+       bm25(memories_fts) AS score,
+       m.state AS state,
+       m.created_at AS created_at
+FROM memories_fts JOIN memories m ON m.id = memories_fts.rowid
+WHERE memories_fts MATCH :match AND m.workspace_id = :workspace_id
+  AND m.state != 'rejected'
+ORDER BY bm25(memories_fts) LIMIT :limit
+```
+Add `m.confidence AS confidence` to the `SELECT` list (no other clause changes — `_search()` at line 112-119 already returns `dict(row._mapping)` for every column present, so this is additive and needs no signature change).
+
+**`src/wakil/app/memory_service.py:98-106`** — `retrieval_rank()` currently takes `(state, created_at)` and returns a single float. Extend its signature to accept confidence and fold it in as a fractional sub-rank within the same integer-valued state bucket, so state ordering is never disturbed:
+```python
+def retrieval_rank(state: str, created_at: datetime | None, confidence: float | None = None) -&gt; float:
+    """Lower ranks first. Encodes the fading rules described above.
+
+    `confidence` only breaks ties *within* the same state bucket — it is
+    added as a fractional offset (0.0-1.0, higher confidence = lower
+    offset) on top of the integer state rank, so it can never move a memory
+    across a state boundary (e.g. a low-confidence durable memory still
+    outranks every candidate memory).
+    """
+    rank = _STATE_RANK.get(state, 2.0)
+    if state == "working" and created_at is not None:
+        created = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
+        age_days = (datetime.now(UTC) - created).days
+        if age_days &gt; WORKING_FADE_DAYS:
+            rank = _FADED_WORKING_RANK
+    effective_confidence = confidence if confidence is not None else _DEFAULT_CONFIDENCE
+    return rank + (1.0 - effective_confidence) * _CONFIDENCE_SPREAD
+```
+with two new module constants near `_STATE_RANK` (line 36):
+```python
+_DEFAULT_CONFIDENCE = 0.5  # tiebreak for NULL confidence — see open question below
+_CONFIDENCE_SPREAD = 0.5   # keeps the offset &lt; the 1.0 gap between adjacent _STATE_RANK values
+```
+`_CONFIDENCE_SPREAD` must stay `&lt; 1.0` (the smallest gap between any two `_STATE_RANK` values, e.g. `durable=0.0` to `candidate=1.0`) — this is the mechanism that guarantees confidence is strictly a same-state tiebreak, never a cross-state override. `0.5` gives headroom.
+
+**`src/wakil/app/search_service.py:71-78`** — `_ranked_memory_hits()` currently:
+```python
+def sort_key(row: dict) -&gt; tuple[float, float]:
+    return (retrieval_rank(row["state"], _parse_dt(row["created_at"])), row["score"])
+```
+Change to pass through `row["confidence"]` (present once item 4's `fts.py` change lands, else `.get` returns `None` — use `.get` defensively since `notes`/`sources` rows never carry a `confidence` key, though this helper only ever receives memory rows):
+```python
+def sort_key(row: dict) -&gt; tuple[float, float]:
+    return (
+        retrieval_rank(row["state"], _parse_dt(row["created_at"]), row.get("confidence")),
+        row["score"],
+    )
+```
+No signature change to `_ranked_memory_hits` itself or its caller (`search_workspace`, line 64).
+
+---
+
+### 5. `wakil memory list --type opinion`
+
+**`src/wakil/app/memory_service.py:52-67`** `list_memories()` filters with plain `Memory.memory_type == memory_type` equality (line 64-65) — already works for any string, `opinion` included. **`src/wakil/cli/main.py:694-697`** wires `--type` straight through with no allow-list. No code change; confirm-only via a test (see item 7).
+
+---
+
+### 6. `ui/console.py` display
+
+`print_memories()` (`src/wakil/ui/console.py:359-385`) prints `memory.memory_type` (line 376) as a bare string in a Rich table column with no type-specific styling or allow-list; `print_memory_detail()` (388-399) does the same at line 391. Both already render arbitrary strings correctly. No code change; confirm-only.
+
+---
+
+### 7. Tests
+
+**a. `CandidateMemoryModel` type/confidence bound** — new file `tests/unit/test_llm_schemas.py` is the right home (it already tests other schema/contract behavior in this module, see `test_complete_with_contract_*`, lines 33-72) — add below the existing tests:
+```python
+from wakil.llm.schemas import CandidateMemoryModel
+
+def test_candidate_memory_model_accepts_opinion_type():
+    memory = CandidateMemoryModel(type="opinion", content="X was worth it.", confidence=0.3)
+    assert memory.type == "opinion"
+
+def test_candidate_memory_model_rejects_out_of_range_confidence():
+    with pytest.raises(ValidationError):
+        CandidateMemoryModel(type="fact", content="X", confidence=1.5)
+    with pytest.raises(ValidationError):
+        CandidateMemoryModel(type="fact", content="X", confidence=-0.1)
+```
+(needs `from pydantic import ValidationError` added to that file's imports.)
+
+**b. Ranking uses confidence as secondary sort key, incl. NULL case** — extend `tests/unit/test_memory_service.py`, which already has `_add_memory` (lines 26-39, currently takes `content, state, created_at` — extend its signature with `confidence: float | None = None` and pass it into the `Memory(...)` constructor) and `test_search_orders_memories_by_lifecycle` (lines 113-125) as the direct pattern to follow. Add:
+```python
+def test_retrieval_rank_breaks_ties_by_confidence_within_state():
+    now = datetime.now(UTC)
+    high = retrieval_rank("candidate", now, confidence=0.9)
+    low = retrieval_rank("candidate", now, confidence=0.2)
+    null_conf = retrieval_rank("candidate", now, confidence=None)
+    assert high &lt; low
+    # confidence never crosses a state boundary
+    assert retrieval_rank("candidate", now, confidence=0.0) &lt; retrieval_rank("working", now, confidence=1.0)
+
+def test_search_orders_same_state_memories_by_confidence(workspace):
+    with open_session(workspace) as session:
+        ws = session.scalar(select(Workspace.id))
+        _add_memory(session, ws, "zugzwang low conf", state="candidate", confidence=0.1)
+        _add_memory(session, ws, "zugzwang high conf", state="candidate", confidence=0.9)
+        _add_memory(session, ws, "zugzwang null conf", state="candidate", confidence=None)
+        session.commit()
+        hits = [h for h in search_workspace(session, workspace, "zugzwang") if h.kind == "memory"]
+    assert hits[0].ref.endswith(...)  # high-confidence hit ranks first
+```
+(exact assertion needs `SearchHit` to expose `confidence`, or the test can assert on ordering by matching `title`/`ref` against known ids — `SearchHit` dataclass at `search_service.py:16-24` does **not** currently carry `confidence`; the test can still assert ordering without it, but see open question below about whether to also add `confidence` to `SearchHit` for display/debugging.)
+
+**c. `memory_type="opinion"` filtering** — extend `tests/unit/test_memory_service.py::test_list_memories_filters_by_state` pattern (lines 42-53) with a new test using `_add_memory(..., )` plus a `memory_type` param (currently `_add_memory` hardcodes `memory_type="fact"` at line 31 — needs a `memory_type: str = "fact"` parameter added):
+```python
+def test_list_memories_filters_by_type(workspace):
+    with open_session(workspace) as session:
+        ws = session.scalar(select(Workspace.id))
+        _add_memory(session, ws, "an opinion", memory_type="opinion")
+        _add_memory(session, ws, "a fact", memory_type="fact")
+        session.commit()
+        assert [m.content for m in list_memories(session, ws, memory_type="opinion")] == ["an opinion"]
+```
+
+**d. Skill-eval fixture for the transcript extractor** — **critical finding: `src/wakil/skills/transcript/` currently has no `eval.json` at all.** Confirmed via `find src/wakil/skills -iname eval.json` (present for `content-synthesis`, `entity-enrichment`, `entity-resolution`, `ingest-source`, `kb-commit`, `knowledge-query`, `knowledge-research`, `note-conformance`, `note-revision`, `note-routing`, `skill-authoring`, `source-ingestion` — **absent** for `article`, `entity-resolve`, `text`, `transcript`). `tests/evals/test_skill_evals.py:41-61` (`_collect_cases`) auto-skips any skill without `eval.json` (`pytest.mark.skip(reason=f"{name} has no eval.json yet...")`) via `discover_skill_names` (`src/wakil/skills/resolver.py:239-250`), which enumerates directories with zero hardcoding — so creating `src/wakil/skills/transcript/eval.json` is picked up automatically by the existing runner with **no other wiring needed** (confirms one of the open questions below).
+
+New file `src/wakil/skills/transcript/eval.json`, validated by `EvalFile`/`EvalScenario` (`src/wakil/skills/evals.py:25-51`, requiring `MIN_SCENARIOS = 3`). Follow the exact `EvalScenario` shape used in `src/wakil/skills/entity-resolution/eval.json` (id/query/workspace.base_fixture+overlay/expected_behavior/related_skills) and the runner's actual invocation contract: `tests/evals/runner.py::run_scenario` (lines 67-81) sends the skill's raw prose (`BASE_SYSTEM + skill.body`) plus the scenario's `query` and a workspace file listing for a **free-form "what would you do and why" answer** graded by rubric — it does **not** invoke the real `CandidateMemoryModel`-constrained extraction call. So each scenario's `query` must ask the model to reason about classification/confidence in prose, not literally emit the JSON contract:
+
+```json
+{
+  "skill": "transcript",
+  "scenarios": [
+    {
+      "id": "clear-opinion",
+      "query": "This transcript excerpt includes the line: 'Honestly I think the $630K comp package is reasonable for someone at that level.' If you were extracting memories from this transcript, what memory `type` would you assign this line, and why?",
+      "workspace": {"base_fixture": "tests/fixtures/kb", "overlay": {}},
+      "expected_behavior": [
+        "Classifies the line as type=opinion, not type=fact",
+        "Explains the distinction: this is a value judgment ('reasonable') attributed to the speaker, not an observed/stated actuality",
+        "Does NOT classify it as type=hypothesis (it is not a tentative claim about the world, it's a stance)"
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "hot-take-metric",
+      "query": "In an informal 1:1, the speaker says: 'AI pushed our PR volume from like 30 a week to way more, I dunno, maybe 80?' What memory type and confidence would you assign this line, and why?",
+      "workspace": {"base_fixture": "tests/fixtures/kb", "overlay": {}},
+      "expected_behavior": [
+        "Classifies the line as type=fact (it asserts a metric/observation) or explicitly discusses the fact/opinion boundary, while assigning it low confidence",
+        "Assigns confidence at or below roughly 0.4, citing the hedged, off-the-cuff phrasing ('I dunno, maybe') as the reason",
+        "Does NOT treat the casual phrasing as reason to omit the memory entirely"
+      ],
+      "related_skills": []
+    },
+    {
+      "id": "hypothesis-vs-opinion-because-clause",
+      "query": "The transcript says: 'Greenlite paused hiring because each additional engineer was expected to slow down the roadmap more than they'd add.' Classify this as fact, opinion, or hypothesis, and explain your reasoning for the boundary you drew.",
+      "workspace": {"base_fixture": "tests/fixtures/kb", "overlay": {}},
+      "expected_behavior": [
+        "Identifies that 'Greenlite paused hiring' is the factual/observed part",
+        "Identifies that the causal 'because' clause is not established by the transcript as a directly-reported reason, and treats it as interpretation rather than fact",
+        "Reasons explicitly about opinion vs. hypothesis for the causal clause rather than defaulting to one silently — e.g. distinguishes 'a stance/judgment about why' (opinion) from 'a tentative claim about the world that could later be verified' (hypothesis), and states which it picked and why",
+        "Does not simply relabel the entire sentence as type=opinion without addressing the fact/interpretation split within it"
+      ],
+      "related_skills": []
+    }
+  ]
+}
+```
+This directly satisfies (a) clear opinion, (b) hot-take-metric, (c) hypothesis-vs-opinion boundary. Gated per ADR 0004: automatically collected under `@pytest.mark.eval` (`test_skill_evals.py:64`), excluded from default `uv run pytest -q` via `addopts = "-m 'not eval'"` (`pyproject.toml:49`), runs only via `uv run pytest -m eval -q` / the `skill-evals.yml` `workflow_dispatch` — no new CI config needed.
+
+---
+
+### 8. README "Memory lifecycle" section
+
+**`README.md:72-85`**, current:
+```markdown
+## Memory lifecycle
+
+Ingests propose memories in `candidate` state; you review and decide:
+
+    working → candidate → durable
+                      ↘ rejected
+    durable → archived
+
+`wakil memory list` (with `--state`/`--type` filters) reviews them, `promote`
+moves them to durable, `reject` removes them from search, and `archive` keeps
+them searchable but downranked. Invalid transitions are refused. Rather than
+deleting, retrieval fades memories: durable ranks first, then candidate, then
+working (fading further after 30 days), then archived. Memories used to
+answer a query get their `last_seen_at` bumped for future ranking.
+```
+Add two precisely-scoped sentences — one naming `opinion` as a type example, one explicitly fencing off `state` from this change:
+```markdown
+`wakil memory list` (with `--state`/`--type` filters) reviews them, `promote`
+moves them to durable, `reject` removes them from search, and `archive` keeps
+them searchable but downranked. Invalid transitions are refused. Rather than
+deleting, retrieval fades memories: durable ranks first, then candidate, then
+working (fading further after 30 days), then archived — and, as a secondary
+tiebreak *within* the same state, higher-confidence memories rank ahead of
+lower-confidence ones. Memories used to answer a query get their
+`last_seen_at` bumped for future ranking.
+
+Memory `type` includes `fact | opinion | summary | relationship | question |
+hypothesis | decision | theme | event` — `opinion` marks a subjective value
+judgment or interpretation, as distinct from `fact`. Lifecycle `state`
+transitions remain entirely manual (`promote`/`reject`/`archive`); there is
+no automatic promotion or demotion based on type or confidence — a
+low-confidence `opinion` still starts in `candidate` like everything else
+and stays there until you act on it.
+```
+
+---
+
+### 9. New ADR `docs/adr/0013-...md`
+
+Template verified against `docs/adr/0005-timeline-entries-as-memory-rows.md` (frontmatter: `title`/`status`/`date`/`audience`; body: `## Context`, `## Decision`, `## Consequences`, `## Sources`) and `docs/adr/0009-...md` (same frontmatter shape, omits the redundant H1 duplicate of `title`). Suggested filename: `docs/adr/0013-opinion-memory-type-and-confidence-ranking.md`.
+
+```markdown
+---
+title: Opinion memory type as a free-string addition; confidence becomes a retrieval-ranking input
+status: accepted
+date: 2026-07-22
+audience: wakil design
+---
+
+## Context
+
+[cite the same free-string precedent as ADR 0005: Memory.memory_type is
+String(30) with no DB enum; cite that confidence was write-only/display-only
+before this change — search_memories() didn't even SELECT it, and
+retrieval_rank()/​_ranked_memory_hits() never read it]
+
+## Decision
+
+- `opinion` is added to CandidateMemoryModel.type's Field description
+  vocabulary — a free-string value addition on an already-free-string
+  column, requiring no migration, following the same pattern ADR 0005
+  established for memory_type='event'.
+- CandidateMemoryModel.confidence gains Field(ge=0.0, le=1.0) — previously
+  unconstrained at both the Pydantic and DB layer.
+- confidence becomes a ranking input for the first time: search_memories()
+  now SELECTs it, and retrieval_rank()/_ranked_memory_hits() use it as a
+  same-state tiebreak (never crossing a lifecycle-state boundary).
+- Lifecycle `state` is explicitly UNCHANGED by this work: promotion/
+  rejection/archival remain 100% manual via `wakil memory promote|reject|
+  archive`; no automatic state transition is introduced based on type or
+  confidence.
+
+## Consequences
+
+[no migration; NULL-confidence rows from before this change get the
+tiebreak default — cross-reference the open question below and however it
+gets resolved; opinion rows work with every existing filter/display path
+unmodified; state remains fully human-gated]
+
+## Sources
+
+- src/wakil/llm/schemas.py (CandidateMemoryModel)
+- src/wakil/app/memory_service.py (retrieval_rank)
+- src/wakil/storage/fts.py (search_memories)
+- docs/adr/0005-timeline-entries-as-memory-rows.md (free-string precedent)
+- docs/memory-opinion-and-register.md (originating proposal, phase 1 scope)
+```
+
+---
+
+## Open Questions for the User
+
+1. **NULL-confidence tiebreak default (flagged, not decided).** I used `_DEFAULT_CONFIDENCE = 0.5` (mid-point/neutral) in the `retrieval_rank()` sort-key change in item 4. Reasoning: most existing rows have `confidence IS NULL` (it was write-only before this change), and treating unknown-confidence as "average" avoids two bad outcomes — (a) defaulting NULL to `1.0`/high would rank every historical fact ahead of any explicitly-low-confidence opinion for the wrong reason (absence of a signal isn't the same as a strong signal), and (b) defaulting NULL to `0.0`/low would bury the entire pre-existing corpus behind newly-confidence-tagged memories on day one of this change, which is a much bigger, more surprising behavior shift than "new low-confidence opinions rank slightly behind." But this is a real, debatable product choice with no objectively correct answer — please confirm `0.5`, or state a preferred alternative (e.g., treat NULL as if unset and don't apply any confidence tiebreak until confidence is populated, which is close to today's behavior for existing data).
+
+2. **`≤0.4` confidence guidance: prompt-only or enforced?** The plan treats "guidance ≤0.4 for hot takes" as pure prompt text with no code-level enforcement or warning (matches the proposal doc's own framing and today's precedent — `_clamp01()` already silently accepts anything in `[0,1]`). Should there be a warning/log (not a hard failure) when the extractor tags something the prompt describes as a hot-take pattern with a higher confidence, or is prompt guidance alone acceptable for phase 1? I did not build any such check — flag if you want one.
+
+3. **`opinion` guidance scope: transcript-only vs. all extraction skills.** The agreed scope names only `prompts.py` + `transcript/SKILL.md`. But `article/SKILL.md:14-17` already has closely related (narrower) guidance about fact vs. inference/hypothesis, and `text/SKILL.md` has none. All three skills produce the same `CandidateMemoryModel` via the same shared `build_extraction_prompt`. My plan puts the *generic* fact-vs-opinion rule into `prompts.py` (so it reaches article/text/transcript alike) but the *low-confidence hot-take register* rule only into `transcript/SKILL.md` (matching the proposal's "1:1 conversation" framing, which is transcript-specific). Confirm this split is what you want, versus adding the hot-take-register bullet to `article`/`text` too, versus keeping literally everything transcript-only and nothing in `prompts.py`.
+
+4. **ADR number/filename and date.** No draft ADR exists yet (confirmed: only `docs/memory-opinion-and-register.md` is untracked; `git log --all` has no `0013` reference), so `0013` is uncontested today — but this repo has many open branches (`docs/resolver-md-migration-strategy`, `feat/wire-skill-resolver-into-ingest`, etc.), and ADR numbering is manual/sequential (not auto-assigned), so a race with another in-flight PR claiming `0013` first is possible between now and merge. Also: I used `date: 2026-07-22` (today) — confirm, since ADR 0004 in this repo omits `date` entirely, unlike every other ADR, so there's no single universal template rule to follow.
+
+5. **`SearchHit` doesn't carry `confidence`.** `search_service.py:16-24`'s `SearchHit` dataclass exposes `state` for memory hits but not `confidence`, even though ranking will now use it. This doesn't block the ranking change (the sort happens before `SearchHit` construction, inside `_ranked_memory_hits`), but it does mean a test/CLI consumer can't assert "hit X had confidence Y" without re-querying — the test in item 7b will have to assert ordering by identity (title/ref) rather than by an inspectable confidence value on the hit. Do you want `confidence: float | None = None` added to `SearchHit` for debuggability/display, or is ordering-only sufficient for phase 1? (I did not add it, to stay minimal per CLAUDE.md's stated bias.)
+
+6. **`_CONFIDENCE_SPREAD` magnitude.** I chose `0.5` (half the `1.0` gap between adjacent `_STATE_RANK` values) so confidence differences are visible but can never cross a state boundary. This is an arbitrary but safe choice — no strong reason it couldn't be `0.9` or `0.1` instead; smaller values make confidence a weaker tiebreak. Flagging as a tunable, not a considered/tested constant.
+
+7. **`docs/entity-model.md`** (not in the agreed 9 items) also documents `memory_type='event'`/`'question'` as examples (lines 131-132, 191) but doesn't enumerate the full type list, so it doesn't strictly need an `opinion` mention — leaving it untouched unless you want it kept in lockstep with the README.
+
+---
+
+### Critical Files for Implementation
+- /Users/ebridges/Projects/wakil/src/wakil/llm/schemas.py
+- /Users/ebridges/Projects/wakil/src/wakil/app/memory_service.py
+- /Users/ebridges/Projects/wakil/src/wakil/storage/fts.py
+- /Users/ebridges/Projects/wakil/src/wakil/app/search_service.py
+- /Users/ebridges/Projects/wakil/src/wakil/skills/transcript/SKILL.md
+- /Users/ebridges/Projects/wakil/src/wakil/skills/transcript/eval.json (new file)
+- /Users/ebridges/Projects/wakil/tests/unit/test_memory_service.py</result>
+<usage><subagent_tokens>84275</subagent_tokens><tool_uses>46</tool_uses><duration_ms>308670</duration_ms></usage>
+</task-notification>
