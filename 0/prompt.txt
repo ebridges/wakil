@@ -1,0 +1,609 @@
+It seems like the insertion of the files ended up in context, but it didn't seem to have any effect on the enrichment -- not even a back link.
+
+uv run wakil enrich --context 'see prep documents at @meetings/2026/2026-07-20-mosaic-contract-negotiation-prep.md and @meetings/2026/2026-07-20-mosaic-ian-gutwinski-catchup-prep.md' --force 2
+On branch wakil/ingest/2026-07-20-mosaic-offer-sync-ian-gutwinski
+╭───────────────────────────────────────────────────────────────────────────────────────────── Enrichment preview ──────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Mosaic — offer sync with Ian Gutwinski (severance & acceleration asks)                                                                                                                                        │
+│ source #2                                                                                                                                                                                                     │
+│ Context: see prep documents at  and                                                                                                                                                                           │
+│                                                                                                                                                                                                               │
+│ --- Attached Context ---                                                                                                                                                                                      │
+│                                                                                                                                                                                                               │
+│ 📄 @meetings/2026/2026-07-20-mosaic-contract-negotiation-prep.md (1841 tokens)                                                                                                                                │
+│ ```markdown                                                                                                                                                                                                   │
+│ ---                                                                                                                                                                                                           │
+│ type: meeting-prep                                                                                                                                                                                            │
+│ name: Mosaic — contract negotiation call with Ian Gutwinski, prep                                                                                                                                             │
+│ date: 2026-07-20                                                                                                                                                                                              │
+│ company: mosaic-private-markets                                                                                                                                                                               │
+│ people:                                                                                                                                                                                                       │
+│ tags:                                                                                                                                                                                                         │
+│ created: 2026-07-20                                                                                                                                                                                           │
+│ ---                                                                                                                                                                                                           │
+│                                                                                                                                                                                                               │
+│ # 2026-07-20-mosaic-contract-negotiation-prep                                                                                                                                                                 │
+│                                                                                                                                                                                                               │
+│ Goal for the call: say yes warmly, then close two gaps in the agreement before signing — severance and change-of-control treatment of the equity. Neither is a renegotiation of the deal; both are standard   │
+│ terms for a VP-level hire that the draft simply doesn't address. Tone throughout: I'm in, I want to sign this week, these are the last two items.                                                             │
+│                                                                                                                                                                                                               │
+│ ## Opening                                                                                                                                                                                                    │
+│                                                                                                                                                                                                               │
+│ Lead with the decision, not the asks. Something like: "Ian, I want to start with the headline — I'm in. I've done the diligence, I've talked to Hardik and Ryan, and I want to do this with you. I reviewed   │
+│ the agreement this morning and there are two things I'd like to close on before I sign — both standard for a role at this level, and neither changes the economics you offered."                              │
+│                                                                                                                                                                                                               │
+│ That framing matters. He hears the yes first, so the asks land as finishing the paperwork, not reopening the deal.                                                                                            │
+│                                                                                                                                                                                                               │
+│ ## Ask 1 — Severance (the bigger gap)                                                                                                                                                                         │
+│                                                                                                                                                                                                               │
+│ **The gap.** The Mosaic letter is pure at-will with no severance provision of any kind. The agreement from [] had an explicit tiered schedule: six months of base salary if terminated without cause before   │
+│ the second anniversary, four months between years two and three, one month per year of service after that — all standard release-of-claims mechanics.                                                         │
+│                                                                                                                                                                                                               │
+│ **The ask.** Six months of base salary on termination without cause, in exchange for a standard release, including COBRA. Fallback: three months, or a GreenLite-style tier that steps down as vesting builds │
+│ up. On a $400K base, six months is $200K — real money to me, a rounding error against an $18M raise that's still mostly on the balance sheet.                                                                 │
+│                                                                                                                                                                                                               │
+│ **How to frame it — use his candor, gently.** "Part of why I'm saying yes is that you've been straight with me about the range of outcomes — you walked me through the downside scenario yourself, and Ryan   │
+│ was candid that 2026 could land anywhere in a wide range depending on which bank deals convert. I'm not worried about the company; I'm signing up for exactly that uncertainty. But I'm leaving a signed      │
+│ offer on the table, going all-in on one company, five days a week in the office. If it doesn't work out for reasons that aren't about my performance, I need a reasonable runway. Six months of base on a     │
+│ without-cause termination does that, and it costs Mosaic nothing unless something has already gone wrong."                                                                                                    │
+│                                                                                                                                                                                                               │
+│ Do not quote Ryan's $5–20M figure back at him as an argument — it reads as using a conversation he generously arranged against him. "You've both been candid about the range of outcomes" carries the same    │
+│ weight without the edge.                                                                                                                                                                                      │
+│                                                                                                                                                                                                               │
+│ **Likely pushback and responses.**                                                                                                                                                                            │
+│ - *"Nobody else here has that."* — That's typical; severance is a level-specific term, not a benefits-plan term. VP/C-level hires at Series A companies get it precisely because they're the ones betting a   │
+│ career stage on a young company. It doesn't set a precedent for the broader team.                                                                                                                             │
+│ - *"We don't plan to ever use it."* — Exactly — it's insurance neither of us expects to need, which is why it's cheap to grant.                                                                               │
+│ - *"Can we revisit after you start?"* — This only works as a term of the agreement I sign. Happy to keep the mechanics simple — a paragraph in the offer letter or a one-page side letter.                    │
+│                                                                                                                                                                                                               │
+│ If he agrees in principle: ask that the "Cause" definition be a standard one (dishonesty, felony, material uncured breach) — not so broad that any disagreement qualifies. The GreenLite letter's definition, │
+│ with its 30-day cure periods, is a fine model.                                                                                                                                                                │
+│                                                                                                                                                                                                               │
+│ ## Ask 2 — Change of control / acceleration (open with a question, not a demand)                                                                                                                              │
+│                                                                                                                                                                                                               │
+│ **The gap.** The offer letter has no acceleration language, and the option is governed by the 2022 Equity Incentive Plan and a grant agreement I haven't seen. Most plans of that vintage let the board       │
+│ decide at deal time — assume, substitute, cash out, or cancel unvested options. So the honest starting point is a question.                                                                                   │
+│                                                                                                                                                                                                               │
+│ **The question.** "==How does the 2022 Plan treat unvested options in an acquisition? And can you send me the Plan and the form of grant agreement before I sign?=="                                          │
+│                                                                                                                                                                                                               │
+│ **The ask.** Double-trigger acceleration: 100% of unvested shares vest if there's a change of control *and* I'm terminated without cause (or resign for good reason) within 12 months after it. Fallback:     │
+│ 50%. I'm deliberately not asking for single-trigger — that's the version acquirers hate and boards rightly resist. Double-trigger only pays out if the acquirer takes the company and then cuts me.           │
+│                                                                                                                                                                                                               │
+│ **How to frame it — align with his ambition, use his own words.** "I know the goal is an IPO — you told me that's what you're doing this for, and I love that. But you also told me you already turned down   │
+│ one acquisition offer at the Series A, and you named FactSet, AlphaSense, Intapp, and S&P as plausible acquirers someday. If a serious offer comes, I'll be one of the people advising you and the board on   │
+│ it. Double-trigger acceleration means my incentives stay clean in that moment — I'm only protected if the acquirer cuts me, so I can argue for whatever's actually right for the company. That's the          │
+│ alignment argument, and it's why this structure is the standard one."                                                                                                                                         │
+│                                                                                                                                                                                                               │
+│ The equity is 1.5% of the upside case he pitched — the offer deck's own scenarios run $1.35M to $150M. Half of that evaporating in year two of a four-year vest because an acquirer wants the product but not │
+│ the management layer is the specific outcome this term exists to prevent.                                                                                                                                     │
+│                                                                                                                                                                                                               │
+│ **Likely pushback.**                                                                                                                                                                                          │
+│ - *"The Plan gives the board flexibility; we treat people right."* — I believe that about this board. But an acquisition adds a party to the table whose incentives I can't know today. Double-trigger just   │
+│ writes down what "treating people right" means, in the one scenario where the decision isn't fully yours anymore.                                                                                             │
+│                                                                                                                                                                                                               │
+│ ## Also confirm before signing (quick, administrative)                                                                                                                                                        │
+│                                                                                                                                                                                                               │
+│ - Strike price / current 409A — never stated on the offer call.                                                                                                                                               │
+│ - Fully diluted share count behind the 33,694 shares, to confirm the 1.5%.                                                                                                                                    │
+│ - Copies of the 2022 Equity Incentive Plan and form of grant agreement.                                                                                                                                       │
+│ - Early-exercise availability, if the Plan allows it — worth one question while the strike is low.                                                                                                            │
+│                                                                                                                                                                                                               │
+│ ## Close                                                                                                                                                                                                      │
+│                                                                                                                                                                                                               │
+│ "If we can get these two into the letter — or a short side letter — I'll sign this week and we're done. August 10th works." Offer to have his counsel draft; the changes are a paragraph each. If he needs to │
+│ check with the board (Ryan holds the only outside seat and knows me now — that helps), agree on a date rather than leaving it open: "Can we aim to have language by Wednesday?"                               │
+│                                                                                                                                                                                                               │
+│ ## Reminders                                                                                                                                                                                                  │
+│                                                                                                                                                                                                               │
+│ - He framed the internal decision on me as unanimous, he ran the diligence process generously, and today is the deadline *he* set — arriving with a yes plus two crisp asks is exactly on time, not late.     │
+│ - Don't bring up GreenLite as leverage or a live alternative — it's a factual data point about market terms, nothing more. One mention, in the severance section, is enough.                                  │
+│ - Both asks in one pass. No third ask later; this is the whole list.                                                                                                                                          │
+│ - Get final language reviewed by an employment lawyer before signing — a one-hour review, not a negotiation-by-counsel.                                                                                       │
+│                                                                                                                                                                                                               │
+│ ```                                                                                                                                                                                                           │
+│                                                                                                                                                                                                               │
+│ 📄 @meetings/2026/2026-07-20-mosaic-ian-gutwinski-catchup-prep.md (1375 tokens)                                                                                                                               │
+│ ```markdown                                                                                                                                                                                                   │
+│ ---                                                                                                                                                                                                           │
+│ type: meeting                                                                                                                                                                                                 │
+│ title: "Mosaic — Ian Gutwinski catch-up, prep (employment agreement review)"                                                                                                                                  │
+│ date: 2026-07-20                                                                                                                                                                                              │
+│ source: notes                                                                                                                                                                                                 │
+│ attendees:                                                                                                                                                                                                    │
+│   - "Edward Bridges"                                                                                                                                                                                          │
+│   - "[]"                                                                                                                                                                                                      │
+│ company: mosaic-private-markets                                                                                                                                                                               │
+│ project: ""                                                                                                                                                                                                   │
+│ stage: offer                                                                                                                                                                                                  │
+│ decisions: []                                                                                                                                                                                                 │
+│ action-items: []                                                                                                                                                                                              │
+│ transcript: ""                                                                                                                                                                                                │
+│ tags:                                                                                                                                                                                                         │
+│   - job-search                                                                                                                                                                                                │
+│   - interview-prep                                                                                                                                                                                            │
+│   - mosaic                                                                                                                                                                                                    │
+│   - offer                                                                                                                                                                                                     │
+│ status: prep                                                                                                                                                                                                  │
+│ created: 2026-07-20                                                                                                                                                                                           │
+│ updated: 2026-07-20                                                                                                                                                                                           │
+│ ---                                                                                                                                                                                                           │
+│ # 2026-07-20-mosaic-ian-gutwinski-catchup-prep                                                                                                                                                                │
+│                                                                                                                                                                                                               │
+│ **Session:** Mon 2026-07-20, 3:00–3:30 PM ET, Zoom (https://zoom.us/j/9174997683). Ian's own decision deadline for the offer was today — this catch-up is the venue to close remaining open items on the      │
+│ written employment agreement before responding.                                                                                                                                                               │
+│                                                                                                                                                                                                               │
+│ ## Context                                                                                                                                                                                                    │
+│                                                                                                                                                                                                               │
+│ Read the actual signed [] offer letter + Confidentiality/Invention/Arbitration Agreement against the draft [] offer letter + Employee Confidential Information and Inventions Assignment Agreement (from      │
+│ `inbox/`). Both are structurally near-identical — short offer letter + separate CIIA, same JAMS/FAA arbitration, NY governing law, NY §203-f invention carve-out, 1-year non-compete/non-solicit boilerplate  │
+│ — consistent with standard startup template forms. Comparison and full terms: [Source: User, document review, 2026-07-20].                                                                                    │
+│                                                                                                                                                                                                               │
+│ ## Comp/terms comparison (GreenLite 2025-03-03 vs. Mosaic 2026-07-19 draft)                                                                                                                                   │
+│                                                                                                                                                                                                               │
+│ | Term | GreenLite (signed) | Mosaic (draft) |                                                                                                                                                                │
+│ |---|---|---|                                                                                                                                                                                                 │
+│ | Title / reporting | Head of Engineering | VP of Engineering, direct to CEO |                                                                                                                                │
+│ | Base salary | $275,000 | $400,000 |                                                                                                                                                                         │
+│ | Bonus | Variable cash comp plan | None stated |                                                                                                                                                             │
+│ | Sign-on bonus | $10,000 (clawback <3mo) | None |                                                                                                                                                            │
+│ | **Severance** | **6mo/4mo/1mo-per-year tiered, without-cause** | **None** |                                                                                                                                 │
+│ | Equity | 100,000 shares | 33,694 shares (1.5%, per verbal offer-call disclosure — not in the letter) |                                                                                                      │
+│ | Vesting | 25% @ 12mo, then monthly × 36mo | Identical: 1/4 @ 1yr, then 1/48 monthly |                                                                                                                       │
+│ | Vacation | Not detailed in letter | Explicit "unlimited"/unaccrued, fully discretionary |                                                                                                                   │
+│ | Resignation notice | 2 weeks requested | None requested |                                                                                                                                                   │
+│ | Non-compete/non-solicit | 12mo, broad multi-state/intl territory | Same — 1yr, nearly identical territory language |                                                                                        │
+│                                                                                                                                                                                                               │
+│ ## Priority items to raise, in order                                                                                                                                                                          │
+│                                                                                                                                                                                                               │
+│ 1. **Severance — the single biggest gap.** GreenLite's agreement had an explicit tiered without-cause severance schedule; Mosaic's draft has none. Worth asking for something comparable (even a flat 3–6     │
+│ months) given Mosaic's own board-level diligence surfaced real forecast uncertainty ($5–20M ARR range per Ryan Shannon, 2026-07-17) and operational scaling risk — this is an exec-level hire at an           │
+│ early-stage company, not a role where zero downside protection is standard.                                                                                                                                   │
+│                                                                                                                                                                                                               │
+│ 2. **Change-of-control / acceleration terms — absent entirely.** No single- or double-trigger acceleration language in either document, but worth flagging for Mosaic specifically: your own moat/exit        │
+│ analysis on the company page rates strategic acquisition as the most likely realistic exit path. Ask how unvested equity would be handled in an acquisition.                                                  │
+│                                                                                                                                                                                                               │
+│ 3. **Strike price / current 409A FMV — still not disclosed anywhere.** Not stated on the 07-15 offer call, not in the written letter. Useful anchor going in: back-solving from 33,694 shares = 1.5% implies  │
+│ ~2.246M fully-diluted shares, and the deck's own illustrative scenarios ($1.35M @ $90M valuation, $15M @ $1B, $150M @ $10B) all imply a blended ~$40/share today. That figure is **not** the actual 409A      │
+│ common-stock strike — 409A appraisals discount common below the blended per-share price to reflect the preferred liquidation-preference stack, often substantially. Use $40/share only as a ceiling to        │
+│ sanity-check whatever number Ian/finance gives — press for the actual current 409A FMV and strike price directly.                                                                                             │
+│                                                                                                                                                                                                               │
+│ 4. **No bonus / variable comp.** Confirm whether $400K is intentionally all-fixed-cash (rolled into the higher base + equity vs. GreenLite's base+bonus structure), or whether an annual bonus/OKR component  │
+│ is negotiable.                                                                                                                                                                                                │
+│                                                                                                                                                                                                               │
+│ 5. **Equity grant is only "anticipated," subject to Board approval** — not yet a binding grant. Ask when the Board actually approves it, and whether there's any 409A/pricing risk in the gap between start   │
+│ date and grant date.                                                                                                                                                                                          │
+│                                                                                                                                                                                                               │
+│ 6. **Non-compete scope.** Same broad 1-year, multi-state/international territory as GreenLite's — not unique to Mosaic, but worth a light touch given the VP role gives full-company customer/territory       │
+│ visibility, which is exactly the exposure these clauses are broadest against.                                                                                                                                 │
+│                                                                                                                                                                                                               │
+│ ## Lower priority / good to note, not necessarily press on                                                                                                                                                    │
+│                                                                                                                                                                                                               │
+│ - No "Cause" definition anywhere in the Mosaic draft (moot without severance tied to it — becomes relevant if severance gets added).                                                                          │
+│ - Vacation is "unlimited" but fully unaccrued/discretionary, approval based on subjective factors ("progress on work goals," "fairness to the team") — standard unlimited-PTO boilerplate, worth              │
+│ understanding informally how it works in practice rather than negotiating.                                                                                                                                    │
+│ - No sign-on bonus and no resignation-notice requirement in Mosaic's draft — both neutral-to-favorable relative to GreenLite, not gaps.                                                                       │
+│                                                                                                                                                                                                               │
+│ Cross-references: [] · [] · [] · [] · []                                                                                                                                                                      │
+│                                                                                                                                                                                                               │
+│ ```                                                                                                                                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────────────────────────────────────────── Summary ───────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ On the offer-sync call (2026-07-20), Edward Bridges told Mosaic CEO Ian Gutwinski he is accepting the VP of Engineering offer and confirmed an August 10 start, then raised the two items from his prep       │
+│ before signing: a without-cause severance provision and change-of-control acceleration. Ian was non-committal on severance (must take it to the board and weigh precedent) but favorable on acceleration,     │
+│ saying his position has 'always been' that unvested options would accelerate in an acquisition and that his lawyers could draft language; Edward offered to accept a double-trigger version. Ian agreed to    │
+│ send the 2022 options plan, current 409A/strike price, and fully diluted share count. They set a celebratory dinner for Tuesday July 28.                                                                      │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Key points:
+  • Edward accepted the VP of Engineering offer in principle; two items to close before signing.
+  • Severance ask (6 months base + COBRA on without-cause termination, standard release) left pending — Ian must take it to the board and consider precedent.
+  • Acceleration: Ian said his position has always been that unvested options accelerate in an acquisition; Edward offered to accept double-trigger; lawyers to draft.
+  • Ian to send the 2022 options plan, current 409A/strike price, and fully diluted share count.
+  • Start date confirmed August 10, 2026; dinner set for Tuesday July 28 at 6pm.
+Related notes:
+  meetings/2026/2026-07-15-mosaic-ian-gutwinski-offer-sync.md Mosaic — VP of Engineering offer call with Ian Gutwinski
+  meetings/2026/2026-07-20-mosaic-offer-sync-ian-gutwinski.md Mosaic — offer sync with Ian Gutwinski (severance & acceleration asks)
+  meetings/2026/2026-05-27-1nsp-lyon-szot-followup.md 1NSP follow-up call with Joe Smith (Lyon Szot Architecture)
+  meetings/2026/2026-07-16-hovnanian-kyle-carnes-offer-sync.md Hovnanian offer-sync call with Kyle Carnes (equity ask update + AI role clarity)
+  meetings/2026/2026-07-14-hovnanian-kyle-carnes-offer-sync.md Hovnanian offer-sync call with Kyle Carnes (terms + equity mechanics)
+  companies/alloy.md Alloy
+  companies/allspice.md Allspice
+  companies/alltrails.md AllTrails
+  companies/american-express.md American Express
+  companies/apollo-intelligence.md Apollo Intelligence
+  companies/as-software.md AS Software
+  companies/candid-health.md Candid Health
+  companies/capital-one.md Capital One
+  companies/coinbase.md Coinbase
+  companies/counterpart.md Counterpart
+  companies/daversa-partners.md Daversa Partners
+  companies/delve-partners.md Delve Partners
+  companies/diligence-squared.md Diligence Squared
+  companies/gamechanger.md GameChanger
+  companies/goody.md Goody
+  companies/greenlite-technologies.md GreenLite Technologies
+  companies/hovnanian-homes.md K. Hovnanian Homes
+  companies/insight-partners.md Insight Partners
+  companies/justworks.md Justworks
+  companies/keystone-strategy.md Keystone Strategy
+  companies/mosaic-app.md Mosaic App
+  companies/mosaic-private-markets.md Mosaic
+  companies/nace-partners.md NACE Partners
+  companies/new-york-times.md New York Times
+  companies/one-northside-piers.md One Northside Piers
+  companies/onpartners.md ON Partners
+  companies/own-company.md Own Company
+  companies/planetx.md PlanetX
+  companies/rivian.md Rivian
+  companies/riviera-partners.md Riviera Partners
+  companies/ro.md Ro
+  companies/roscommon-analytics.md Roscommon Analytics
+  companies/sigma-computing.md Sigma Computing
+  companies/square.md Square
+  companies/squarespace.md Squarespace
+  companies/vertica-capital-partners.md Vertica Capital Partners
+  companies/way.md Way
+  concepts/2020-11-19-alistair-marshall.md 2020 11 19 Alistair Marshall
+  concepts/2021-01-29-alistair-marshall.md 2021 01 29 Alistair Marshall
+  concepts/2021-02-09-alistair-marshall.md 2021 02 09 Alistair Marshall
+  concepts/2021-03-18-alistair-marshall.md 2021 03 18 Alistair Marshall
+  concepts/6-things-every-mentor-should-do.md 6 Things Every Mentor Should Do
+  concepts/advanced-nlp-with-spacy.md Advanced Nlp With Spacy
+  concepts/ai-engineering-building-applications-with-foundation-models.md Ai Engineering Building Applications With Foundation Models
+  concepts/ai-engineering-organization.md Ai Engineering Organization
+  concepts/ai-native-software-engineering.md AI-Native Software Engineering
+  concepts/ai-planning.md Ai Planning
+  concepts/career-development-schematic.md Career Development Schematic
+  concepts/career-direction.md Career Direction
+  concepts/catastrophic-care.md Catastrophic Care
+  concepts/common-server-setups.md Common Server Setups
+  concepts/communicating-with-execs.md Communicating With Execs
+  concepts/computer-networking-fundamentals.md Computer Networking Fundamentals
+  concepts/data-strategy-for-greenlite.md Data Strategy For Greenlite
+  concepts/database-indices.md Database Indices
+  concepts/database-replication.md Database Replication
+  concepts/database-transactions.md Database Transactions
+  concepts/database-types.md Database Types
+  concepts/databases.md Databases
+  concepts/developing-okrs.md Developing Okrs
+  concepts/eisenhower-matrix.md Eisenhower Matrix
+  concepts/empowered-product-teams.md Empowered Product Teams
+  concepts/empowered-workshop-reading.md Empowered Workshop Reading
+  concepts/empowered-workshop.md Empowered Workshop
+  concepts/engineering-challenges.md Engineering Challenges
+  concepts/engineering-delivery.md Engineering Delivery
+  concepts/engineering-leadership.md Engineering Leadership
+  concepts/engineering-leveling-frameworks.md Engineering Leveling Frameworks
+  concepts/good-strategy-bad-strategy.md Good Strategy Bad Strategy
+  concepts/greenlite-data-strategy-foundation-plan.md Greenlite Data Strategy Foundation Plan
+  concepts/greenlite-glossary.md Greenlite Glossary
+  concepts/greenlite-out-of-scope-analysis.md Greenlite Out Of Scope Analysis
+  concepts/how-google-sold-its-engineers-on-management.md How Google Sold Its Engineers On Management
+  concepts/how-to-be-a-positive-leader.md How To Be A Positive Leader
+  concepts/how-to-break-a-monolith-into-micro-services.md How To Break A Monolith Into Micro Services
+  concepts/how-to-raise-money.md How To Raise Money
+  concepts/lead-and-disrupt.md Lead and Disrupt: How To Solve The Innovator’s Dilemma
+  concepts/leadership-notes.md Leadership Notes
+  concepts/measure-what-matters.md Measure What Matters
+  concepts/misc-notes.md Misc Notes
+  concepts/multipart-uploads.md Multipart Uploads
+  concepts/note-taking.md Note Taking
+  concepts/notes-on-meeting-with-vc.md Notes On Meeting With Vc
+  concepts/notes.md Notes
+  concepts/organizing-ai-engineering-in-startups.md Organizing Ai Engineering In Startups
+  concepts/planning-how-to-train-a-building-code-model.md Planning How To Train A Building Code Model
+  concepts/precision-and-recall.md Precision And Recall
+  concepts/private-equity-background.md Private Equity Background
+  concepts/radical-candor.md Radical Candor
+  concepts/situational-awareness-around-ai.md Situational Awareness Around Ai
+  concepts/software-is-changing-again.md Software Is Changing Again
+  concepts/software-security-audit-proposal.md Software Security Audit Proposal
+  concepts/startup-equity.md Startup Equity
+  concepts/team-development-plans.md Team Development Plans
+  concepts/template-engineering-metrics-update.md Template Engineering Metrics Update
+  concepts/template-for-onboarding.md Template For Onboarding
+  concepts/the-engineering-executives-primer.md The Engineering Executives Primer
+  concepts/untitled.md Untitled
+  concepts/vp-vs-director.md Vp Vs Director
+  concepts/why-software-is-eating-the-world.md Why Software Is Eating The World
+  concepts/work-notes.md Work Notes
+  ideas/ai-powered-photo-curation-for-content-creators.md Ai Powered Photo Curation For Content Creators
+  organization/employer-history/greenlite/engineering-career-ladder.md Engineering Career Ladder
+  organization/employer-history/greenlite/greenlite-30-60-90-plan.md Greenlite 30 60 90 Plan
+  organization/employer-history/greenlite/greenlite-operating-principles.md Greenlite Operating Principles
+  organization/employer-history/greenlite/greenlite-referrals.md Greenlite Referrals
+  organization/employer-history/greenlite/greenlite-responsibilities.md Greenlite Responsibilities
+  organization/employer-history/greenlite/greenlite-system-architecture.md Greenlite System Architecture
+  organization/employer-history/greenlite/level-4-senior-software-engineer-1.md Level 4 Senior Software Engineer 1
+  organization/employer-history/greenlite/level-5-senior-software-engineer-2.md Level 5 Senior Software Engineer 2
+  organization/employer-history/greenlite/m3-engineering-manager.md M3 Engineering Manager
+  organization/employer-history/greenlite/m4-engineering-manager.md M4 Engineering Manager
+  organization/employer-history/greenlite/m5-sr-engineering-manager.md M5 Sr Engineering Manager
+  organization/employer-history/greenlite/m6-engineering-director.md M6 Engineering Director
+  organization/employer-history/greenlite/m7-sr-engineering-director.md M7 Sr Engineering Director
+  organization/employer-history/greenlite/team-retrospective-notes.md Team Retrospective Notes
+  organization/employer-history/greenlite/vp-engineering-series-a.md Vp Engineering Series A
+  organization/employer-history/squarespace/migration-of-analytics-from-a-standalone-app-into-the-squarespace-app.md Migration Of Analytics From A Standalone App Into The Squarespace App
+  organization/employer-history/squarespace/performance-issues-with-time0-cohorts.md Performance Issues With Time0 Cohorts
+  organization/employer-history/squarespace/squarespace-app-js-architecture.md Squarespace App Js Architecture
+  organization/practice/behavioral/conflict-between-a-direct-report-someone-on-another-team.md Conflict Between A Direct Report Someone On Another Team
+  organization/practice/behavioral/dealing-with-a-difficult-co-worker.md Dealing With A Difficult Co Worker
+  organization/practice/behavioral/dealing-with-a-difficult-situation.md Dealing With A Difficult Situation
+  organization/practice/hiring/engineering-interview-process.md Engineering Interview Process
+  organization/practice/hiring/offer-approvals.md Offer Approvals
+  organization/practice/motivations/how-and-why-did-you-become-a-people-manager.md How And Why Did You Become A People Manager
+  organization/practice/motivations/what-do-i-want-in-a-job.md What Do I Want In A Job
+  organization/practice/motivations/what-motivates-you-as-a-manager.md What Motivates You As A Manager
+  organization/practice/motivations/what-motivates-you-as-a-person-and-in-your-career.md What Motivates You As A Person And In Your Career
+  organization/practice/people-management/approach-to-one-on-ones.md Approach To One On Ones
+  organization/practice/people-management/deciding-on-how-to-hire-people.md Deciding On How To Hire People
+  organization/practice/people-management/how-did-i-mentor-my-team.md How Did I Mentor My Team
+  organization/practice/people-management/how-do-i-think-about-growing-a-team.md How Do I Think About Growing A Team
+  organization/practice/technical/engineering-decision-making-process.md Engineering Decision Making Process
+  organization/star-stories/describe-a-conflict-among-people-on-your-team.md Describe A Conflict Among People On Your Team
+  organization/star-stories/describe-a-conflict-on-the-team-and-how-i-resolved-it.md Describe A Conflict On The Team And How I Resolved It
+  organization/star-stories/describe-a-few-of-your-peers-and-your-relationship-to-them.md Describe A Few Of Your Peers And Your Relationship To Them
+  organization/star-stories/describe-a-quick-high-stakes-decision-without-all-the-info-that-i-needed.md Describe A Quick High Stakes Decision Without All The Info That I Needed
+  organization/star-stories/describe-a-time-that-you-course-corrected-a-team-or-org-that-became-unhealthy.md Describe A Time That You Course Corrected A Team Or Org That Became Unhealthy
+  organization/star-stories/describe-a-time-when-i-identified-a-drop-in-teams-performance.md Describe A Time When I Identified A Drop In Teams Performance
+  organization/star-stories/describe-a-time-when-i-identified-a-skill-gap.md Describe A Time When I Identified A Skill Gap
+  organization/star-stories/describe-a-time-when-i-improved-developer-experience.md Describe A Time When I Improved Developer Experience
+  organization/star-stories/describe-a-time-when-i-needed-to-define-the-scope-of-an-ambitious-project-and-assigned-work-accordingly.md Describe A Time When I Needed To Define The Scope Of An Ambitious Project
+And Assigned Work Accordingly
+  organization/star-stories/describe-a-time-when-you-had-to-dismiss-someone.md Describe A Time When You Had To Dismiss Someone
+  organization/star-stories/describe-a-time-when-you-needed-to-grow-a-team.md Describe A Time When You Needed To Grow A Team
+  organization/star-stories/describe-some-of-the-products-i-built-and-how-they-worked.md Describe Some Of The Products I Built And How They Worked
+  organization/star-stories/describe-the-frameworks-that-you-created-to-resolve-conflicts-quickly.md Describe The Frameworks That You Created To Resolve Conflicts Quickly
+  organization/star-stories/disagreeing-with-your-boss-or-leadership.md Disagreeing With Your Boss Or Leadership
+  organization/star-stories/share-a-time-when-i-dealt-with-a-difference-of-opinion.md Share A Time When I Dealt With A Difference Of Opinion
+  organization/star-stories/share-a-time-when-you-needed-to-reprioritize-a-teams-work-as-a-result-of-a-shift-in-priorities.md Share A Time When You Needed To Reprioritize A Teams Work As A Result Of A Shift In
+Priorities
+  organization/star-stories/squarespace-cms-integration-starl-hovnanian.md Squarespace CMS integration STARL for Hovnanian
+  organization/star-stories/star-planset-review-agent.md STAR(L) — Planset Review Agent
+  organization/star-stories/story-of-a-time-where-team-worked-great-together.md Story Of A Time Where Team Worked Great Together
+  organization/star-stories/taking-action-without-all-needed-information.md Taking Action Without All Needed Information
+  organization/star-stories/time-when-i-had-to-deliver-bad-news-to-a-stakeholder.md Time When I Had To Deliver Bad News To A Stakeholder
+  people/albert-montolio-romo.md Albert Montolio Romo
+  people/alex-tam-hiring-notes.md Alex Tam — Hiring Notes
+  people/allen-thomas-varghese.md Allen Thomas Varghese
+  people/allie-cialeo.md Allie Cialeo
+  people/allon-rauer.md Allon Rauer
+  people/anand-jesudason-hiring-notes.md Anand Jesudason - Hiring Notes
+  people/andrew-monshizadeh.md Andrew Monshizadeh
+  people/antonije-ivanovic-hiring-notes.md Antonije Ivanovic — Hiring Notes
+  people/arnaud-mondoulet.md Arnaud Mondoulet
+  people/benjamin-allen.md Benjamin Allen
+  people/bobby-mareddy-reference.md Bobby Mareddy reference
+  people/brian-corr.md Brian Corr
+  people/brian-williams.md Brian Williams
+  people/carlos-reyes.md Carlos Reyes
+  people/carrie-barker.md Carrie Barker
+  people/chris-blais.md Chris Blais
+  people/chris-cunningham-sell-call.md Chris Cunningham (Sell Call)
+  people/chris-griffin.md Chris Griffin
+  people/chris-running.md Chris Running
+  people/christofer-sjogren.md Christofer Sjögren
+  people/christopher-bailey.md Christopher Bailey
+  people/christopher-barbour.md Christopher Barbour
+  people/christopher-bowns.md Christopher Bowns
+  people/christopher-ribetti.md Christopher Ribetti
+  people/claudio-ortiz.md Claudio Ortiz
+  people/daniel-montano.md Daniel Montaño
+  people/darren-mcconnell.md Darren McConnell
+  people/david-canavan.md David Canavan
+  people/dogan-gulcan.md Doğan Gülcan
+  people/edward-bridges.md Edward Bridges
+  people/fiorella-bariani.md Fiorella Bariani
+  people/goksel-koksal-hiring-notes.md Goksel Koksal - Hiring Notes
+  people/goksel-koksal.md Goksel Koksal - Hiring Notes
+  people/gustavo-gianotti.md Gustavo Gianotti
+  people/hardik-patel.md Hardik Patel
+  people/harrison-fay.md Harrison Fay
+  people/ian-gutwinski.md Ian Gutwinski
+  people/isaac-jones-ewhuiknebueze.md Isaac Jones Ewhuiknebueze
+  people/jacob-haflett.md Jacob Haflett
+  people/james-ayoub.md James Ayoub
+  people/james-gallagher.md James Gallagher
+  people/jemma-colletta.md Jemma Colletta
+  people/joelle-barr.md Joelle Barr
+  people/jon-zallas.md Jon Zallas
+  people/julian-ballen.md Julian Ballen
+  people/julian-boilen.md Julian Boilen
+  people/jurien-garrison.md Jurien Garrison
+  people/kyle-dumont.md Kyle Dumont
+  people/luciano-perez.md Luciano Perez
+  people/luis-viant.md Luis Viant
+  people/madeleine-fox-hiring-notes.md Madeleine Fox - Hiring Notes
+  people/manju-suresh.md Manju Suresh
+  people/marco-juliani.md Marco Juliani
+  people/margaret-turzanska.md Margaret Turzanska
+  people/mark-harmon.md Mark Harmon
+  people/michael-berl.md Michael Berl
+  people/michael-blake.md Michael Blake
+  people/michael-chang.md Michael Chang
+  people/michael-damman.md Michael Damman
+  people/michael-dietrich.md Michael Dietrich
+  people/michael-lee.md Michael Lee
+  people/michael-lvov.md Michael Lvov
+  people/michael-pieper.md Michael Pieper
+  people/michael-rouse.md Michael Rouse
+  people/michael-suh.md Michael Suh
+  people/mikelle-masciantonio.md Mikelle Masciantonio
+  people/moncef-biaz.md Moncef Biaz
+  people/nicole-michaelis.md Nicole Michaelis
+  people/ramon-aranda.md Ramon Aranda
+  people/ryan-hrabak.md Ryan Hrabak
+  people/ryan-mutch.md Ryan Mutch
+  people/ryan-petroff.md Ryan Petroff
+  people/ryan-shannon.md Ryan Shannon
+  people/sean-barry-hiring-notes.md Sean Barry — Hiring Notes
+  people/sean-barry.md Sean Barry
+  people/sheona-harry.md Sheona Harry
+  people/simon-kenny.md Simon Kenny
+  people/sophia-gallucci.md Sophia Gallucci
+  people/soufiane-hayou.md Soufiane Hayou
+  people/tammy-smalley.md Tammy Smalley
+  people/victor-vives.md Víctor Vives
+  people/william-a-young.md William A. Young
+  people/xianglong-li.md Xianglong Li
+  projects/aetion/2022-10-11-icd10-code-formatting-issue.md 2022 10 11 Icd10 Code Formatting Issue
+  projects/aetion/2022-10-18-interview-competency-project-kick-off.md 2022 10 18 Interview Competency Project Kick Off
+  projects/aetion/2022-10-27-dsl-cloud-cost-planning.md 2022 10 27 Dsl Cloud Cost Planning
+  projects/aetion/2022-10-31-interview-competency-project-sync.md 2022 10 31 Interview Competency Project Sync
+  projects/aetion/2022-11-17-aws-capacity-issues-on-databricks.md 2022 11 17 Aws Capacity Issues On Databricks
+  projects/aetion/aetion-engineering-strategy.md Aetion Engineering Strategy
+  projects/aetion/aetion-introductory-training-series.md Aetion Introductory Training Series
+  projects/aetion/career-ladder.md Career Ladder
+  projects/aetion/company-all-hands.md Company All Hands
+  projects/aetion/company-okrs.md Company Okrs
+  projects/aetion/database-organization.md Database Organization
+  projects/aetion/databricks-user-fundamentals.md Databricks User Fundamentals
+  projects/aetion/drug-computation-measure.md Drug Computation Measure
+  projects/aetion/dta-planning.md Dta Planning
+  projects/aetion/engineering-strategy.md Engineering Strategy
+  projects/aetion/general-notes.md General Notes
+  projects/aetion/issue-retrospectives.md Issue Retrospectives
+  projects/aetion/measures-overview.md Measures Overview
+  projects/aetion/measures.md Measures
+  projects/aetion/okrs-2023.md Okrs 2023
+  projects/aetion/onboarding-agenda.md Onboarding Agenda
+  projects/aetion/production-issues.md Production Issues
+  projects/aetion/projects-cohorts-with-multiple-patient-entries.md Projects Cohorts With Multiple Patient Entries
+  projects/aetion/projects-system-refactoring.md Projects System Refactoring
+  projects/aetion/roadmap-planning.md Roadmap Planning
+  projects/aetion/software-testing-notes.md Software Testing Notes
+  projects/aetion/team-meeting-planning.md Team Meeting Planning
+  projects/aetion/technology-all-hands.md Technology All Hands
+  projects/greenlite/2026-03-31-atlas-dashboard-ws.md 2026 03 31 Atlas Dashboard Ws
+  projects/greenlite/2026-04-01-atlas-dashboard-ws.md 2026 04 01 Atlas Dashboard Ws
+  projects/greenlite/2026-04-02-planset-review-ws.md 2026 04 02 Planset Review Ws
+  projects/greenlite/2026-04-14-planset-review-ws.md 2026 04 14 Planset Review Ws
+  projects/greenlite/2026-q2-planning-brief.md 2026 Q2 Planning Brief
+  projects/greenlite/about-engineering-leadership-dashboard.md About Engineering Leadership Dashboard
+  projects/greenlite/ai-budgeting.md Ai Budgeting
+  projects/greenlite/annual-planning.md Annual Planning
+  projects/greenlite/atlas-dashboard.md Atlas Dashboard
+  projects/greenlite/building-department-services.md Building Department Services
+  projects/greenlite/comment-database-etl-system-design.md Comment Database Etl System Design
+  projects/greenlite/competition.md Competition
+  projects/greenlite/customer-dashboard.md Customer Dashboard
+  projects/greenlite/development-goals.md Development Goals
+  projects/greenlite/engineering-at-greenlite.md Engineering At Greenlite
+  projects/greenlite/engineering-metrics.md Engineering Metrics
+  projects/greenlite/engineering-planning.md Engineering Planning
+  projects/greenlite/greenlite-product-ideas.md Greenlite Product Ideas
+  projects/greenlite/greenlite-quick-reference-feb2026.md Greenlite Quick Reference Feb2026
+  projects/greenlite/greenlite-system-design.md Greenlite System Design
+  projects/greenlite/metabase-setup.md Metabase Setup
+  projects/greenlite/okrs.md Okrs
+  projects/greenlite/planset-agent.md Planset Agent
+  projects/greenlite/planset-knowledge-graph.md Planset Knowledge Graph
+  projects/greenlite/planset-review.md Planset Review
+  projects/greenlite/portfolio-dashboard.md Portfolio Dashboard
+  projects/greenlite/private-plan-review.md Private Plan Review
+  projects/greenlite/roadmap-planning.md Roadmap Planning
+  projects/greenlite/soc2-compliance-meetings.md Soc2 Compliance Meetings
+  projects/greenlite/soc2-compliance.md Soc2 Compliance
+  projects/greenlite/sprint-planning.md Sprint Planning
+  projects/greenlite/strategic-planning-intelligence.md Strategic Planning Intelligence
+  projects/greenlite/team-development-goals.md Team Development Goals
+  projects/greenlite/wins.md Wins
+  projects/greenlite/xlb-sunset-plan.md Xlb Sunset Plan
+  projects/mosaic/kb-strategy.md KB Strategy for VP Engineering Role
+  projects/mosaic/onboarding.md Mosaic Onboarding
+  projects/squarespace/1-month-of-remote-working.md 1 Month Of Remote Working
+  projects/squarespace/2020-10-27-product-all-hands.md 2020 10 27 Product All Hands
+  projects/squarespace/2020-11-19-product-all-hands.md 2020 11 19 Product All Hands
+  projects/squarespace/breviz-meeting-notes.md Breviz Meeting Notes
+  projects/squarespace/commerce-x-squarespace-app-conflict.md Commerce X Squarespace App Conflict
+  projects/squarespace/squarespace-analytics-apps.md Squarespace Analytics Apps
+  projects/squarespace/squarespace-app-org.md Squarespace App Org
+                                                                                               Candidate memories
+┏━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┓
+┃ # ┃ Type     ┃ Content                                                                                                                                                                                 ┃ Conf ┃
+┡━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━┩
+│ 0 │ event    │ On 2026-07-20 Edward Bridges held an offer-sync call with Mosaic CEO Ian Gutwinski and stated he is accepting Mosaic's VP of Engineering offer ('I'm in'), calling the offer letter     │ 0.95 │
+│   │          │ conventional with no flags.                                                                                                                                                             │      │
+│ 1 │ decision │ Edward Bridges accepted the Mosaic VP of Engineering offer in principle, with two items to close before signing: a without-cause severance provision and change-of-control              │ 0.90 │
+│   │          │ acceleration. He confirmed the August 10, 2026 start date still works.                                                                                                                  │      │
+│ 2 │ question │ Edward Bridges asked Ian Gutwinski for a severance provision of six months of base salary plus COBRA on termination without cause, in exchange for a standard release. Ian said 'I      │ 0.90 │
+│   │          │ totally hear it' but would need to take it back to the board and think through 'the precedents ramifications' — it is not agreed, only under consideration.                             │      │
+│ 3 │ fact     │ On the severance ask, Ian Gutwinski pushed back gently, noting the hiring process took roughly a month and that Edward had had two other offers, suggesting the severance 'buffer might │ 0.85 │
+│   │          │ be probably more than was necessary' (reported: Ian Gutwinski). He said he would reflect and discuss with Ryan and others.                                                              │      │
+│ 4 │ decision │ On change-of-control treatment of the equity, Ian Gutwinski said his position 'has always been' that unvested options would be accelerated in an acquisition and agreed this can be     │ 0.85 │
+│   │          │ reflected in the documents, with his lawyers drafting language. Edward Bridges offered to accept a double-trigger (acceleration on acquisition plus termination without cause), noting  │      │
+│   │          │ acquirers sometimes want the product but not the management.                                                                                                                            │      │
+│ 5 │ fact     │ Ian Gutwinski agreed to send Edward Bridges the 2022 options plan, the current 409A / strike price, and the fully diluted share count. Ian said the strike would be the most recent     │ 0.90 │
+│   │          │ 409A (Mosaic runs 409As roughly every 12 months) and that options are issued at the next board meeting, which he expects could be soon.                                                 │      │
+│ 6 │ event    │ Edward Bridges and Ian Gutwinski set a celebratory dinner (just the two of them) for Tuesday, July 28, 2026 at 6pm; Ian will preview the venue before locking it in.                    │ 0.90 │
+│ 7 │ fact     │ A powerful laptop for Edward has already been arranged by 'Chris' at Mosaic; Edward noted it can run many agents.                                                                       │ 0.80 │
+│ 8 │ fact     │ Ian Gutwinski invited Edward Bridges to dial into a Mosaic session next week on expanding the platform for more AI, offering that Edward could listen in as an observer before his      │ 0.85 │
+│   │          │ start date.                                                                                                                                                                             │      │
+│ 9 │ fact     │ Ian Gutwinski described Mosaic engineering as having capable engineers but early signs of process stress (e.g., sprint planning is 'all over the place'), and a tension between two     │ 0.85 │
+│   │          │ leaders — Claudio Ortiz (tight, zero tolerance for error) and Michael Rouse (move fast, ship quickly). Ian framed the new VP of Engineering role as key to managing that tension and    │      │
+│   │          │ scaling process (reported: Ian Gutwinski).                                                                                                                                              │      │
+└───┴──────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────┘
+Candidate relationships:
+  [1] --elaborates--> [0]
+  [2] --elaborates--> [1]
+  [3] --related_to--> [2]
+  [4] --elaborates--> [1]
+  [5] --supports--> [4]
+  [9] --supports--> [8]
+                                                                        Entity resolution
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┓
+┃ Entity                                                                 ┃ Type    ┃ Action ┃ Target                                                      ┃ Conf ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━┩
+│ Mosaic — offer sync with Ian Gutwinski (severance & acceleration asks) │ meeting │ update │ meetings/2026/2026-07-20-mosaic-offer-sync-ian-gutwinski.md │ 0.97 │
+│ Ian Gutwinski                                                          │ person  │ update │ people/ian-gutwinski.md                                     │ 0.99 │
+│ Edward Bridges                                                         │ person  │ update │ people/edward-bridges.md                                    │ 0.95 │
+│ Mosaic                                                                 │ company │ update │ companies/mosaic-private-markets.md                         │ 0.98 │
+│ Claudio Ortiz                                                          │ person  │ update │ people/claudio-ortiz.md                                     │ 0.90 │
+│ Michael Rouse                                                          │ person  │ update │ people/michael-rouse.md                                     │ 0.90 │
+│ Ryan Shannon                                                           │ person  │ update │ people/ryan-shannon.md                                      │ 0.80 │
+│ Hardik Patel                                                           │ person  │ update │ people/hardik-patel.md                                      │ 0.80 │
+│ Carrie Barker                                                          │ person  │ update │ people/carrie-barker.md                                     │ 0.75 │
+│ Apollo Intelligence                                                    │ company │ update │ companies/apollo-intelligence.md                            │ 0.70 │
+│ GreenLite Technologies                                                 │ company │ skip   │ -                                                           │ 0.60 │
+│ Argonaut                                                               │ company │ skip   │ -                                                           │ 0.70 │
+│ Simron                                                                 │ person  │ skip   │ -                                                           │ 0.60 │
+│ Chris                                                                  │ person  │ skip   │ -                                                           │ 0.60 │
+└────────────────────────────────────────────────────────────────────────┴─────────┴────────┴─────────────────────────────────────────────────────────────┴──────┘
+Proposed note:
+╭────────────────────────────────────────────────────────────────── NEW drafts/mosaic-offer-sync-with-ian-gutwinski-severance-acceleration.md ──────────────────────────────────────────────────────────────────╮
+│ ---                                                                                                                                                                                                           │
+│ type: meeting                                                                                                                                                                                                 │
+│ title: "Mosaic — offer sync with Ian Gutwinski (severance & acceleration asks)"                                                                                                                               │
+│ date: 2026-07-20                                                                                                                                                                                              │
+│ source: transcript                                                                                                                                                                                            │
+│ status: synthesized                                                                                                                                                                                           │
+│ attendees:                                                                                                                                                                                                    │
+│   - "Edward Bridges"                                                                                                                                                                                          │
+│   - "[[people/ian-gutwinski|Ian Gutwinski]]"                                                                                                                                                                  │
+│ company: mosaic-private-markets                                                                                                                                                                               │
+│ project: mosaic                                                                                                                                                                                               │
+│ decisions:                                                                                                                                                                                                    │
+│   - "Edward accepted the VP of Engineering offer in principle; August 10, 2026 start confirmed"                                                                                                               │
+│   - "Two items to close before signing: without-cause severance and change-of-control acceleration"                                                                                                           │
+│   - "Ian verbally favorable to acceleration of unvested options in an acquisition; language to be drafted by counsel"                                                                                         │
+│ action-items:                                                                                                                                                                                                 │
+│   - "Ian to take the severance ask to the board and weigh precedent, then report back"                                                                                                                        │
+│   - "Ian to send the 2022 options plan, current 409A / strike price, and fully diluted share count"                                                                                                           │
+│   - "Ian's lawyers to draft change-of-control acceleration language"                                                                                                                                          │
+│   - "Ian to share timing of next week's AI-platform session so Edward can dial in"                                                                                                                            │
+│   - "Celebratory dinner: Tuesday 2026-07-28, 6pm (Ian to pick and preview venue)"                                                                                                                             │
+│ transcript: sources/transcripts/2026-07-20-mosaic-offer-sync-ian-gutwinski.md                                                                                                                                 │
+│ tags:                                                                                                                                                                                                         │
+│   - job-search                                                                                                                                                                                                │
+│   - mosaic                                                                                                                                                                                                    │
+│   - offer                                                                                                                                                                                                     │
+│   - negotiation                                                                                                                                                                                               │
+│ created: 2026-07-20                                                                                                                                                                                           │
+│ updated: 2026-07-20                                                                                                                                                                                           │
+│ ---                                                                                                                                                                                                           │
+│ # 2026-07-20 — Mosaic offer sync with Ian Gutwinski                                                                                                                                                           │
+│                                                                                                                                                                                                               │
+│ ## Summary                                                                                                                                                                                                    │
+│                                                                                                                                                                                                               │
+│ Edward Bridges opened by accepting Mosaic's VP of Engineering offer — "I'm in" — calling the offer letter conventional with "no flags" and confirming the August 10, 2026 start date. He then raised the two  │
+│ …                                                                                                                                                                                                             │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Apply this enrichment (write files, record memories)? [y/N]:
