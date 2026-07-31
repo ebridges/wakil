@@ -1,0 +1,1 @@
+Claude seems to have no problem with it and will automatically put the mcp task in the background (after I hinted that it'd take a long time)
