@@ -1,0 +1,1 @@
+When you pass the `@path` syntax to Claude Code, what is it doing under the covers with that file path?
