@@ -1,0 +1,1 @@
+Modify the last commit to remove the troubleshooting entry and to restore the links -- I will be making this public in near term, so it's okay for it to be broken for now
