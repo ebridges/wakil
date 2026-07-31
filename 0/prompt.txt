@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bnr6k5mf0</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/bnr6k5mf0.output</output-file>
+<status>completed</status>
+<summary>Background command "Run the failure-classification table generation" completed (exit code 0)</summary>
+</task-notification>
