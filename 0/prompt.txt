@@ -1,0 +1,24 @@
+<task-notification>
+<task-id>a1a74c2f2bb5cab84</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/a1a74c2f2bb5cab84.output</output-file>
+<status>completed</status>
+<summary>Agent "Explain Claude Code @path mention mechanics" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Based on the Claude Code documentation:
+
+**Client-side expansion:** When you type `@path/to/file.md`, Claude Code's local interface **parses and resolves the reference before sending** the request to the model. The model never sees the literal `@path` string.
+
+**File content handling:** For files, `@path` **reads and inlines the full file content directly into your message context** — like an implicit Read tool, but the content arrives as part of the prompt, not as a subsequent tool call or reference.
+
+**Directory vs. file:** References to directories work differently — they show a **file listing with metadata**, not full contents. MCP resources use the format `@server:resource` (e.g., `@github:repos/owner/repo/issues`).
+
+**CLAUDE.md bonus:** When you reference a file or directory with `@`, Claude Code automatically includes `CLAUDE.md` from that directory and its parents in context.
+
+**No tool call:** Unlike `/read`, the `@` syntax doesn't trigger the Read tool — the CLI handles expansion locally and sends the resolved content as plain text in your prompt.
+
+**Limits:** Large files, binary files, and images work but are subject to your model's context window. For binary files or very large files, you'd typically reference them conventionally (let the model request them with Read) rather than force them inline with `@`.
+
+**Multiple references:** You can `@` multiple files in one message: `@file1.js @file2.js` both expand inline.</result>
+<usage><subagent_tokens>16261</subagent_tokens><tool_uses>2</tool_uses><duration_ms>25035</duration_ms></usage>
+</task-notification>
