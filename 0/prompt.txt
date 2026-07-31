@@ -1,0 +1,1 @@
+but let's discuss how those batches are created.  can we do yet another relevance pass on the entities to cluster them into batches?  Or is there some approach we can take rather than simply picking an arbitrary number of entities for a batch?
