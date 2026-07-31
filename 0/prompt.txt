@@ -1,0 +1,1 @@
+Explain this statement: 'The compile mechanism itself was narrowed from "lossy compression, workspace-wide sweep, new skill assumed" down to "additive-only, single-entity, reuse note-revision's discipline unless proven awkward"'
