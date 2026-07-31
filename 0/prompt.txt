@@ -1,0 +1,1 @@
+for paths that are outside the repo, make them relative to ${HOME} -- e.g. `/Users/ebridges/.claude/projects/.../*.jsonl` should be `~/.claude/projects/.../*.jsonl` -- I prefer not to embed my local machine's file structure all over the place.
