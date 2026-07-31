@@ -1,0 +1,221 @@
+<task-notification>
+<task-id>a92d05e8e6957ed01</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3bf34b02-9b03-4e75-9b11-2ff5adca5354/tasks/a92d05e8e6957ed01.output</output-file>
+<status>completed</status>
+<summary>Agent "Design wakil release process implementation" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># Structured Release Process for `wakil` — Implementation Plan
+
+Confirmed during exploration (beyond what was given):
+- `src/wakil/__init__.py` hardcodes `__version__ = "0.1.0"` — **a second, independent copy of the version string**, already out of sync-risk with `pyproject.toml`'s `version = "0.1.0"` (two hand-maintained sources of truth, not one).
+- A `wakil version` CLI subcommand **already exists** (`src/wakil/cli/main.py:1558-1561`), printing `f"wakil {wakil.__version__}"`. There is no `--version` flag on the root callback, but the subcommand already covers the need — this is a wiring problem, not a missing-feature problem.
+- Zero git tags, zero branch protection on `main` (private repo without GitHub Pro can't even configure it — confirmed via `gh api .../branches/main/protection` → 403 "upgrade to Pro"), so nothing today would block a workflow from pushing a commit + tag directly to `main`.
+- **The GitHub repo (`ebridges/wakil`) is currently private.** This matters directly for requirement 1 ("others may install it too") — see Open Question 1 below.
+- `git-cliff` and `hatch-vcs` are not installed/configured anywhere yet (`import hatch_vcs` fails locally) — both are genuinely new dependencies, not already-present-but-unwired.
+
+---
+
+## 1. Versioning strategy — recommend `hatch-vcs` (git-tag-derived dynamic versioning)
+
+**Decision: (b), git-tag-derived, not hand-maintained.**
+
+Justification against "keep it simple": this is not adding complexity, it's **removing** an existing duplicated-state bug. Today there are *two* hand-written version strings (`pyproject.toml`'s `version = "0.1.0"` and `src/wakil/__init__.py`'s `__version__ = "0.1.0"`) that must be kept in sync by hand, forever, with no check that they agree. `hatch-vcs` collapses both into one source of truth (the git tag), derived automatically at build time. Net line count and mental-model complexity goes *down*, not up — one new `[build-system]` dependency and a 2-line `[tool.hatch.version]` block, in exchange for deleting an entire manual bookkeeping step from every release.
+
+**Concrete changes:**
+
+`pyproject.toml`:
+```toml
+[project]
+# remove: version = "0.1.0"
+dynamic = ["version"]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+```
+
+`src/wakil/__init__.py`:
+```python
+"""wakil: a local-first CLI agent for a personal Markdown knowledge base."""
+
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("wakil")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"  # editable/uninstalled dev checkout
+```
+No change needed to `main.py` — the existing `wakil version` command already reads `wakil.__version__`, it just starts reporting a real, tag-derived value instead of a frozen string.
+
+**Operational notes to be aware of (not blockers, just expected behavior):**
+- `hatch-vcs` needs git history/tags present to compute a version. `actions/checkout` in CI/release workflows must use `fetch-depth: 0`. Local `git clone` (shallow or not) is fine since users normally get tags too, but a *shallow clone with `--depth 1` and no tags* would fall back to `0.0.0+unknown`/a dev placeholder — worth a one-line README caveat once installable, not a design problem.
+- Between releases, commits on `main` will report versions like `0.1.1.dev4+gabcdef1` (hatch-vcs's default dev-version scheme) — this is correct, expected, and is itself a feature (an installed dev build is traceable to a commit), not a bug to fix.
+- Since there are zero tags today, the **first tag cut under this scheme should be `v0.1.0`** (matching the current static value) to avoid an artificial version jump, with `v0.2.0`+ following normal semver bump rules thereafter.
+
+---
+
+## 2. Gating criteria
+
+**Baseline (must always be true, re-verified against the exact commit being tagged, inside the release workflow itself — not by trusting a possibly-stale CI run):**
+- `uv sync --locked` succeeds (lockfile still resolves)
+- `uv run ruff check .` passes
+- `uv run pytest -q` passes (this already includes the skill-lint suite as ordinary `tests/unit/test_skill_lint.py` tests — no separate step needed; the `eval` marker suite stays excluded by the existing `addopts = "-m 'not eval'"`, correctly, since that's a live-model suite unrelated to release gating)
+
+Re-running these three inline as the first job steps in `release.yml` (rather than querying `ci.yml`'s run status via the GitHub API / `workflow_run` trigger) is the simpler design: no cross-workflow polling, no "which run corresponds to this exact ref" ambiguity, no risk of trusting a CI run that predates a same-commit re-tag. The duplication with `ci.yml` is ~10 lines of YAML — an acceptable, proportionate cost for a much simpler failure mode.
+
+**The `ty` gap — explicit decision: (b) defer, not (a) add now.**
+
+Reasoning: `ty` is listed in CLAUDE.md's stated stack but has never been run against this codebase — there is no config, no baseline of what it would currently flag, and no idea whether wiring it in surfaces zero issues or forty. Folding "stand up a brand-new, previously-unenforced type-checking gate" into "design the release process" conflates two separately-scoped pieces of work and risks blocking the *first* release on an open-ended cleanup task unrelated to release engineering. Recommendation: close this gap as its own follow-up (add `ty` config, run it once, triage/fix what it finds, *then* add it to `ci.yml` as a normal PR gate) before or after the release process ships, but not bundled into `release.yml`. This is a deliberate, stated deferral, not a silent drop — flag it as a tracked follow-up (an issue, or a short ADR note) so it doesn't quietly disappear.
+
+**One additional gate worth adding (proportionate, not over-built):** a `dry_run` input on the release workflow (see §4) that runs every step except pushing the tag/commit and publishing — this is the practical version of a "does this look right" gate for a manual, infrequent process, without needing a separate approval-board mechanism.
+
+**Explicitly not adding:** dependency vulnerability scanning (`pip-audit`), SBOM generation, coverage thresholds, multi-OS/multi-Python-version test matrices. None of these were asked for and CLAUDE.md's "don't over-engineer" principle argues against adding them speculatively for a solo-maintainer local tool.
+
+---
+
+## 3. Changelog automation — `git-cliff`
+
+The existing commit history is disciplined enough (gitmoji + Conventional Commits, enforced by the `commit` skill at `.claude/skills/commit/SKILL.md`) that a generator is a good fit and hand-writing would be pure overhead.
+
+**New file: `cliff.toml`** at repo root. Key design point: git-cliff's built-in `conventional_commits = true` parser expects the type keyword at the very start of the subject, but this repo's convention puts an emoji *before* the type (`✨ feat(ingest): ...`). So: set `conventional_commits = false` and drive grouping entirely off `commit_parsers` with a small regex tolerant of the leading emoji, matching the exact type vocabulary already documented in the `commit` skill (`feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert`):
+
+```toml
+[changelog]
+header = """
+# Changelog
+
+All notable changes to `wakil` are documented in this file.
+"""
+body = """
+{% if version %}## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}## [Unreleased]
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = false
+filter_unconventional = false
+tag_pattern = "v[0-9]*"
+commit_parsers = [
+  { message = "^.{0,3}feat(\\(.+\\))?!?:",     group = "✨ Features" },
+  { message = "^.{0,3}fix(\\(.+\\))?!?:",      group = "🐛 Bug Fixes" },
+  { message = "^.{0,3}perf(\\(.+\\))?!?:",     group = "⚡ Performance" },
+  { message = "^.{0,3}refactor(\\(.+\\))?!?:", group = "♻️ Refactoring" },
+  { message = "^.{0,3}docs(\\(.+\\))?!?:",     group = "📝 Documentation" },
+  { message = "^.{0,3}(build|ci)(\\(.+\\))?!?:", group = "📦 Build/CI", skip = true },
+  { message = "^.{0,3}(chore|style)(\\(.+\\))?!?:", group = "🔧 Chores", skip = true },
+  { message = "^.{0,3}test(\\(.+\\))?!?:",     group = "✅ Tests", skip = true },
+  { message = "^Merge pull request",           skip = true },
+  { message = ".*",                            group = "Other" },
+]
+```
+(`skip = true` on chore/build/test/style keeps the *release-facing* changelog focused on user-visible changes — feat/fix/perf/refactor/docs. This is a judgment call worth confirming — see Open Question 2.)
+
+**Generated output shape** for a `v0.2.0` cut would look like:
+```markdown
+## [0.2.0] - 2026-07-27
+
+### ✨ Features
+- thread frontmatter confidence through extraction's proposed_note (bfaedd8)
+- synthesize real content on entity create, not a placeholder (32d7a5f)
+
+### 🐛 Bug Fixes
+- recognize personal-reflection shape in text extraction skill (af27e14)
+- reconcile required fields when correcting a proposed note's type (12a1e60)
+```
+Run twice in the release workflow: once to write/update the full `CHANGELOG.md` (`git cliff --tag vX.Y.Z -o CHANGELOG.md`), once to extract just the new section in isolation (`git cliff --tag vX.Y.Z --unreleased --strip all`) to use verbatim as the GitHub Release body.
+
+**New file needed:** `CHANGELOG.md` doesn't exist yet — first release run creates it (git-cliff creates it fresh if absent).
+
+---
+
+## 4. Release workflow — `.github/workflows/release.yml`
+
+**Trigger:** `workflow_dispatch` only, matching "maintainer decides when":
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      dry_run:
+        description: "Preview only — build and changelog, no tag/push/publish"
+        required: false
+        type: boolean
+        default: false
+```
+The maintainer choosing `bump` explicitly (rather than the workflow auto-detecting it from commit types via `git cliff --bumped-version`) is the simpler, more predictable design — it keeps "what kind of release this is" a human judgment call, consistent with "manual, periodic cut points," and avoids coupling the release mechanism's correctness to how well commit-type auto-detection matches intent.
+
+**Permissions:**
+```yaml
+permissions:
+  contents: write   # push changelog commit + tag, create GitHub Release
+  id-token: write    # PyPI Trusted Publishing (OIDC)
+```
+
+**Step sequence:**
+1. `actions/checkout@v7` with `fetch-depth: 0` (full history + tags — required by both `hatch-vcs` and `git-cliff`)
+2. `astral-sh/setup-uv@v8.3.2`, `uv sync --locked`
+3. Gate: `uv run ruff check .`
+4. Gate: `uv run pytest -q`
+5. Compute next version: read `git describe --tags --abbrev=0 --match 'v*' 2&gt;/dev/null || echo v0.0.0` for the current latest tag, parse `X.Y.Z`, bump per `inputs.bump` (a short inline Python one-liner is enough — no new script file needed). Export as `NEW_VERSION`/`NEW_TAG` (`vX.Y.Z`) via `$GITHUB_ENV`.
+6. Install `git-cliff` (e.g. `uvx git-cliff` — no need to add it as a project dependency, invoke via `uvx` in the workflow only)
+7. Generate changelog: update `CHANGELOG.md` in full, and separately capture the new section to `release-notes.md` (workflow-local scratch file, not committed) for the Release body
+8. If not `dry_run`: commit `CHANGELOG.md` (`📝 docs(changelog): ${NEW_TAG}`) directly to the ref that was dispatched (normally `main` — no branch-protection obstacle today, confirmed above)
+9. If not `dry_run`: create and push annotated tag `${NEW_TAG}` on that commit (this is the step that fixes `hatch-vcs`'s computed version)
+10. `uv build` (produces `dist/*.whl` + `dist/*.tar.gz`) — run *after* tagging, so `hatch-vcs` reads the just-created tag
+11. Sanity check: confirm the built wheel's version matches `NEW_VERSION` (cheap `python -c` check against `dist/*.whl` filename) — fail loudly rather than silently publishing a mismatched artifact
+12. If `dry_run`: upload `dist/*` and `release-notes.md`/`CHANGELOG.md` diff as workflow artifacts for review, and stop here (no push, no release, no publish)
+13. If not `dry_run`: create the GitHub Release — `gh release create ${NEW_TAG} dist/* --title ${NEW_TAG} --notes-file release-notes.md`
+14. If not `dry_run`: publish to PyPI via `pypa/gh-action-pypi-publish@release/v1` (no `password`/token input — Trusted Publishing via the job's OIDC token, using the `id-token: write` permission from step's job-level `permissions`)
+
+**One-time manual setup a human must do (cannot be automated):**
+- Register the `wakil` project on pypi.org (if the name isn't already claimed by someone else — worth checking early) and configure a **Trusted Publisher** entry pointing at `ebridges/wakil`, workflow file `release.yml`, environment (optional). This must exist before step 14 can succeed the first time; PyPI trusted-publisher registration can be done as a "pending publisher" before the project exists at all, so it can be set up ahead of the first real release.
+- Confirm (or add) a `contents: write`-capable default `GITHUB_TOKEN` at the repo/workflow level (default is usually fine, but repo Settings → Actions → Workflow permissions should be "Read and write permissions" — worth a one-time check since the default can be "Read only" on some repos).
+
+---
+
+## 5. Packaging verification
+
+Checked concretely against `src/wakil/cli/main.py` and `pyproject.toml`:
+- `[project.scripts] wakil = "wakil.cli.main:app"` is already correct for both `pip install` and `uv tool install` distribution — no change needed.
+- `[tool.hatch.build.targets.wheel] packages = ["src/wakil"]` correctly packages the src-layout — no change needed.
+- **Version reporting already exists**: `wakil version` (subcommand, not a `--version` flag) is implemented and works today, it just currently prints the frozen `"0.1.0"` string. §1's change makes it report the real installed version with zero changes to `main.py` itself. No gap to fix here beyond the versioning-strategy change already planned.
+- **Optional, not required:** adding a `--version`/`-V` eager flag on the root Typer callback for conventional-CLI ergonomics (`wakil --version` in addition to `wakil version`) — small nicety, not blocking installability, can be a normal follow-up PR rather than part of the release-process rollout.
+- **README.md** currently documents only `git clone` + `uv sync` as the install path. Once PyPI publishing is live, README needs a new install section (`pip install wakil` / `uv tool install wakil`) — this is a one-time doc PR to do alongside (not as part of) the first automated release, since `release.yml` shouldn't be responsible for editing README prose.
+- Optional PyPI-listing polish (not required for installability, cheap to add if desired): `[project.classifiers]` and `[project.urls]` (Homepage/Repository) in `pyproject.toml`.
+
+---
+
+## Open questions (flagging back rather than deciding unilaterally)
+
+1. **The repo is currently private.** Publishing to public PyPI makes the built sdist/wheel (source included) downloadable by anyone, regardless of the GitHub repo's visibility — "others may install it too" via PyPI effectively means the package becomes public even if the source repo stays private. Is that the intent, or should the source repo also go public as part of this? (If the intent is a smaller, semi-private distribution — e.g., only a few trusted people — GitHub Releases alone, without PyPI, would keep artifact access gated by repo/org membership instead.) This changes whether §4 step 14 (PyPI publish) belongs in the workflow at all versus being deferred until the visibility question is resolved.
+2. **Changelog scope**: the `cliff.toml` sketch above skips `chore`/`build`/`ci`/`test`/`style` commits from the generated changelog, keeping it to feat/fix/perf/refactor/docs. Confirm that's the right bar — some maintainers prefer a fuller record even if verbose.
+3. **`ty` gate deferral**: confirmed as a deliberate decision above (§2), not silently dropped — do you want this tracked as a GitHub issue now, or left as a documented gap for later?
+4. **First-tag version**: recommending `v0.1.0` as the first tag (matching current `pyproject.toml`) rather than jumping straight to `v0.2.0` — reasonable to override if you'd rather treat "first tagged release" as itself a meaningful jump.
+
+### Critical Files for Implementation
+- /Users/ebridges/Projects/wakil/pyproject.toml
+- /Users/ebridges/Projects/wakil/src/wakil/__init__.py
+- /Users/ebridges/Projects/wakil/.github/workflows/release.yml (new)
+- /Users/ebridges/Projects/wakil/cliff.toml (new)
+- /Users/ebridges/Projects/wakil/.github/workflows/ci.yml (reference for step parity)
+- /Users/ebridges/Projects/wakil/CHANGELOG.md (new, generated)
+- /Users/ebridges/Projects/wakil/README.md (install-section update, follow-up)</result>
+<usage><subagent_tokens>59512</subagent_tokens><tool_uses>16</tool_uses><duration_ms>213366</duration_ms></usage>
+</task-notification>
