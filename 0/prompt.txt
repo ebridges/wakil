@@ -1,0 +1,221 @@
+<task-notification>
+<task-id>a8ab018062171e585</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/a8ab018062171e585.output</output-file>
+<status>completed</status>
+<summary>Agent "Investigate _candidate_entity_notes noise" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># Investigation: `_candidate_entity_notes` in `src/wakil/app/ingest_service.py`
+
+## 1. Complete function body + regex constants
+
+File: `/Users/ebridges/Projects/wakil/src/wakil/app/ingest_service.py`
+
+Regex and stopword constants (lines 460–502):
+
+```python
+# A run of 1-4 capitalized words: "Mosaic", "Ian Gutwinski", "Riviera Partners".
+_PROPER_NOUN_RE = re.compile(
+    r"\b[A-Z][A-Za-z0-9&amp;.'-]*(?:\s+[A-Z][A-Za-z0-9&amp;.'-]*){0,3}\b"
+)
+# Single capitalized words that are only candidates because they happened to
+# start a sentence — common enough in free-text context strings that they'd
+# otherwise pollute every lookup with irrelevant title matches.
+_PROPER_NOUN_STOPWORDS = {
+    "I",
+    "The",
+    "A",
+    "An",
+    "Meeting",
+    "Call",
+    "Phone",
+    "Yeah",
+    "Well",
+    "So",
+    "But",
+    "And",
+    "This",
+    "That",
+    "We",
+    "She",
+    "He",
+    "They",
+}
+
+
+# Generic words in a humanized filename/title ("offer", "sync", "call") that
+# would otherwise substring-match unrelated entity notes once casing is no
+# longer a filter (see _title_terms).
+_TITLE_TERM_STOPWORDS = {w.lower() for w in _PROPER_NOUN_STOPWORDS} | {
+    "sync",
+    "offer",
+    "prep",
+    "recap",
+    "update",
+    "follow",
+    "notes",
+    "chat",
+    "intro",
+}
+```
+
+`_title_terms` helper (lines 505–518) — lowercases a filename-derived title and drops words ≤2 chars or in `_TITLE_TERM_STOPWORDS`.
+
+The function itself (lines 521–572):
+
+```python
+def _candidate_entity_notes(
+    session,
+    workspace_id: int,
+    text: str,
+    schemas: dict,
+    *,
+    extra_terms: set[str] = frozenset(),
+) -&gt; list[tuple[str, str]]:
+    """Direct title lookup for proper nouns against known entity directories.
+
+    Complements (does not replace) the relevance search above: a name match
+    here doesn't depend on QMD/FTS ranking a short, sparse entity stub above
+    longer notes that merely mention the same name.
+
+    extra_terms: additional lowercase candidate words (e.g. from
+    _title_terms) that bypass the capitalized-proper-noun requirement —
+    for text sources where casing can't be trusted as a name signal.
+    """
+    directories = tuple(
+        f"{schema.directory}/"
+        for schema in schemas.values()
+        if schema.directory and schema.category in ("identity", "hybrid")
+    )
+    if not directories:
+        return []
+    candidates = {
+        phrase
+        for phrase in _PROPER_NOUN_RE.findall(text)
+        if len(phrase) &gt; 2 and phrase not in _PROPER_NOUN_STOPWORDS
+    }
+    # candidates ends up including a lot of irrelevant terms -- e.g. small talk,
+    # speech terms (e.g. Mm-hmm, Very, etc.): is there a way to filter those out?
+    candidates |= extra_terms
+    if not candidates:
+        return []
+    notes = session.scalars(
+        select(Note).where(
+            Note.workspace_id == workspace_id,
+            or_(*(Note.path.like(f"{d}%") for d in directories)),
+        )
+    )
+    matches: list[tuple[str, str]] = []
+    for note in notes:
+        note_title = note.title or ""
+        if not note_title:
+            continue
+        if any(
+            phrase.lower() in note_title.lower() or note_title.lower() in phrase.lower()
+            for phrase in candidates
+        ):
+            matches.append((note.path, note_title))
+    return matches
+```
+
+Note line 551–552 is an existing inline comment/TODO acknowledging exactly this problem ("small talk, speech terms (e.g. Mm-hmm, Very, etc.)").
+
+## 2. Caller and downstream data flow
+
+Sole call site is in `prepare_enrichment` (lines 383–401):
+
+```python
+for path, note_title in _candidate_entity_notes(
+    session,
+    workspace_id,
+    " ".join(filter(None, [context, text])),
+    load_entity_schemas(config.root_path),
+    extra_terms=_title_terms(title),
+):
+    if path in seen_paths or path == source.raw_text_path:
+        continue
+    seen_paths.add(path)
+    related_notes.append(
+        SearchHit(
+            kind="note",
+            ref=path,
+            title=note_title,
+            snippet="",
+            engine="entity-name",
+        )
+    )
+```
+
+Key point: **the raw regex-matched candidate phrases (`candidates` set) never leave the function.** They are used purely as an in-memory filter to decide which *existing Note rows already in the DB* get appended to `related_notes` (via substring match against `note.title`, lines 566–571). The candidate strings themselves are discarded once the function returns — only `(note.path, note.title)` pairs for notes whose *title* happens to substring-match some candidate survive.
+
+Those `related_notes` → `related_pairs = [(hit.ref, hit.title) for hit in related_notes]` (line 408) are then passed into both prompt builders:
+
+- `build_extraction_prompt(..., related_pairs, ...)` (line 421, `_run_extraction`, line 598-607)
+- `build_resolution_prompt(text, ..., related_pairs, ...)` (line 630, `_run_entity_resolution`, line 615-634)
+
+In `/Users/ebridges/Projects/wakil/src/wakil/llm/prompts.py`, both builders render this list with `_render_related` (lines 217–220):
+
+```python
+def _render_related(related_notes: list[tuple[str, str]]) -&gt; str:
+    if not related_notes:
+        return "(none found)"
+    return "\n".join(f"- [[{path}]] {title}" for path, title in related_notes)
+```
+
+Used at:
+- `build_extraction_prompt`, line 82: `f"Existing related notes:\n{_render_related(related_notes)}"`
+- `build_resolution_prompt`, line 116: `parts += [_render_related(related_notes), ""]` (under the header "Existing notes that may already cover these entities:")
+
+**Answer to the precise question**: Neither is it literal verbatim insertion of the candidate list into the prompt, nor is it a pre-filter on which notes get *loaded/fetched from disk* (full note content is never loaded here at all — only `note.path`/`note.title` are queried from the DB, and `snippet=""` is hardcoded). It's a third, more indirect path:
+
+- The regex candidates only ever act as a matching key against existing `Note.title` values already in the SQL result set (all notes under `identity`/`hybrid`-category entity directories, loaded via one `Note.path.like(...)` query, line 556-561).
+- If a junk candidate (e.g. "Mm-hmm", "Very", "Right") happens to substring-match (or be substring-matched by) some real note's title, that note's `(path, title)` — just the wikilink + title string, one line — gets appended to `related_notes`/`related_pairs`, which *does* land verbatim in both the extraction prompt and the resolution prompt as one extra `- [[path]] title` line.
+- If no note title collides with the junk candidate, it causes **zero** prompt bloat — it's silently dropped. So actual context bloat only manifests as accidental extra "- [[path]] title" lines when a filler word happens to coincide with an existing note title/substring (e.g., a short entity stub whose title is itself a common word).
+
+So "bloating the context" here is real but indirect and probabilistic — driven by false-positive substring matches against real note titles, not by the raw regex-candidate list itself ever being serialized into a prompt.
+
+## 3. What the regex actually matches on real text
+
+```python
+_PROPER_NOUN_RE = re.compile(
+    r"\b[A-Z][A-Za-z0-9&amp;.'-]*(?:\s+[A-Z][A-Za-z0-9&amp;.'-]*){0,3}\b"
+)
+```
+
+This matches any run of 1–4 whitespace-separated capitalized "words" (each starting with `[A-Z]`, continuing with letters/digits/`&amp;`/`.`/`'`/`-`). It has **no notion of proper-noun-ness** beyond capitalization — it will match:
+- Legitimate names: "Mosaic", "Ian Gutwinski", "Riviera Partners"
+- Sentence-initial capitalized common words/interjections: "Mm-hmm" (hyphen is an allowed continuation char, so it matches as one token), "Very", "Right", "Yeah" — though "Yeah" is explicitly stopword-listed already (see below), "Very" and "Right" and "Mm-hmm" are not.
+
+This exact gap is called out in the code's own inline comment (line 551–552, quoted above), i.e. the maintainers already flagged that "small talk, speech terms (e.g. Mm-hmm, Very, etc.)" pass through uncaught.
+
+## 4. Existing stopword/filler/threshold mechanisms
+
+Yes, a partial mechanism already exists, immediately above the function:
+
+- `_PROPER_NOUN_STOPWORDS` (lines 467–486): a fixed 18-word set — `I, The, A, An, Meeting, Call, Phone, Yeah, Well, So, But, And, This, That, We, She, He, They`. This is a hand-picked list of sentence-initial capitalized function words/pronouns/discourse markers, plus a few domain nouns (`Meeting`, `Call`, `Phone`) that would otherwise map to a `meetings/` directory falsely (verified by the test asserting `not any(p.startswith("meetings/") ...)`).
+- `_TITLE_TERM_STOPWORDS` (lines 492–502): derived from the above (lowercased) plus filename-genre words (`sync, offer, prep, recap, update, follow, notes, chat, intro`) — but this list is only applied in `_title_terms`, i.e. to the filename-derived `extra_terms` path, not to the transcript-text regex path.
+- Minimum length: `len(phrase) &gt; 2` (line 549) is the only length threshold — a coarse 3-character-minimum filter, not word-frequency-based.
+
+There is **no** minimum-frequency threshold, and no general filler/interjection word list (e.g. nothing covers "Mm-hmm", "Very", "Right", "Okay", "Um", "Oh", "Hmm", "Sure", "Wow", "Great", "Cool", "Hey", "Now", "Actually", etc.) — confirmed absent both in this file and via grep of nearby module scope. The existing `_PROPER_NOUN_STOPWORDS` set is exactly what the docstring/comment above it says it is: a reactive list built to fix specific observed false positives (evidently the `meetings/` test case), not a systematic filler/stopword solution — the inline TODO comment at line 551–552 is the developer's own acknowledgment that it's incomplete.
+
+## 5. Existing tests
+
+File: `/Users/ebridges/Projects/wakil/tests/unit/test_ingest_service.py` (imports `_candidate_entity_notes` at line 13).
+
+**`test_candidate_entity_notes_finds_pages_relevance_search_would_bury`** (lines 907–931):
+- Creates a `companies/mosaic-private-markets.md` note titled "Mosaic".
+- Calls `_candidate_entity_notes(session, workspace_id, "Meeting is with Eleni Karahalios to discuss Mosaic and Jane Doe.", load_entity_schemas())`.
+- Asserts `"companies/mosaic-private-markets.md"` and `"people/jane-doe.md"` are in the matched paths.
+- Asserts **`not any(p.startswith("meetings/") for p in paths)`** — i.e. explicitly tests that sentence-initial "Meeting" is *not* treated as a proper noun/candidate that would match a `meetings/` directory note. (Relies on `Meeting` being in `_PROPER_NOUN_STOPWORDS`.)
+
+**`test_candidate_entity_notes_matches_filename_derived_title_terms`** (lines 934–961):
+- Creates `companies/hovnanian-homes.md` with `name: K. Hovnanian Homes`, `aliases: [Hovnanian]`.
+- Tests that without `extra_terms`, `"We talked about the offer and the team."` does not match; with `extra_terms=_title_terms("hovnanian kyle carnes offer sync")`, it does.
+- This exercises the `extra_terms`/filename-hint path, not the raw-regex path.
+
+**`test_title_terms_drops_generic_filename_words`** (lines 964–968):
+- Asserts `_title_terms("hovnanian kyle carnes offer sync")` keeps `hovnanian`, `kyle`, `carnes` but drops `offer` (confirming `_TITLE_TERM_STOPWORDS` behavior).
+
+**Transcript-vocabulary implications for any future filler filter**: the tests currently exercise the word `"Meeting"` (must stay excluded, already stopword-listed) and real names `"Eleni Karahalios"`, `"Mosaic"`, `"Jane Doe"` (must remain included — none of these are common filler words, so a filler/stopword filter is unlikely to collide with them). No test currently exercises `"Mm-hmm"`, `"Very"`, `"Yeah"` (partially covered already), or other filler tokens directly — there is no existing test asserting those are filtered, matching the fact that this gap is still open (per the in-code TODO comment) rather than already covered by a passing test.</result>
+<usage><subagent_tokens>24295</subagent_tokens><tool_uses>11</tool_uses><duration_ms>76621</duration_ms></usage>
+</task-notification>
