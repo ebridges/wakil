@@ -1,0 +1,171 @@
+<task-notification>
+<task-id>ab0acf458a49b53bf</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/ab0acf458a49b53bf.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore wakil CLI and context flow" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I now have a complete picture. Here is the full report.
+
+## 1. Typer command definitions — `src/wakil/cli/main.py`
+
+The Typer app lives in `src/wakil/cli/main.py`. Structure:
+
+- Root app: `app = typer.Typer(name="wakil", ...)` with a `@app.callback()` `main()` that stashes the resolved `-w/--workspace` value on `ctx.obj` (not resolved yet — resolution happens lazily via `_resolve_workspace(ctx)` in each command).
+- `ingest_app = typer.Typer(...)` mounted via `app.add_typer(ingest_app, name="ingest")`, with three subcommands: `ingest_transcript`, `ingest_text`, `ingest_article` (lines 482–536).
+- `enrich` is a top-level command (`@app.command()`, line 356), not under a sub-Typer.
+
+Shared option pattern: reusable option annotations are defined once as module-level `Annotated[...]` aliases and reused across the three `ingest_app` subcommands:
+
+```python
+_YES = Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")]
+_LOCAL = Annotated[bool, typer.Option("--local", "-l", help="Write files without branching, committing, or opening a PR.")]
+_CONTEXT = Annotated[
+    str | None,
+    typer.Option(
+        "--context", "-C",
+        help="A few lines of context about the source (attendees, company, purpose) "
+             "to guide analysis and entity linking.",
+    ),
+]
+```
+
+`enrich`'s `--context`/`-C` is declared inline (not via `_CONTEXT`), with slightly different help text:
+
+```python
+@app.command()
+def enrich(
+    ctx: typer.Context,
+    source_id: Annotated[int, typer.Argument(help="Source id from the capture step.")],
+    context: Annotated[
+        str | None,
+        typer.Option("--context", "-C",
+            help="Extra context (attendees, company, purpose); defaults to the "
+                 "context given at capture time."),
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", ...)] = False,
+    force: Annotated[bool, typer.Option("--force", ...)] = False,
+    local: Annotated[bool, typer.Option("--local", "-l", ...)] = False,
+) -&gt; None:
+```
+
+The three ingest subcommands:
+
+```python
+@ingest_app.command("transcript")
+def ingest_transcript(ctx, file: Annotated[Path, typer.Argument(...)], context: _CONTEXT = None, yes: _YES = False, local: _LOCAL = False) -&gt; None:
+    _run_ingest(ctx, "transcript", yes, file=file, local=local, context=context)
+
+@ingest_app.command("text")
+def ingest_text(ctx, file: Annotated[Path, typer.Argument(...)], context: _CONTEXT = None, yes: _YES = False, local: _LOCAL = False) -&gt; None:
+    _run_ingest(ctx, "text", yes, file=file, local=local, context=context)
+
+@ingest_app.command("article")
+def ingest_article(ctx, url: Annotated[str, typer.Argument(...)], context: _CONTEXT = None, yes: _YES = False, local: _LOCAL = False) -&gt; None:
+    _run_ingest(ctx, "article", yes, url=url, local=local, context=context)
+```
+
+All three delegate to a shared private helper `_run_ingest(ctx, kind, yes, file=None, url=None, local=False, context=None)` (line 288) that resolves the workspace, calls `prepare_capture`, prints the proposal, confirms, calls `apply_capture`, and lands via git.
+
+Note: today `--context`/`-C` is a single `str | None` — Typer's `Option` is not declared with `multiple=True`/list type anywhere in this file, so there is no existing precedent in `main.py` for a repeatable option except `typer.Argument(help=...)` used with `list[int]` for memory ids (e.g. `memory_promote(ctx, ids: Annotated[list[int], typer.Argument(...)])`), which shows the codebase's pattern for accepting multiple values is `list[T]` type annotation — that's the natural pattern to replicate for a repeatable `--context`.
+
+## 2. Context flow: CLI → `ingest_service.py`
+
+**Capture path (`ingest`):**
+```
+ingest_transcript/text/article (context: str|None)
+  → _run_ingest(ctx, kind, yes, file=, url=, local=, context=)
+    → prepare_capture(config, kind, *, file=None, url=None, context: str | None = None) -&gt; CaptureProposal
+```
+`src/wakil/app/ingest_service.py:192`:
+```python
+def prepare_capture(config: WorkspaceConfig, kind: str, *, file: Path | None = None,
+                     url: str | None = None, context: str | None = None) -&gt; CaptureProposal:
+    ...
+    proposal = CaptureProposal(..., context=context, ...)
+```
+`context` is stored as a plain field on the `CaptureProposal` dataclass (line 117: `context: str | None = None`), then persisted by `apply_capture` (line 254) into `Source.metadata_json` as `{"context": proposal.context, ...}` (lines 275–284).
+
+**Enrichment path (`enrich`):**
+```
+enrich(context: str|None, ...)
+  → prepare_enrichment(config, source_id, client, context=context, force=force) -&gt; EnrichmentProposal
+```
+`src/wakil/app/ingest_service.py:329`:
+```python
+def prepare_enrichment(config: WorkspaceConfig, source_id: int, client: ModelClient,
+                        context: str | None = None, force: bool = False) -&gt; EnrichmentProposal:
+    with open_session(config) as session:
+        ...
+        metadata = json.loads(source.metadata_json or "{}")
+        context = context or metadata.get("context")   # falls back to capture-time context
+        text = _load_source_text(config, source)
+        ...
+        related_query = " ".join(filter(None, [title, context, text[:300]]))  # used for related-note search
+        ...
+        proposal = EnrichmentProposal(source_id=source_id, title=title, context=context, related_notes=related_notes, ...)
+```
+`context` is a plain `str | None` field on `EnrichmentProposal` (line 145). Downstream, `proposal.context` is threaded into prompt-building (`build_revision_prompt(text, proposal.summary, targets, context=proposal.context)` at line 861) and re-persisted into note frontmatter/`metadata_json` (`apply_enrichment`, lines 1074–1075, 1349–1350, 1366). Note: `prepare_enrichment`'s `context` parameter is positional/keyword but not keyword-only (`context: str | None = None` — no `*` before it, unlike `prepare_capture`).
+
+There is no intermediate "context assembly" layer — the raw string is passed through as-is at every hop, and the only transformation is string concatenation into `related_query` for search and into prompts. `validate_proposal(proposal, kb_root=config.root_path)` (called from `main.py`'s `enrich` command) does not touch `context`.
+
+## 3. `src/wakil/config` — WorkspaceConfig / workspace-root
+
+`src/wakil/config/settings.py` defines `WorkspaceConfig(BaseModel)`:
+
+```python
+class WorkspaceConfig(BaseModel):
+    name: str
+    root_path: Path        # this checkout's own directory — used for ALL file I/O
+    state_root: Path | None = None   # where .wakil/ lives; defaults to root_path
+    git_remote: str | None = None
+    qmd_enabled: bool = False
+    ingest_directory: str = Field(default="sources")
+    generated_directory: str = Field(default="drafts")
+```
+
+`root_path` is the field the codebase already uses everywhere as the sandbox/allowed root for file I/O — e.g. `ingest_service.py` uses `config.root_path` as the base for writing raw captures, resolving proposed note paths, loading entity schemas, and (explicitly) as the `kb_root` argument name in `validate_proposal(proposal, kb_root=config.root_path)`. `config.root_path.resolve()` is also used at line 1396 for a resolved-path safety check. This is the natural `allowed_root` to sandbox `@file:` expansion against.
+
+`state_root` is a distinct concept (where `.wakil/` and the DB live — differs only for linked git worktrees) and is NOT the right root for content-file sandboxing.
+
+Loading: `WorkspaceConfig.load(root: Path) -&gt; WorkspaceConfig` (classmethod) reads `.wakil/config.yaml` located via `resolve_state_root(root)`, but overrides `root_path`/`state_root` in the loaded data with the actual resolved paths for this invocation (lines 102–113). CLI commands get this via `_resolve_workspace(ctx)` (in `main.py`, returns a `Path`) followed by `WorkspaceConfig.load(root)`.
+
+`find_workspace_root(start: Path) -&gt; Path | None` walks upward from `start` looking for `.wakil/config.yaml` (via `is_initialized`), which is how the workspace root is discovered when `-w` isn't passed.
+
+## 4. Token estimation / context-window sizing
+
+**No token-counting/estimation utility exists anywhere in `src/wakil`.** A full `grep -rniE "token"` across `src` and `tests` turns up only:
+- `DEFAULT_MAX_TOKENS = 8192` in `src/wakil/llm/client.py:19` — this is an output-token budget (`max_tokens` param passed to `.complete()`), not an input-context-window limit.
+- `ModelTruncatedError` in the same file, which retries with a doubled `max_tokens` budget on truncation (used by `src/wakil/llm/schemas.py`'s `max_tokens = DEFAULT_MAX_TOKENS`, `max_tokens *= 2` retry loop, lines ~138–153).
+- Unrelated uses of "token" as a word (ASR filler tokens, FTS query tokens, skill-name tokens in lint.py) — not token counting.
+- `MAX_CONTEXT_BLOCKS = 12` in `src/wakil/app/query_service.py:18` — this is a count of search-hit blocks to include in a query prompt, not a token count or model context-window size.
+
+There is **no** concept of the active model's context-window size (e.g. no `context_length`, `CONTEXT_WINDOW`, `MAX_CONTEXT` anywhere) — `resolve_client()` in `src/wakil/llm/client.py` only picks a provider/model string (`DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"`, `WAKIL_MODEL` env override) with no notion of that model's input context window. A new context-registration feature would need to add both a token-estimation helper (e.g. `estimate_tokens`) and a model-context-window lookup/constant from scratch — neither exists today.
+
+## 5. Existing CLI test patterns for ingest/enrich
+
+Tests live in `tests/integration/test_ingest_cli.py` (and enrichment specifics also touched in `tests/integration/test_git_cli.py`). Harness: Typer's `CliRunner` from `typer.testing`, module-level singleton:
+
+```python
+from typer.testing import CliRunner
+from wakil.cli.main import app
+runner = CliRunner()
+```
+
+Invocation pattern: `runner.invoke(app, ["-w", str(kb_path), "ingest", "transcript", str(transcript), "--yes", "--local", *extra])` — everything driven through actual CLI argv, no direct service-layer calls.
+
+Fixtures (`tests/conftest.py`):
+- `kb_path(tmp_path)` — copies a static fixture KB tree (`tests/fixtures/kb`) into a pytest `tmp_path`, giving each test an isolated, pre-initialized-looking workspace directory.
+- `isolated_workspace_registry` (autouse) — redirects `XDG_CONFIG_HOME` into `tmp_path`, and clears `WAKIL_WORKSPACE`/`WAKIL_SKILL_PATH` env vars so tests don't touch the real `~/.config/wakil`.
+- `_no_real_qmd` (autouse) — monkeypatches `wakil.integrations.qmd.shutil.which` to return `None` so tests never shell out to the real `qmd` binary.
+- `NO_COLOR`/`COLUMNS=200` env set at import time in `conftest.py` for deterministic Rich output in assertions.
+
+Local test helpers in `test_ingest_cli.py`:
+- `FakeClient` (line 46) — a fake `ModelClient` with `model = "fake-model"` and a `.complete(system, prompt, max_tokens=8192)` that pops scripted JSON payloads off a queue (`EXTRACTION_JSON`, `RESOLUTION_JSON` constants); installed via `monkeypatch.setattr("wakil.llm.client.resolve_client", lambda: FakeClient())`.
+- `_init(kb_path)` — runs `wakil init` via the CLI, writes a `meeting.txt` transcript, returns its path.
+- `_capture(kb_path, transcript, *extra)` — runs `wakil ingest transcript ... --yes --local` plus any extra CLI args (this is how `--context` is tested today, e.g. `test_capture_with_context_shows_in_preview` at line 108 passes `"--context", "Attendees: Jane Doe, Bob (Acme)."` and asserts `"Context: Attendees"` appears in `result.output`).
+- `test_enrich_flow` (line 115) exercises `wakil enrich 1 --yes --local` end-to-end including entity stub creation and re-enrich rejection.
+
+For a new context-registration feature's CLI tests, the natural home is this same file (`tests/integration/test_ingest_cli.py`), reusing `kb_path`/`_init`/`_capture`/`FakeClient` and asserting on `result.output` / files written under `kb_path`, following the exact same `runner.invoke(app, [...])` pattern with additional `--context`/`--context-file` args appended via the `*extra` mechanism already in `_capture`.</result>
+<usage><subagent_tokens>55274</subagent_tokens><tool_uses>18</tool_uses><duration_ms>856405</duration_ms></usage>
+</task-notification>
