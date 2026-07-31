@@ -1,0 +1,34 @@
+<task-notification>
+<task-id>ac86c791f0a795e23</task-id>
+<tool-use-id>toolu_012auxkwCGDAKx9DvLusrdxX</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/ac86c791f0a795e23.output</output-file>
+<status>completed</status>
+<summary>Agent "Refactor enrich in main.py" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Commit is finalized and the working tree is clean; no dev-docs entry warranted.
+
+## Summary
+
+**Refactor**: `enrich` in `src/wakil/cli/main.py` split into two helpers, following this file's existing `_do_thing_or_exit` pattern:
+
+- `_prepare_enrichment_or_exit(config, *, source_id, client, resolved_context, force, landing)` — wraps the `console.status(...)` + `prepare_enrichment` call and its `(IngestError, ModelError)` handler (print error, `abandon_landing`, `typer.Exit(1)`). Keyword-only args after `config`, matching the requested order and avoiding positional mixups.
+- `_confirm_and_apply_enrichment(config, proposal, landing, yes)` — wraps preview/validate/issue-print/confirm/apply, each failure path ending in `abandon_landing` + `typer.Exit`, and includes `print_enrichment_result(result)` on success.
+- `enrich` now: resolves workspace/config/context/client, `prepare_landing`, calls the two helpers, then the unchanged land/refresh-or-abandon tail.
+- Imports were split per-helper (only what each uses); `enrich`'s own top-of-function imports trimmed to `GitServiceError, abandon_landing, prepare_landing` and `resolve_client`.
+
+**Diff**: `src/wakil/cli/main.py`, 1 file changed, 67 insertions(+), 43 deletions(-).
+
+**Line count**: `enrich` is now 76 lines (lines 587–662), down from ~109.
+
+**Tests run**:
+- `uv run pytest tests/integration/test_ingest_cli.py tests/integration/test_git_cli.py tests/unit/test_mcp_tools.py -v` — 62 passed.
+- `uv run pytest -q -m "not eval"` (full non-eval suite) — 621 passed, 62 deselected, no regressions.
+
+**Lint/type checks**: `uv run ruff check src/wakil/cli/main.py` — all checks passed. `uv run --with ty ty check src/wakil/cli/main.py` — all checks passed.
+
+**Commit**: `35caf6f` — `♻️ refactor(cli): split enrich into prepare/confirm-and-apply helpers` (not pushed, per instructions).
+
+Applied the `development-docs` skill per the pre-commit hook reminder: this was a mechanical application of an already-established pattern with no new gotcha or generalizable pattern, so no entry was added to `docs/DEVELOPMENT.md` or `docs/TROUBLESHOOTING.md`.</result>
+<usage><subagent_tokens>53486</subagent_tokens><tool_uses>21</tool_uses><duration_ms>196512</duration_ms></usage>
+<worktree><worktreePath>/Users/ebridges/Projects/wakil/.claude/worktrees/agent-ac86c791f0a795e23</worktreePath><worktreeBranch>worktree-agent-ac86c791f0a795e23</worktreeBranch></worktree>
+</task-notification>
