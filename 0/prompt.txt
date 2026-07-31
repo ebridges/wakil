@@ -1,0 +1,186 @@
+<task-notification>
+<task-id>a8e9f68a203fa0a7e</task-id>
+<tool-use-id>toolu_015rYytJ6moo8mcXbSkchLgY</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/a8e9f68a203fa0a7e.output</output-file>
+<status>completed</status>
+<summary>Agent "Investigate search_workspace context bloat and capture-time title" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Now I have all the pieces. Here's the consolidated report.
+
+## 1. `search_workspace` and how `query` is used
+
+**Signature** (`src/wakil/app/search_service.py:33`):
+```python
+def search_workspace(
+    session: Session,
+    config: WorkspaceConfig,
+    query: str,
+    limit: int = 10,
+    mode: str = "search",
+) -&gt; list[SearchHit]:
+```
+It queries three engines and concatenates results: QMD (if `config.qmd_enabled`), then SQLite FTS5 over notes/memories/sources (deduping notes already found by QMD via `seen_notes`).
+
+**QMD path** (`src/wakil/integrations/qmd.py:66`, `qmd_search`): the entire `query` string is passed as a single CLI argument to the external `qmd` binary:
+```python
+subprocess.run(["qmd", mode, query, "--json", "-n", str(limit)], ...)
+```
+Default `mode="search"` is QMD's BM25 keyword mode (module docstring: "`search` (BM25 keyword), `vsearch` (vector similarity), `query` (hybrid with LLM re-ranking)"). So this is exactly a bag-of-words BM25 query — however qmd itself tokenizes the raw string.
+
+**FTS5 path** (`src/wakil/storage/fts.py`): `search_notes`/`search_memories`/`search_sources` all funnel through `_search()`, which calls `to_match_expression(query)`:
+```python
+def to_match_expression(query: str) -&gt; str:
+    tokens = re.findall(r"[A-Za-z0-9_]+", query)
+    return " OR ".join(f'"{token}"' for token in tokens)
+```
+This is explicitly bag-of-words: every alphanumeric token in `query` is OR'd together, so bm25 ranking is computed over the union of all tokens present anywhere in the (potentially huge) blob — a single rare/topical word from `title` gets diluted by hundreds of tokens pulled in from an expanded `@file:` context block. There's no query-length cap or truncation anywhere in this path before it hits `re.findall`.
+
+**`RELATED_NOTE_LIMIT`**: defined in `src/wakil/app/ingest_service.py:70` as `RELATED_NOTE_LIMIT = 5`. It caps the number of *hits returned/kept* (passed as `limit=` into `search_workspace`, which forwards it as `-n` to qmd and `LIMIT :limit` to the FTS SQL) — it does not cap query size at all.
+
+## 2. Exact `related_query` construction and downstream flow
+
+`src/wakil/app/ingest_service.py:363` inside `prepare_enrichment`:
+```python
+related_query = " ".join(filter(None, [title, context, text[:300]]))
+related_notes = [
+    hit
+    for hit in search_workspace(
+        config=config,
+        session=session,
+        query=related_query,
+        limit=RELATED_NOTE_LIMIT,
+    )
+    if hit.kind == "note" and hit.ref != source.raw_text_path
+]
+```
+`context` here (line ~357: `context = context or metadata.get("context")`) is exactly the string that `resolve_context()`/`expand_piece()` in `src/wakil/app/context_references.py` produces — i.e., it can already contain the `\n\n--- Attached Context ---\n\n` block with full file contents inlined. Nothing truncates `context` before it's joined into `related_query`.
+
+A second, separate query is built a few lines later for a *different* purpose — direct entity-name candidate lookup (line ~385):
+```python
+for path, note_title in _candidate_entity_notes(
+    session, workspace_id,
+    " ".join(filter(None, [context, text])),
+    load_entity_schemas(config.root_path),
+    extra_terms=_title_terms(title),
+):
+```
+This also folds the full (potentially huge) `context` in, plus the *entire* `text` (not `text[:300]`), so it's arguably even more exposed to the same bloat problem, though `_candidate_entity_notes` does its own filtering against capitalized-word candidates (`_title_terms`) rather than delegating ranking purely to FTS/QMD — worth checking separately if going deeper, but it also passes a `query` blob into (presumably) FTS matching.
+
+**Downstream**: `related_pairs = [(hit.ref, hit.title) for hit in related_notes]` (line 408) feeds both DAG prompt builders:
+- `build_extraction_prompt(..., related_notes: list[tuple[str,str]], ...)` — `src/wakil/llm/prompts.py:41`, rendered via `_render_related` into `"Existing related notes:\n{...}"`.
+- `build_resolution_prompt(..., related_notes: list[tuple[str,str]], ...)` — `src/wakil/llm/prompts.py:93`, rendered into `"Existing notes that may already cover these entities:\n{...}"`.
+
+Note that only `(path, title)` pairs flow into prompts — the *search query* is what's bloated, not the prompt payload itself. The damage is to retrieval precision (which 5 notes get surfaced), not directly to prompt token count from `related_notes`.
+
+## 3. How `source.title` is derived; capture is model-free
+
+In `prepare_capture` (`src/wakil/app/ingest_service.py:194`), for `kind in ("transcript", "text")`:
+```python
+stem = _LEADING_DATE_RE.sub("", file.stem) or file.stem
+title = stem.replace("-", " ").replace("_", " ").strip() or file.name
+```
+Purely deterministic — derived from the filename, not from content, a heading, or a model. (For `kind == "article"`, `title = article.title` from `fetch_article(url)` — HTML `&lt;title&gt;`/metadata scraping, still no LLM.)
+
+`grep -n "ModelClient\|resolve_client\|\.complete(" src/wakil/app/ingest_service.py` shows `ModelClient` is only imported and used as a parameter type on `prepare_enrichment`, `_run_extraction`, `_run_entity_resolution`, `_run_entity_updates` (lines 344, 577, 617, 884) — all inside the Step-2 enrichment path. `prepare_capture` (194-258) and `apply_capture` (258-341) contain **zero** references to `ModelClient`, `resolve_client`, or `.complete(`. The module docstring itself states this as an invariant (`src/wakil/app/ingest_service.py:1-19`): *"Step 1, capture ... deterministic only, no model."* So generating an LLM abstract at capture time would indeed be the first model use ever introduced into that code path — a genuine, documented invariant break, not something already snuck in.
+
+## 4. `Source` schema/frontmatter — no transcript abstract field today
+
+`src/wakil/schema/entities/source.yaml`:
+```yaml
+fields:
+  title: {required: true, kind: string}
+  origin: {required: true, kind: enum, values: [transcript, article, twitter, export, manual]}
+  url: {required: false, kind: string}
+  captured: {required: true, kind: date}
+  tags: {required: false, kind: list}
+  created: {required: false, kind: date}
+origins:
+  article:
+    author: {required: false, kind: string}
+    published: {required: false, kind: date}
+    description: {required: false, kind: string}
+  transcript:
+    recording_url: {required: false, kind: string}
+    company: {required: false, kind: ref, ref_type: company}
+    meeting_date: {required: false, kind: date}
+  twitter:
+    author: {required: false, kind: string}
+  export:
+    author: {...}
+    published: {...}
+    readwise_id: {...}
+    readwise_updated: {...}
+```
+`description` exists **only** under `origins.article` today; `origins.transcript` has no equivalent field. Comment in the file confirms this was deliberately origin-scoped ("extend the email-thread precedent with two or three more origin-keyed sub-schemas, each declaring only the fields real files of that origin actually use").
+
+Merge mechanism (`src/wakil/schema/validate.py:73-75`):
+```python
+effective_fields = dict(schema.fields)
+origin = frontmatter.get("origin")
+if schema.origins and isinstance(origin, str):
+    effective_fields.update(schema.origins.get(origin, {}))
+```
+Adding an `abstract`/`summary` key under `origins.transcript` in `source.yaml` would be mechanically identical to the existing `article.description` entry — a one-line dict addition, no special-casing needed in `validate.py` or `loader.py` (`origins: dict[str, dict[str, FieldSpec]]`, `src/wakil/schema/loader.py:74`).
+
+**Actual frontmatter writer**: `_transcript_metadata()` (`src/wakil/app/ingest_service.py:1457`) builds the dict actually written:
+```python
+def _transcript_metadata(config, proposal, created):
+    values = {
+        "created": created,
+        "meeting_date": proposal.meeting_date,
+        "title": proposal.title,
+        "origin_kind": proposal.source_type,
+        "file_url": f"file:{proposal.origin}",
+        "context": proposal.context,
+    }
+    template = transcript_frontmatter_template(config)
+    if template is None:
+        return {"created": created, "meeting_date": proposal.meeting_date}
+    metadata = {}
+    for key, template_value in template.items():
+        normalized = _KNOWN_FIELD_VALUES.get(key.lower().replace("-", "_"))
+        filled = values.get(normalized) if normalized else None
+        metadata[key] = filled if filled is not None else template_value
+    return metadata
+```
+It's driven by `_KNOWN_FIELD_VALUES` — a hardcoded map of template-key aliases to known value sources (`created`, `meeting_date`, `title`, `origin_kind`, `file_url`, `context`). There is **no** `description`/`abstract` entry in `_KNOWN_FIELD_VALUES`, so even if a KB's `SCHEMA.md` template declared a `description` field for transcripts, `_build_raw_file`/`_transcript_metadata` has no source value to fill it with today — it'd fall through to `template_value` (the template's literal placeholder). Adding an abstract would require both the `source.yaml` sub-schema entry *and* a new `_KNOWN_FIELD_VALUES` mapping + a `values[...]` entry in `_transcript_metadata` fed by whatever computes the abstract.
+
+`_build_raw_file` itself (line 1423) is the actual frontmatter-template/file-writer function (not `_stub_content`, which is a different helper used for entity-resolution stub pages, `src/wakil/app/ingest_service.py:963`, unrelated to sources).
+
+## 5. `Source.metadata_json` — already the home for `context`
+
+SQLAlchemy model, `src/wakil/storage/schema.py:43-64`:
+```python
+class Source(Base):
+    __tablename__ = "sources"
+    ...
+    id: Mapped[int]
+    workspace_id: Mapped[int]
+    source_type: Mapped[str]
+    title: Mapped[str | None]
+    origin: Mapped[str | None]
+    author: Mapped[str | None]
+    published_at: Mapped[datetime | None]
+    retrieved_at: Mapped[datetime | None]
+    content_hash: Mapped[str | None]
+    raw_text_path: Mapped[str | None]
+    status: Mapped[str] = mapped_column(String(30), default="new")
+    metadata_json: Mapped[str | None] = mapped_column(Text, default=None)
+    ...
+```
+`metadata_json` is a free-form `Text` column (JSON-serialized dict), and it is exactly where `context`/`meeting_date` already get persisted, both at capture (`apply_capture`, `src/wakil/app/ingest_service.py` ~line 285):
+```python
+metadata_json=json.dumps(
+    {
+        key: value
+        for key, value in (
+            ("context", proposal.context),
+            ("meeting_date", proposal.meeting_date),
+        )
+        if value
+    }
+),
+```
+and read back at enrichment time (`prepare_enrichment`, line ~356): `metadata = json.loads(source.metadata_json or "{}")`. A computed abstract could piggyback here as another key (e.g. `metadata["abstract"] = ...`) with no schema/migration change — it's a schemaless JSON blob column, not validated against `source.yaml`, so this path is structurally trivial compared to the frontmatter route, at the cost of not being visible in the actual `sources/*.md` file a human reads (frontmatter only ends up there via `_build_raw_file`/`_transcript_metadata`, which `metadata_json` does not feed).</result>
+<usage><subagent_tokens>38473</subagent_tokens><tool_uses>25</tool_uses><duration_ms>83757</duration_ms></usage>
+</task-notification>
