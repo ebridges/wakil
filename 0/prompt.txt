@@ -1,0 +1,7 @@
+I'm trying to arrive at the right way to use the `wakil` product.  This product has self-contained skills and a mechanism for overriding those skills by the user working with it.  Ideally I would want to be running tasks within a kb using the Hermes agent that has been customized with the functionality in Wakil.  That said, I would prefer to not simply copy every skill into hermes because it updates skills as it learns (indeed, I'd like Hermes to leverage the mechanism for overriding Wakil skills, so that it's clear what it has changed). 
+
+That said, I'm not sure if I'm understanding how Hermes and Agents generally integrate with tools like Wakil.  So, given that, I'm looking for significant guidance (and possible correction) on what I'm doing.  Ask me questions to help me gain clarity on what I'm trying to do.
+
+The system has now been updated so that the resolver is load bearing: the skills have all been consolidated under @src/wakil/skills and the ingest mechanism relies on the resolver rather than its own way to load skills.
+
+That said, I'm still interested in exploring the best way for a user or for an agent like Hermes to manage a KB via Wakil
