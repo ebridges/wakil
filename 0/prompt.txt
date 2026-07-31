@@ -1,0 +1,7 @@
+Analyze @README.md  and ensure it's up-to-date and that it's crystal clear for a completely new person looking at this repo.  Provide example use cases up front so people know "why" they would want to use this. (including how to make use of the @skills/mcp-coordinator skill
+
+Analyze @TODO.md  and close out any items that are confirmed done.  Migrate all items to Github issues, and if something is done then go ahead and close it after creating it.  Once all items are logged to issues, go ahead and delete the file.
+
+Analyze @CLAUDE.md and ensure that it's providing sufficient context on working with the repo (e.g. from a dev standpoint) Ensure that there's accurate mandatory guidance to reference and update @docs/DEVELOPMENT.md and @docs/TROUBLESHOOTING.md for every run.
+
+Revisit the @PROMPT.md -- does it make sense to keep it around?  is there any context there that would make sense to preserve somewhere?
