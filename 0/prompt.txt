@@ -1,0 +1,4 @@
+Now I get this error:
+> Proposal failed validation — it cannot be applied:
+  ✗ people/edward-bridges.md: updated: required field is missing
+Nothing was written. Fix the gap (or re-run enrichment) and try again
