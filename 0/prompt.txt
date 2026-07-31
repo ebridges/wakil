@@ -1,0 +1,2 @@
+- reflect on "learning-agenda" being another form of knowledge: e.g. "learned knowledge".  What are best practices for categorizing learned knowledge in comparison to consumed knowledge like articles, tweets, etc.
+- reflect on an appropriate policy for "title" metadata
