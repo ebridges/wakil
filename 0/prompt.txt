@@ -1,0 +1,1 @@
+update the mcp-controller skill to suggest running the enrichment step as a background task with appropriate timeout because it takes a very long time.
