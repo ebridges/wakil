@@ -1,0 +1,6 @@
+<task-notification>
+<task-id>w0kv41vs2</task-id>
+<tool-use-id>toolu_01YCLgLTTxBLQaxDfRBu5YLn</tool-use-id>
+<status>stopped</status>
+<summary>No completion record was found for background workflow "implement-skill-resolution" from the previous session. It may have been stopped (via the UI or TaskStop — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. To pick up where it left off, relaunch with Workflow({scriptPath, resumeFromRunId: "wf_a4257bee-634"}) — completed agent() calls return cached.</summary>
+</task-notification>
