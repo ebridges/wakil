@@ -1,0 +1,35 @@
+<task-notification>
+<task-id>abe3597eefc4a4e22</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/a9870ca9-6eef-49d9-bd88-0c44d4f77b21/tasks/abe3597eefc4a4e22.output</output-file>
+<status>completed</status>
+<summary>Agent "Mine docs/git/PR history for decision points" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have sufficient material now. Here's the report.
+
+## docs/ findings
+
+All eight files are `status: draft`, dated after the codebase existed — they document design *reasoning*, not commit-time decisions, but the reasoning is explicit.
+
+- **entity-metadata.md** — Audits real vault frontmatter vs. documented schema; concludes `wakil` should keep `Note.frontmatter_json` as an opaque blob rather than a strict per-type model. Explicit rationale (strict validation would reject most real files).
+- **entity-model.md** — Chooses to store Compiled Truth/Timeline in Markdown only (git = version history) and extend `Memory`/`Relationship` rather than clone GBrain's `page_versions`/`timeline_entries`/`links` tables. Explicit, itemized rejection table with reasons.
+- **entity-resolution.md** — Critiques target vault's `RESOLVER.md`; derives constraints for wakil's own resolver (no first-match-wins, 1:N routing, hard-stop on missing schema). Explicit and well-argued.
+- **ingestion-model.md** — Extracts a 5-concern pipeline shape from GBrain's skill system; explicitly rejects importing the multi-agent *mechanism* while keeping the *decomposition*, citing CLAUDE.md's ban on agent frameworks. Explicit.
+- **ingestion-refactor-spec.md** — Synthesizes the above four into a phased build plan; explicit deferral list with reasons (e.g., structured-output providers deferred until retry rate is measured).
+- **memory-model.md** — Justifies rejecting an autonomous background-rewrite worker in favor of reviewable diffs, citing CLAUDE.md's "no hidden background behavior." Explicit and strong.
+- **skill-refactor.md** — Documents the motivating problem (legacy `~/Projects/kb` skill rot, gbrain coupling) and derives the 12-skill catalog from it. Explicit "why," grounded in a real audit of failure modes.
+- **skill-resolution-specification.md** — Pure spec (precedence order, invariants); states goals/non-goals but never argues alternatives (e.g., why not merge overrides). Spec-only, no stated alternatives.
+
+## git/PR findings
+
+Total commits: 79 (`git log --oneline --all`). Only **14 merged PRs** exist (`gh pr list --state merged`), all squash/merge-commit style, one per major phase (Phase 1–5, then skill-resolution, skill-catalog, ci, entity-refactor phases A–D, skill-resolver wiring, entity-revision). Every single PR body is substantial (731–5391 chars, all &gt;3 lines) — richer than typical repos. Representative architecturally-significant titles: "Phase 1: scaffold wakil CLI," "Phase 2: search and query — FTS5, QMD wrapper," "Phase 4: git-native ingest — branches, PRs," "Phase 5: memory lifecycle," "Entity schema layer (Phase A)," "Wire the skill resolver into wakil enrich's DAG," "Entity-revision DAG, schema page-shapes, and QMD workspace collections."
+
+## No CHANGELOG/RELEASES/HISTORY file anywhere in the repo (confirmed by find); no `*adr*` files either.
+
+## Decision shortlist (ADR-worthiness)
+
+- **Well-documented**: "SQLite as operational store, Markdown as source of truth" (entity-model.md's rejection table + PR #1's schema rationale); "no autonomous background rewriting / reconsolidation as reviewable diff" (memory-model.md, explicit CLAUDE.md citation); "decompose ingestion into classify/extract/resolve/enforce/finalize without adopting multi-agent mechanism" (ingestion-model.md); "skill resolution precedence, first-match-wins, no merging" (PR #10 body + spec).
+- **Partially documented**: "QMD as first-class search over SQLite FTS5" — PR #2 states the *behavior* (QMD first, FTS fills gaps) but not a comparative "why QMD over X" rationale; "git-native change tracking" — PR #4 describes implementation, not why git was chosen over an alternative.
+- **Undocumented-assertion-only**: CLAUDE.md's bare bullet list ("Markdown as source of truth," "SQLite as operational store," "QMD as first-class search," "git-native changes," line 89-92) states the stance with zero historical "why" trail in that file itself — the *only* place the "why" exists for QMD specifically is the terse PR #2 description; for git-native it's PR #4's description, neither of which is a deliberated alternatives-considered writeup like the docs/ files provide for entity modeling and memory lifecycle.</result>
+<usage><subagent_tokens>88490</subagent_tokens><tool_uses>18</tool_uses><duration_ms>100450</duration_ms></usage>
+</task-notification>
