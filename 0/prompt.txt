@@ -1,0 +1,2 @@
+1) How are we deciding on what entities to send to the API? Can that be optimized to be sure we're only sending the relevant entities? Or, can those entities be organized in a logical way to ensure that we're getting the benefit of reasoning to find associations?
+2) If we're sending the same prompt, will that prompt be cached so that we save on upload tokens?
