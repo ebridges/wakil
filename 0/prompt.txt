@@ -1,0 +1,11 @@
+Thing 2:
+- journal: accumulating-subject
+- reflection: single-occurrence
+- idea: single-ocurrence
+- organization: single-occurrence
+- meta: single-occurrence
+- index: accumulating-subject (I think, open to your take on this)
+- source: single-occurrence
+
+Thing 1: 
+- Let's run with hybrid
