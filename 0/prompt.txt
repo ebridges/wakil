@@ -1,0 +1,21 @@
+<task-notification>
+<task-id>a156c7991617aeefb</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/0d040421-da1c-44ba-aeb0-8cd05f206644/tasks/a156c7991617aeefb.output</output-file>
+<status>completed</status>
+<summary>Agent "Adversarial review of ADR 0015" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Answering both questions directly, since you've earned a straight answer given you did the same verification work I should have volunteered.
+
+**1. How I determined it, originally:** Not a live API call. It came from the bundled `claude-api` skill's cached reference documentation — specifically `SKILL.md`'s "API Drift" table and Thinking &amp; Effort table, plus `shared/model-migration.md`'s "Migrating to Opus 4.7" section and `shared/error-codes.md`'s common-mistakes table, all of which state that `budget_tokens` is removed and returns 400 on Opus 4.7-and-later (Fable 5, Opus 5, 4.8, 4.7). That's cached Anthropic-authored documentation bundled with the tool (dated "cached: 2026-06-24" for the model table), not something I personally exercised against a live endpoint or fetched from a URL before asserting it. You were right to not take it as settled on my say-so alone — I stated it with more confidence than "cached skill doc" actually warrants, and I should have flagged the provenance myself the first time instead of presenting it as flatly established.
+
+**Since asking, I ran a live WebFetch** against `https://platform.claude.com/docs/en/about-claude/models/migration-guide.md` (the current official migration guide, independent of the bundled skill) and asked it directly whether Opus 4.8 is named. It returned two relevant passages:
+
+- From the Opus 5 migration section: *"Extended thinking removed: `thinking: {type: "enabled", budget_tokens: N}` is no longer supported on Claude Opus 4.7 or later models and returns a 400 error."*
+- From the Fable 5 / Mythos 5 migration section, naming Opus 4.8 explicitly: *"Manual extended thinking (`thinking: {type: "enabled", budget_tokens: N}`) is not supported on `claude-fable-5` or `claude-mythos-5` and returns a 400 error, the same as on Claude Opus 4.8."*
+
+So I now have two independent sources — the bundled skill and a fresh live fetch of Anthropic's own current migration guide — agreeing, with the second one naming Opus 4.8 specifically rather than requiring the "4.7 or later" inference. Neither is a live API call that actually triggered a 400 against `claude-opus-4-8`; both are documentation.
+
+**2. Given that — my honest preference is a middle ground, not your fully-hedged version.** I don't think this needs the fully agnostic "treat budget_tokens's availability as something to check before writing code" framing anymore — that undersells what's now a specific, citable claim from Anthropic's current live docs, naming this exact model. But I also wouldn't write it as bare unqualified fact with no citation, since neither of us has actually observed the 400 firsthand against this model. I'd suggest: state it as sourced, with the citation attached, e.g. "`budget_tokens` returns 400 on `claude-opus-4-8` per Anthropic's migration guide (`platform.claude.com/docs/en/about-claude/models/migration-guide.md`, 'Migrating to Claude Opus 5' and 'Migrating to Claude Fable 5' sections, fetched 2026-07-25)" — and add one line recommending whoever implements Step A do a cheap one-call live sanity check against the real endpoint before writing the `effort`/`disabled` fallback logic, since a documentation page, however current, is still one step removed from the actual server behavior. That gets you a properly-sourced claim in the ADR without either overclaiming certainty neither of us has, or under-crediting a claim that's now genuinely well-evidenced.</result>
+<usage><subagent_tokens>317995</subagent_tokens><tool_uses>2</tool_uses><duration_ms>59978</duration_ms></usage>
+</task-notification>
