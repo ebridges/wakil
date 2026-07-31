@@ -1,0 +1,5 @@
+Correct the overstatement in #109 
+
+Merge #109, #110, and #111 in sequence, running tests after each; then complete the rest.
+
+then pick the work fixing the 3 approved items from the original audit
