@@ -1,0 +1,5 @@
+The release page has a bug in how it renders Contributors (listing two contributors: "file" and "url") -- it should be the github usernames of the contributors.
+
+https://github.com/ebridges/wakil/releases/tag/v0.1.0
+
+[Image #3]
