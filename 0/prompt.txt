@@ -1,0 +1,3 @@
+merge the PR and proceed with phase 2.  Take the same approach with phase 2: build it out and then loop on an adversarial review/fix cycle until the adversarial reviewer has no further comments and all checks & tests pass.
+
+I will be going to sleep, so if you need access to 1password can you do it now and cache it?
