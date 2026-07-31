@@ -1,0 +1,1 @@
+Occasionally, I may ingest a meeting transcript which may have a prep document already in place for it.  How can I effectively cause the prep to be associated with the meeting and then have the enrichment connect the prep to the meeting (e.g. provide answers to open questions from the prep document, or note that they're still open).
