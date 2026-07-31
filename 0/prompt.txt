@@ -1,0 +1,29 @@
+Help me plan an implementation for registering context with a meeting ingest request.
+
+---
+
+The application should accept the following command line arguments for `wakil ingest` and `wakil enrich`.  The context should apply only to that command.
+
+1. Zero or more `--context` arguments.  Each should be read in, `@[prefix]` elements expanded, and concatenated with `---` used a delimiter between each.
+
+2. Zero or more `--context-file` arguments.  Each file should be read in, `@[prefix]` elements expanded, and concatenated with `---` used a delimiter between each.
+
+3. `@[prefix]` elements expansion: support a subset of Hermes context indicators, such that a block of text that arrives as context would have the following expansion rules:
+   - @file:path/to/note.md — reads the file, wraps it in a fenced code block with a token-count annotation. 
+       - Supports quoted paths (@file:"path with spaces.md")
+       - Line ranges (@file:src/x.py:10-20).
+       - Anchor refs to section headings: @file:path/to/note.md#Questions - where there will be an H[1,2,3] level heading named "Questions" else raise error.
+       - `@` with no prefix, treat the value after `@` as a local file (e.g. same as if it were `@file:`)
+   - @url:https://... — fetches and extracts the URL via a web-extraction tool. Content wrapped in a fenced code block with a token-count annotation.
+
+---
+
+Mechanics worth noting:
+- There's a token budget: if total injected content exceeds 25% of the context window it's a warning, over 50% it's refused outright and nothing gets attached.
+- Paths are resolved relative to cwd and sandboxed to an allowed_root — anything that resolves outside it, or hits a blocklist (.ssh, .aws, .gnupg, shell rc files, Hermes's own .env, etc.), is refused rather than attached.
+- Binary files are rejected.
+- The raw @... token is stripped from the message and the expanded content is appended under an `--- Attached Context ---` section.
+
+---
+
+For reference see Hermes implementation of [context_references.py](https://raw.githubusercontent.com/NousResearch/hermes-agent/477c08b44766ace8b890faa72bf82ecbcf2b3ba8/agent/context_references.py)
