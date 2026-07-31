@@ -1,0 +1,284 @@
+<task-notification>
+<task-id>aa09ac08b050ab2d9</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/aa09ac08b050ab2d9.output</output-file>
+<status>completed</status>
+<summary>Agent "Design context-reference implementation plan" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># Implementation Plan: Repeatable `--context`/`--context-file` with `@`-Reference Expansion
+
+## 1. New module: `src/wakil/app/context_references.py`
+
+This module owns everything about turning raw `--context`/`--context-file` CLI input into one resolved string: reference parsing, per-piece expansion, binary detection, token estimation, and the budget check. It has **no dependency on `ingest_service.py`** (avoids a circular import and keeps this a standalone, independently-testable unit) and depends only on `wakil.integrations.web` and `wakil.knowledge.markdown` (for the heading slicer, see §4).
+
+```python
+"""Resolve --context/--context-file CLI input into one context string,
+expanding @file:/@url:/bare-@ references. Pure CLI-support layer: nothing
+here is imported by wakil.app.ingest_service, and prepare_capture/
+prepare_enrichment are untouched."""
+
+import mimetypes
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from wakil.integrations.web import Article, FetchError, fetch_article
+from wakil.knowledge.markdown import slice_heading_section
+
+class ContextResolutionError(RuntimeError):
+    """A --context/--context-file value could not be resolved. Callers
+    (main.py) must abort the whole command before any capture/enrichment
+    work happens -- never partially apply."""
+
+# --- constants -------------------------------------------------------------
+CHARS_PER_TOKEN = 4                      # rough heuristic, no tokenizer dep
+MODEL_CONTEXT_WINDOW_TOKENS = 180_000    # one assumed constant, v1 scope
+WARN_BUDGET_FRACTION = 0.25
+HARD_BUDGET_FRACTION = 0.50
+
+# suffix -&gt; language tag for fences; also doubles as the "known text
+# extension" override for binary detection AND the bare-@ "recognizable
+# extension" allowlist (single source of truth per spec's reuse note)
+_LANGUAGE_BY_SUFFIX = {
+    ".md": "markdown", ".markdown": "markdown", ".py": "python",
+    ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
+    ".txt": "", ".sh": "bash", ".rst": "", ".csv": "", ".srt": "",
+}
+
+_REF_RE = re.compile(
+    r'@(?:'
+    r'(?P&lt;kind&gt;file|url):(?:"(?P&lt;qval&gt;[^"]+)"|(?P&lt;val&gt;\S+))'
+    r'|(?P&lt;bare&gt;\S+)'
+    r')'
+)
+
+@dataclass
+class ExpandedBlock:
+    label: str
+    content: str  # ready-to-insert fenced block, incl. token-count header
+
+def estimate_tokens(text: str) -&gt; int:
+    return len(text) // CHARS_PER_TOKEN
+
+def expand_piece(raw_text: str, workspace_root: Path) -&gt; str:
+    """Expand all @file:/@url:/bare-@file references in one raw context
+    piece. Returns the piece with reference tokens stripped and a
+    '--- Attached Context ---' section appended (only if &gt;=1 block
+    resolved). Raises ContextResolutionError on any failure."""
+    ...
+
+def resolve_context(
+    *, context: list[str], context_files: list[Path], workspace_root: Path,
+) -&gt; tuple[str | None, list[str]]:
+    """Assemble --context values (in order) then --context-file contents
+    (in order, each file's full text read as one piece before expansion),
+    each piece @-expanded, joined with '\\n\\n---\\n\\n'. Returns
+    (None, []) when both lists are empty -- so prepare_enrichment's
+    capture-time-context fallback still fires. Raises
+    ContextResolutionError on any reference-resolution failure or when the
+    assembled total exceeds HARD_BUDGET_FRACTION of the assumed window;
+    returns non-fatal warnings (e.g. WARN_BUDGET_FRACTION exceeded) for the
+    caller to print."""
+    ...
+```
+
+Internal helpers (private, `_`-prefixed, in the same module):
+
+- `_parse_ref_value(raw: str) -&gt; tuple[str, int|None, int|None, str|None]` — given the unquoted/quoted `file:` value, split off `#heading` (rpartition on last `#`) or `:start-end` (regex `^(.*):(\d+)-(\d+)$`), mutually exclusive per spec; returns `(path_str, line_start, line_end, heading)`.
+- `_looks_like_file_reference(value: str) -&gt; bool` — `"/" in value or Path(value).suffix.lower() in _LANGUAGE_BY_SUFFIX` — governs whether a bare `@value` is treated as `@file:value` or left as untouched literal text.
+- `_is_binary(path: Path) -&gt; bool` — if suffix in `_LANGUAGE_BY_SUFFIX`, not binary (override); else `mimetypes.guess_type` — if it confidently says `text/*`, not binary; otherwise sniff first 4096 bytes for `b"\x00"`.
+- `_resolve_file(path_str, line_start, line_end, heading, workspace_root) -&gt; ExpandedBlock` — resolves relative-to-`workspace_root`, `.resolve()`, containment check (`relative_to(workspace_root.resolve())`, `ValueError` -&gt; `ContextResolutionError("... is outside the workspace")`), existence check, `_is_binary` check, read text, apply `slice_heading_section` (raise if `None` returned — "no matching heading") or line-slice (`lines[start-1:end]`, clamp bounds, raise if `start &gt; end` after clamping), build fenced block: `f"📄 {label} ({estimate_tokens(sliced)} tokens)\n\`\`\`{lang}\n{sliced}\n\`\`\`"`.
+- `_resolve_url(url: str) -&gt; ExpandedBlock` — `fetch_article(url)`, catch `FetchError` → `ContextResolutionError(f"could not fetch {url}: {exc}")`, same fenced-block shape (no language tag).
+
+`expand_piece` implementation strategy: use `_REF_RE.sub(callback, raw_text)` where `callback` is a closure appending to a local `blocks: list[ExpandedBlock]` list and:
+- for `kind == "file"` or `kind == "url"` (or bare classified as file-like): resolve, append block, return `""` (strips the token from visible text);
+- for bare classified as literal: return the original matched text unchanged (leaves it in place).
+
+After the substitution pass, if `blocks` is non-empty, append `\n\n--- Attached Context ---\n\n` + `"\n\n".join(b.content for b in blocks)` to the stripped/stripped-and-`.strip()`ped text; otherwise return the stripped text as-is.
+
+## 2. Changes to `src/wakil/cli/main.py`
+
+Confirmed Rich/console idioms already in this file to reuse exactly:
+- Errors: `console.print(f"[red]X failed:[/red] {exc}")` then `raise typer.Exit(code=1) from exc` (used at lines ~311, ~331, ~337, ~400, ~404, ~416, ~423).
+- Non-fatal warnings: `console.print(f"[yellow]...[/yellow]")` (e.g. line 149, 283 — QMD warnings).
+
+**a. Move and extend the shared option aliases.** Currently `_YES`/`_LOCAL`/`_CONTEXT` are defined *after* `enrich` (around line 477), so `enrich` can't use them and instead declares `context` inline. Move `_CONTEXT` and add a new `_CONTEXT_FILE` up above `def enrich(...)` (i.e., right after `_run_ingest`), and use both in `enrich` too, so all four commands share identical flags/help text:
+
+```python
+_CONTEXT = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--context", "-C",
+        help="Context for the model (attendees, company, purpose); repeatable. "
+        "Supports @file:PATH (optionally #Heading or :start-end) and @url:URL "
+        "references, expanded inline before use.",
+    ),
+]
+_CONTEXT_FILE = Annotated[
+    list[Path] | None,
+    typer.Option(
+        "--context-file",
+        help="Read a file's full text as context; repeatable. The same "
+        "@file:/@url: expansion applies inside the file's content.",
+    ),
+]
+```
+
+Both default to `None` (NOT `[]` — ruff `B006` flags mutable literal defaults, and it's unnecessary: verified via a scratch Typer app that `Annotated[list[str], typer.Option(...)] = None` returns `None` when the flag is never passed and a populated `list[str]` when it is — exactly the shape `resolve_context` wants after a `context or []` normalization).
+
+`enrich`'s docstring keeps its existing note about defaulting to capture-time context (that's `prepare_enrichment`'s behavior, not the flag's, so it belongs in prose, not repeated flag help).
+
+**b. `_run_ingest`**: change signature from `context: str | None = None` to:
+```python
+def _run_ingest(
+    ctx: typer.Context, kind: str, yes: bool,
+    file: Path | None = None, url: str | None = None, local: bool = False,
+    context: list[str] | None = None, context_file: list[Path] | None = None,
+) -&gt; None:
+```
+Immediately after `config = WorkspaceConfig.load(root)` (before the `console.status("Preparing capture...")` block), call:
+```python
+resolved_context = _resolve_context_or_exit(context, context_file, config.root_path)
+```
+then pass `context=resolved_context` into `prepare_capture` (unchanged call site otherwise).
+
+**c. New small CLI-layer helper** (module-level, near `_run_ingest`):
+```python
+def _resolve_context_or_exit(
+    context: list[str] | None, context_file: list[Path] | None, workspace_root: Path,
+) -&gt; str | None:
+    from wakil.app.context_references import ContextResolutionError, resolve_context
+
+    try:
+        resolved, warnings = resolve_context(
+            context=context or [], context_files=context_file or [],
+            workspace_root=workspace_root,
+        )
+    except ContextResolutionError as exc:
+        console.print(f"[red]Context resolution failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    for warning in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
+    return resolved
+```
+(Local import mirrors the file's existing pattern of importing app/service modules inside command bodies rather than at module top, e.g. `from wakil.app.git_service import ...` inside `_run_ingest`/`enrich` today.)
+
+**d. `enrich`**: add `context_file: _CONTEXT_FILE = None` parameter alongside the now-shared `context: _CONTEXT = None`. Call `_resolve_context_or_exit` as the **first thing after `config = WorkspaceConfig.load(root)`**, before the "needs a model provider" check and before `prepare_landing`/branch switch — this guarantees a resolution failure aborts before any git branching, model-provider check, or model call, satisfying "abort... before any capture/enrichment work happens" as strictly as possible (no wasted branch churn either):
+```python
+root = _resolve_workspace(ctx)
+config = WorkspaceConfig.load(root)
+resolved_context = _resolve_context_or_exit(context, context_file, config.root_path)
+client = resolve_client()
+...
+proposal = prepare_enrichment(config, source_id, client, context=resolved_context, force=force)
+```
+
+**e. Three ingest subcommands** (`ingest_transcript`, `ingest_text`, `ingest_article`): add `context_file: _CONTEXT_FILE = None` parameter, and change `context: _CONTEXT = None` from the old single-value alias to the new repeatable one; pass both through: `_run_ingest(ctx, "transcript", yes, file=file, local=local, context=context, context_file=context_file)` (and analogous for text/article).
+
+## 3. `CaptureProposal`/`EnrichmentProposal` — no new fields
+
+Confirmed: this is purely a CLI-layer concern. `resolve_context` runs and its warnings are printed *before* `prepare_capture`/`prepare_enrichment` are even called, so there is no resolution state that needs to survive into either dataclass. `context: str | None` on both dataclasses continues to carry exactly one already-fully-resolved string, unchanged in shape from today. Nothing in `ingest_service.py`, `console.py`'s `print_capture_proposal`/`print_enrichment_proposal`, or the persisted `metadata_json["context"]` shape needs to change.
+
+One consequence worth flagging to the repo owner (not a design flaw, just worth confirming intent): because resolution happens once, upfront, in the CLI, the **expanded** text (with fenced file dumps under `--- Attached Context ---`) is what gets persisted into `Source.metadata_json["context"]` and later reused by `prepare_enrichment`'s capture-time fallback — not the short raw string the user typed. This is actually more correct than persisting raw `@file:` tokens (files referenced at capture time could move/change before `wakil enrich` runs later), but it does mean `metadata_json.context` can now be considerably larger than today. No code changes needed for this — just confirming it's the intended tradeoff of the "resolve entirely in the CLI, pass one opaque string through" design.
+
+A related but genuinely cosmetic issue: `print_capture_proposal`/`print_enrichment_proposal` currently render `Context: {proposal.context}` as one line inside a `Panel` header (`src/wakil/ui/console.py:180-181`, `:199-200`). With multi-KB expanded attachments this will look messy in the preview. Not in scope per the spec (which never asked for preview truncation), but flagging as a plausible fast-follow (e.g., truncate the displayed preview to first ~300 chars with a "+N more chars" note) that the repo owner may want to greenlight separately.
+
+## 4. Heading-section slicer
+
+**Location recommendation: `src/wakil/knowledge/markdown.py`**, not a new module and not inside `context_references.py`. Rationale: it's a pure Markdown-text operation (no file I/O, no workspace/CLI concerns) and this file already owns exactly this kind of heading-regex logic (`_H1_RE`, and `ingest_service.py`'s own `_HEADING_RE`/section-walk pattern at line ~1274 is a close analog worth mirroring, though it lives in the wrong module for reuse). Keeping it in `markdown.py` avoids a third module for one function and matches CLAUDE.md's "avoid speculative abstraction."
+
+```python
+_HEADING_LINE_RE = re.compile(r"^(#{1,3})\s+(.+?)\s*$", re.MULTILINE)
+
+def slice_heading_section(text: str, heading: str) -&gt; str | None:
+    """Body text under the first H1-H3 heading whose title matches `heading`
+    (case-insensitive, trimmed), up to the next heading of equal-or-
+    shallower level (same or fewer '#'), or end of text. None if no H1-H3
+    heading matches."""
+    target = heading.strip().casefold()
+    matches = list(_HEADING_LINE_RE.finditer(text))
+    for i, m in enumerate(matches):
+        if m.group(2).strip().casefold() != target:
+            continue
+        level = len(m.group(1))
+        newline_idx = text.find("\n", m.end())
+        start = newline_idx + 1 if newline_idx != -1 else len(text)
+        end = len(text)
+        for later in matches[i + 1:]:
+            if len(later.group(1)) &lt;= level:
+                end = later.start()
+                break
+        return text[start:end].strip("\n")
+    return None
+```
+
+Key logic points: only H1-H3 are heading candidates (regex `#{1,3}`, not `#{1,6}`, matching the spec exactly — H4+ neither anchors nor bounds a section). The boundary is the next heading with `len(#) &lt;= level` (strictly shallower *or same* level ends the section; a deeper heading, e.g. an H4 or an H3-nested-under-a-matched-H2, stays inside the sliced content). `expand_piece`/`_resolve_file` imports this from `wakil.knowledge.markdown` and treats a `None` return as a `ContextResolutionError` ("heading '&lt;name&gt;' not found in &lt;path&gt;").
+
+## 5. Test plan
+
+### `tests/unit/test_context_references.py` (new file)
+
+Parsing/classification:
+1. `test_parse_and_expand_leaves_bare_mention_untouched` — `"cc @Jane about this"` → `@Jane` unchanged, no attached-context section.
+2. `test_bare_at_with_slash_is_treated_as_file_reference`
+3. `test_bare_at_with_recognized_extension_is_treated_as_file_reference` (e.g. `@notes.md`)
+4. `test_quoted_file_path_with_spaces_is_parsed`
+5. `test_file_reference_with_line_range_slices_only_those_lines` (1-indexed, inclusive)
+6. `test_file_reference_with_out_of_range_line_numbers_clamps_or_raises` (decide clamp-vs-raise behavior and pin it in a test)
+
+Heading anchor / `slice_heading_section` (put these in `tests/unit/test_markdown.py` alongside existing markdown tests, since the function lives there):
+7. `test_slice_heading_section_returns_none_when_heading_absent`
+8. `test_slice_heading_section_h2_stops_at_next_h2`
+9. `test_slice_heading_section_h2_includes_nested_h3`
+10. `test_slice_heading_section_case_insensitive_and_trimmed_match`
+11. `test_slice_heading_section_last_heading_runs_to_end_of_file`
+
+Back in `test_context_references.py`:
+12. `test_file_reference_missing_heading_raises_ContextResolutionError`
+13. `test_file_reference_missing_file_raises`
+14. `test_file_reference_path_outside_workspace_raises` (both a `../../` relative escape and an absolute path outside `workspace_root`)
+15. `test_file_reference_binary_file_raises` (write bytes containing `\x00`, non-text suffix)
+16. `test_file_reference_known_text_extension_overrides_binary_heuristic`
+17. `test_url_reference_uses_fetch_article` (monkeypatch `wakil.app.context_references.fetch_article`)
+18. `test_url_reference_fetch_error_raises_ContextResolutionError`
+19. `test_expand_piece_strips_reference_and_appends_attached_context_section`
+20. `test_expand_piece_with_no_references_returns_text_unchanged`
+21. `test_resolve_context_empty_inputs_returns_none_not_empty_string`
+22. `test_resolve_context_joins_context_then_context_file_pieces_in_order_with_delimiter`
+23. `test_resolve_context_reads_context_file_full_text_and_expands_its_body`
+24. `test_resolve_context_warns_between_25_and_50_percent_budget` (monkeypatch `MODEL_CONTEXT_WINDOW_TOKENS` small for a fast, deterministic assertion)
+25. `test_resolve_context_raises_over_50_percent_budget_before_any_pieces_are_returned`
+
+### `tests/integration/test_ingest_cli.py` (extend)
+
+Extend `_capture`'s existing `*extra` mechanism (already used by `test_capture_with_context_shows_in_preview`, which passes `"--context", "..."` directly) — no fixture changes needed.
+
+26. `test_capture_with_context_file_embeds_content` — write a small file under `kb_path`, `_capture(kb_path, transcript, "--context-file", str(path))`, assert its text appears in the written raw file / preview output.
+27. `test_capture_with_repeated_context_flags_joined_in_order` — `"--context", "A", "--context", "B"`, assert both appear, `A` before `B`.
+28. `test_capture_with_file_reference_in_context_expands_content` — a `notes.md` under `kb_path`, `--context "See @file:notes.md."`, assert the note's body text is present in the persisted raw file and `@file:notes.md` is not left as a literal token.
+29. `test_capture_context_reference_outside_workspace_aborts` — `--context "@file:../outside.md"` (or an absolute path outside `kb_path`); assert `exit_code != 0`, an error message in output, and **nothing written** under `sources/`.
+30. `test_capture_context_reference_missing_file_aborts`
+31. `test_capture_context_file_flag_nonexistent_path_aborts`
+32. `test_capture_context_hard_budget_exceeded_aborts` — `monkeypatch.setattr("wakil.app.context_references.MODEL_CONTEXT_WINDOW_TOKENS", small_n)` for a fast/deterministic trigger; assert exit_code 1, clear message, nothing written.
+33. `test_capture_context_soft_budget_warns_but_proceeds` — same monkeypatch technique tuned into the 25-50% band; assert warning text present, `exit_code == 0`, and the file **was** written.
+34. `test_enrich_with_context_and_context_file_wires_through` (near existing `test_enrich_flow`) — pass `--context`/`--context-file` on the `enrich` invocation, assert no crash and the resolved text is visible in the "Enrichment preview" panel's `Context:` line.
+35. `test_enrich_context_reference_failure_aborts_before_model_call` — a bad `@file:` reference on `enrich`; assert exit_code 1 and that no "On branch" / model-analysis output appears (proves the abort happens before landing/model work, not just before `apply_enrichment`).
+
+## 6. CLAUDE.md scope-boundary check
+
+- **Per-provider/per-model context-window table**: confirmed out of scope. One `MODEL_CONTEXT_WINDOW_TOKENS` constant matches "smallest useful version" and "avoid speculative abstraction" — nothing here quietly needs more; the constant is trivially bumped or made per-provider later if it ever matters.
+- **Token estimation**: `len(text) // 4` with no tokenizer dependency is correct scope — adding `tiktoken` or similar would be new infra for a rough budget guard, which the project's dependency list (httpx/BeautifulSoup/frontmatter/etc., no tokenizer) doesn't currently include and shouldn't need to.
+- **Binary detection**: `mimetypes` (stdlib) + null-byte sniff, no `python-magic`/`filetype` dependency — correctly scoped, avoids a new dependency for a guard-rail feature.
+- **Heading-section slicing**: a single regex-based pure function is consistent with (not a step up in complexity from) the existing `_H1_RE`/`_HEADING_RE` precedents already in the codebase — not a new markdown-AST parser, even though `markdown-it-py` is already a project dependency. Correctly scoped.
+- **Two flagged-but-intentionally-out-of-scope rough edges** worth a one-line mention in the PR description rather than fixing now: (1) the mini `@`-reference syntax has no escaping for quotes-within-quotes or literal `#`/`@` inside a quoted path; (2) unquoted `\S+` token matching can swallow trailing sentence punctuation immediately after a reference (e.g. `@file:notes.md.` picks up the trailing `.` as part of the path and will 404). Both are consistent with "keep changes small" — fixing them would require a heavier parser for a marginal edge case.
+- **Confirmed**: no `CaptureProposal`/`EnrichmentProposal` field additions, no `prepare_capture`/`prepare_enrichment` signature changes — the whole feature is additive and CLI-layer-contained, which is the cheapest possible integration into the existing service layer.
+
+### Critical Files for Implementation
+- /Users/ebridges/Projects/wakil/src/wakil/app/context_references.py (new)
+- /Users/ebridges/Projects/wakil/src/wakil/cli/main.py
+- /Users/ebridges/Projects/wakil/src/wakil/knowledge/markdown.py
+- /Users/ebridges/Projects/wakil/src/wakil/integrations/web.py
+- /Users/ebridges/Projects/wakil/tests/integration/test_ingest_cli.py
+- /Users/ebridges/Projects/wakil/tests/unit/test_context_references.py (new)</result>
+<usage><subagent_tokens>58326</subagent_tokens><tool_uses>24</tool_uses><duration_ms>384807</duration_ms></usage>
+</task-notification>
