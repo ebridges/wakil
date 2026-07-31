@@ -1,0 +1,6 @@
+Once this has completed do the following:
+1. create a PR, run an adversarial PR review agent on it, responding to its feedback in a loop until you both agree
+2. merge the PR, and then switch to `main` and refresh from origin.
+3. then, as yet another approach to mitigating the issue of ModelTruncationErrors, review ADR #0016. 
+4. start an adversarial agent to review ADR 0016 to arrive at a common agreement.
+5. if your review leaves us in a place that indicates it's important to build it, then build a step by step plan and then ultracode an implementation
