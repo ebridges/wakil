@@ -1,0 +1,1 @@
+check off this todo in the pull request: "manual smoke test of `wakil qmd sync` / `wakil init` on a fresh workspace"
