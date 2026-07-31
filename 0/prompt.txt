@@ -1,0 +1,28 @@
+<task-notification>
+<task-id>a00c908676a4e68db</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/0d040421-da1c-44ba-aeb0-8cd05f206644/tasks/a00c908676a4e68db.output</output-file>
+<status>completed</status>
+<summary>Agent "Adversarial review of ADR 0017" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Re-read the full revised file independently and re-verified against the actual code/regex claims where it mattered, not just against the coordinator's summary. Findings:
+
+**#1 (fabricated citation):** Confirmed fixed, and fixed honestly rather than just patched — the new text names the actual failure ("conflated what I remember reading once with what the current document says"), states the `grep -i nudge` result explicitly, and doesn't just delete the mechanism but explains why removing it (rather than defending it) was the right call once the false "already-reviewed" framing was gone. `grep -n -i "second\|two.*point\|two.*touch\|nudge"` against the full file turns up no leftover "two touch-points" language anywhere — Decision, Alternatives, Supersession, and Consequences are all consistently single-touchpoint now.
+
+**#2 (salience rule near-zero power):** This is a real design change, not a rewording. The redundancy/durability split gives the model actual categories to reason with instead of a rule that could only ever protect, never prune. I checked the four eval scenarios against the two-part rule directly: (a) tests redundancy-with-actual-drop, (b) tests durability-protection, (c) tests ephemerality-compression, (d) tests anti-compounding — each maps to a distinct claim in the Decision text, none orphaned. I specifically checked whether (c)'s "compressed or dropped" wording reopens the same looseness that made the old (a) untrustworthy: it doesn't, because additive mode has no mechanism to compress a once-stated, non-redundant fact at all — there's no "did nothing new" path through (c) the way there was through the old (a). The loophole is closed where it mattered and correctly left alone where it didn't.
+
+**#3 (compounding invocation risk):** Verified the Timeline-only prompt design is actually in the Decision text (Stage 2, "What 'full' means" bullet) and is reasoned as a mechanism, not just asserted — it explicitly contrasts with additive mode's `build_compile_prompt` (which does send current top_section, correctly so since additive is non-lossy) and explains why that's specifically dangerous once dropping is allowed. This is a structural fix, not a test standing in for one: with Timeline as the only input, two consecutive runs have nothing to anchor on beyond the same immutable source. Scenario (d) is a reasonable verification of that design, not a substitute for it, matching what the coordinator claimed.
+
+**#4 (edit-flow bugs):** All four sub-cases are handled with actual code-aware reasoning, not hand-waves — the empty-edit fix correctly distinguishes *why* `_merge_entity_note`'s "no compiled_truth means no change" guard exists (protecting against a model that forgot to resend content) from why reusing it for a user's deliberate edit would be wrong. The `_TIMELINE_HEADING_RE` check is the right defense against the exact corruption path I traced. Good.
+
+**#5, #6, #7:** All confirmed fixed as described — the pending-PR note is explicit and up front, the enrich-side mechanism is cut rather than defended, and the anchor-calibration caveat is stated plainly as intended behavior.
+
+**Residual items — worth naming, not blocking:**
+- The durability judgment has no stated default for genuine uncertainty. Additive mode's skill has an explicit hedge ("when in doubt, include both"); Stage 2's Decision text doesn't specify an equivalent bias for an ambiguous durable-vs-ephemeral call, even though the cost is now asymmetric (wrongly dropping is a real loss; wrongly keeping is just verbosity). This should land in `entity-compile/SKILL.md`'s Stage-2 addendum when written, not necessarily the ADR, but the ADR could say so in one sentence.
+- Minor UX ambiguity: when an edit is rejected for a heading collision, the Decision text doesn't say whether re-opening the editor preserves the user's rejected draft or restarts from the original proposal. Implementation-detail level, not a design flaw.
+
+Neither rises to a genuine objection against the ADR as written — both are exactly the kind of thing the existing hard-eval-gate discipline is positioned to catch before real notes are touched, consistent with how this project has handled comparable judgment risk before (ADR 0015's `relevance` field).
+
+**This lands.** All seven substantive objections from the first round were met with real design changes or honest disclosure rather than rhetorical patches, and the two places you asked me to double-check independently — the Timeline-only prompt's actual placement and the eval scenarios' consistency with the two-part salience rule — both check out under direct re-verification. I'd accept this ADR as revised, with the durability-default hedge as a nice-to-have note for whoever writes the Stage-2 skill file, not a required change to the ADR itself.</result>
+<usage><subagent_tokens>131561</subagent_tokens><tool_uses>2</tool_uses><duration_ms>112401</duration_ms></usage>
+</task-notification>
