@@ -1,0 +1,263 @@
+I get an alembic error when trying to run wakil:
+
+```
+wakil ingest transcript sources/transcripts/.raw/2026-07-23-scorealytics-planning-meeting.json --context "Lawrence Krubner (CTO, Scorealytics) and Edward Bridges — planning meeting on scoping a 1-week AI mentoring/consulting engagement, follow-up to the 2026-07-20 CTO Summer Lunch conversation." --context-file "meetings/2026/2026-07-23-scorealytics-lawrence-krubner-mentoring-prep.md"
+╭────────────────────────────────────────────────────────────────────────────── Traceback (most recent call last) ──────────────────────────────────────────────────────────────────────────────╮
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/base.py:213 in _catch_revision_errors                                                             │
+│                                                                                                                                                                                               │
+│    210 │   │   resolution: Optional[str] = None,                                                                                                                                              │
+│    211 │   ) -> Iterator[None]:                                                                                                                                                               │
+│    212 │   │   try:                                                                                                                                                                           │
+│ ❱  213 │   │   │   yield                                                                                                                                                                      │
+│    214 │   │   except revision.RangeNotAncestorError as rna:                                                                                                                                  │
+│    215 │   │   │   if start is None:                                                                                                                                                          │
+│    216 │   │   │   │   start = cast(Any, rna.lower)                                                                                                                                           │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/base.py:432 in _upgrade_revs                                                                      │
+│                                                                                                                                                                                               │
+│    429 │   │   │   │   migration.MigrationStep.upgrade_from_script(                                                                                                                           │
+│    430 │   │   │   │   │   self.revision_map, script                                                                                                                                          │
+│    431 │   │   │   │   )                                                                                                                                                                      │
+│ ❱  432 │   │   │   │   for script in reversed(list(revs))                                                                                                                                     │
+│    433 │   │   │   ]                                                                                                                                                                          │
+│    434 │                                                                                                                                                                                      │
+│    435 │   def _downgrade_revs(                                                                                                                                                               │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/revision.py:814 in iterate_revisions                                                              │
+│                                                                                                                                                                                               │
+│    811 │   │   else:                                                                                                                                                                          │
+│    812 │   │   │   fn = self._collect_upgrade_revisions                                                                                                                                       │
+│    813 │   │                                                                                                                                                                                  │
+│ ❱  814 │   │   revisions, heads = fn(                                                                                                                                                         │
+│    815 │   │   │   upper,                                                                                                                                                                     │
+│    816 │   │   │   lower,                                                                                                                                                                     │
+│    817 │   │   │   inclusive=inclusive,                                                                                                                                                       │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/revision.py:1475 in _collect_upgrade_revisions                                                    │
+│                                                                                                                                                                                               │
+│   1472 │   │   │   )                                                                                                                                                                          │
+│   1473 │   │   ).union(targets)                                                                                                                                                               │
+│   1474 │   │                                                                                                                                                                                  │
+│ ❱ 1475 │   │   current_revisions = self.get_revisions(lower)                                                                                                                                  │
+│   1476 │   │   if not implicit_base and any(                                                                                                                                                  │
+│   1477 │   │   │   rev not in required_node_set                                                                                                                                               │
+│   1478 │   │   │   for rev in current_revisions                                                                                                                                               │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/revision.py:542 in get_revisions                                                                  │
+│                                                                                                                                                                                               │
+│    539 │   │   """                                                                                                                                                                            │
+│    540 │   │                                                                                                                                                                                  │
+│    541 │   │   if isinstance(id_, (list, tuple, set, frozenset)):                                                                                                                             │
+│ ❱  542 │   │   │   return sum([self.get_revisions(id_elem) for id_elem in id_], ())                                                                                                           │
+│    543 │   │   else:                                                                                                                                                                          │
+│    544 │   │   │   resolved_id, branch_label = self._resolve_revision_number(id_)                                                                                                             │
+│    545 │   │   │   if len(resolved_id) == 1:                                                                                                                                                  │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/revision.py:565 in get_revisions                                                                  │
+│                                                                                                                                                                                               │
+│    562 │   │   │   │   except ValueError:                                                                                                                                                     │
+│    563 │   │   │   │   │   # couldn't resolve as integer                                                                                                                                      │
+│    564 │   │   │   │   │   pass                                                                                                                                                               │
+│ ❱  565 │   │   │   return tuple(                                                                                                                                                              │
+│    566 │   │   │   │   self._revision_for_ident(rev_id, branch_label)                                                                                                                         │
+│    567 │   │   │   │   for rev_id in resolved_id                                                                                                                                              │
+│    568 │   │   │   )                                                                                                                                                                          │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/revision.py:566 in <genexpr>                                                                      │
+│                                                                                                                                                                                               │
+│    563 │   │   │   │   │   # couldn't resolve as integer                                                                                                                                      │
+│    564 │   │   │   │   │   pass                                                                                                                                                               │
+│    565 │   │   │   return tuple(                                                                                                                                                              │
+│ ❱  566 │   │   │   │   self._revision_for_ident(rev_id, branch_label)                                                                                                                         │
+│    567 │   │   │   │   for rev_id in resolved_id                                                                                                                                              │
+│    568 │   │   │   )                                                                                                                                                                          │
+│    569                                                                                                                                                                                        │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/revision.py:637 in _revision_for_ident                                                            │
+│                                                                                                                                                                                               │
+│    634 │   │   │   if branch_rev:                                                                                                                                                             │
+│    635 │   │   │   │   revs = self.filter_for_lineage(revs, check_branch)                                                                                                                     │
+│    636 │   │   │   if not revs:                                                                                                                                                               │
+│ ❱  637 │   │   │   │   raise ResolutionError(                                                                                                                                                 │
+│    638 │   │   │   │   │   "No such revision or branch '%s'%s"                                                                                                                                │
+│    639 │   │   │   │   │   % (                                                                                                                                                                │
+│    640 │   │   │   │   │   │   resolved_id,                                                                                                                                                   │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ResolutionError: No such revision or branch '0006'
+
+The above exception was the direct cause of the following exception:
+
+╭────────────────────────────────────────────────────────────────────────────── Traceback (most recent call last) ──────────────────────────────────────────────────────────────────────────────╮
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/wakil/cli/main.py:554 in ingest_transcript                                                                       │
+│                                                                                                                                                                                               │
+│    551 │   local: _LOCAL = False,                                                                                                                                                             │
+│    552 ) -> None:                                                                                                                                                                             │
+│    553 │   """Ingest a meeting or call transcript."""                                                                                                                                         │
+│ ❱  554 │   _run_ingest(                                                                                                                                                                       │
+│    555 │   │   ctx,                                                                                                                                                                           │
+│    556 │   │   "transcript",                                                                                                                                                                  │
+│    557 │   │   yes,                                                                                                                                                                           │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/wakil/cli/main.py:345 in _run_ingest                                                                             │
+│                                                                                                                                                                                               │
+│    342 │   │   raise typer.Exit(code=1)                                                                                                                                                       │
+│    343 │   try:                                                                                                                                                                               │
+│    344 │   │   with console.status("Preparing capture..."):                                                                                                                                   │
+│ ❱  345 │   │   │   proposal = prepare_capture(                                                                                                                                                │
+│    346 │   │   │   │   config,                                                                                                                                                                │
+│    347 │   │   │   │   kind,                                                                                                                                                                  │
+│    348 │   │   │   │   client,                                                                                                                                                                │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/wakil/app/ingest_service.py:280 in prepare_capture                                                               │
+│                                                                                                                                                                                               │
+│    277 │   │   raw_file=ProposedFile(path="", content=""),                                                                                                                                    │
+│    278 │   )                                                                                                                                                                                  │
+│    279 │                                                                                                                                                                                      │
+│ ❱  280 │   with open_session(config) as session:                                                                                                                                              │
+│    281 │   │   existing = session.scalar(select(Source.id).where(Source.content_hash == content_hash))                                                                                        │
+│    282 │   │   if existing is not None:                                                                                                                                                       │
+│    283 │   │   │   proposal.duplicate_of = existing                                                                                                                                           │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/wakil/app/workspace_service.py:52 in open_session                                                                │
+│                                                                                                                                                                                               │
+│    49                                                                                                                                                                                         │
+│    50 def open_session(config: WorkspaceConfig) -> Session:                                                                                                                                   │
+│    51 │   engine = create_db_engine(config.database_path)                                                                                                                                     │
+│ ❱  52 │   init_db(engine)                                                                                                                                                                     │
+│    53 │   return make_session_factory(engine)()                                                                                                                                               │
+│    54                                                                                                                                                                                         │
+│    55                                                                                                                                                                                         │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/wakil/storage/database.py:91 in init_db                                                                          │
+│                                                                                                                                                                                               │
+│    88 │   tables = set(inspect(engine).get_table_names())                                                                                                                                     │
+│    89 │   if "alembic_version" in tables:                                                                                                                                                     │
+│    90 │   │   if _current_revision(engine) != _head_revision():                                                                                                                               │
+│ ❱  91 │   │   │   command.upgrade(_alembic_config(engine), "head")                                                                                                                            │
+│    92 │   elif tables:                                                                                                                                                                        │
+│    93 │   │   # Pre-Alembic database from an earlier wakil version.                                                                                                                           │
+│    94 │   │   config = _alembic_config(engine)                                                                                                                                                │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/command.py:490 in upgrade                                                                                │
+│                                                                                                                                                                                               │
+│   487 │   │   destination_rev=revision,                                                                                                                                                       │
+│   488 │   │   tag=tag,                                                                                                                                                                        │
+│   489 │   ):                                                                                                                                                                                  │
+│ ❱ 490 │   │   script.run_env()                                                                                                                                                                │
+│   491                                                                                                                                                                                         │
+│   492                                                                                                                                                                                         │
+│   493 def downgrade(                                                                                                                                                                          │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/base.py:556 in run_env                                                                            │
+│                                                                                                                                                                                               │
+│    553 │   │                                                                                                                                                                                  │
+│    554 │   │                                                                                                                                                                                  │
+│    555 │   │   """                                                                                                                                                                            │
+│ ❱  556 │   │   util.load_python_file(self.dir, "env.py")                                                                                                                                      │
+│    557 │                                                                                                                                                                                      │
+│    558 │   @property                                                                                                                                                                          │
+│    559 │   def env_py_location(self) -> str:                                                                                                                                                  │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/util/pyfiles.py:116 in load_python_file                                                                  │
+│                                                                                                                                                                                               │
+│   113 │   ext = path.suffix                                                                                                                                                                   │
+│   114 │   if ext == ".py":                                                                                                                                                                    │
+│   115 │   │   if path.exists():                                                                                                                                                               │
+│ ❱ 116 │   │   │   module = load_module_py(module_id, path)                                                                                                                                    │
+│   117 │   │   else:                                                                                                                                                                           │
+│   118 │   │   │   pyc_path = pyc_file_from_path(path)                                                                                                                                         │
+│   119 │   │   │   if pyc_path is None:                                                                                                                                                        │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/util/pyfiles.py:136 in load_module_py                                                                    │
+│                                                                                                                                                                                               │
+│   133 │   spec = importlib.util.spec_from_file_location(module_id, path)                                                                                                                      │
+│   134 │   assert spec                                                                                                                                                                         │
+│   135 │   module = importlib.util.module_from_spec(spec)                                                                                                                                      │
+│ ❱ 136 │   spec.loader.exec_module(module)  # type: ignore                                                                                                                                     │
+│   137 │   return module                                                                                                                                                                       │
+│   138                                                                                                                                                                                         │
+│   139                                                                                                                                                                                         │
+│ in exec_module:759                                                                                                                                                                            │
+│ in _call_with_frames_removed:491                                                                                                                                                              │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/wakil/storage/migrations/env.py:49 in <module>                                                                   │
+│                                                                                                                                                                                               │
+│   46 if context.is_offline_mode():                                                                                                                                                            │
+│   47 │   run_migrations_offline()                                                                                                                                                             │
+│   48 else:                                                                                                                                                                                    │
+│ ❱ 49 │   run_migrations_online()                                                                                                                                                              │
+│   50                                                                                                                                                                                          │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/wakil/storage/migrations/env.py:42 in run_migrations_online                                                      │
+│                                                                                                                                                                                               │
+│   39 │   │   │   connection=connection, target_metadata=target_metadata, render_as_batch=True                                                                                                 │
+│   40 │   │   )                                                                                                                                                                                │
+│   41 │   │   with context.begin_transaction():                                                                                                                                                │
+│ ❱ 42 │   │   │   context.run_migrations()                                                                                                                                                     │
+│   43 │   connectable.dispose()                                                                                                                                                                │
+│   44                                                                                                                                                                                          │
+│   45                                                                                                                                                                                          │
+│ in run_migrations:8                                                                                                                                                                           │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/runtime/environment.py:969 in run_migrations                                                             │
+│                                                                                                                                                                                               │
+│    966 │   │   """                                                                                                                                                                            │
+│    967 │   │   assert self._migration_context is not None                                                                                                                                     │
+│    968 │   │   with Operations.context(self._migration_context):                                                                                                                              │
+│ ❱  969 │   │   │   self.get_context().run_migrations(**kw)                                                                                                                                    │
+│    970 │                                                                                                                                                                                      │
+│    971 │   def execute(                                                                                                                                                                       │
+│    972 │   │   self,                                                                                                                                                                          │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/runtime/migration.py:614 in run_migrations                                                               │
+│                                                                                                                                                                                               │
+│    611 │   │   head_maintainer = HeadMaintainer(self, heads)                                                                                                                                  │
+│    612 │   │                                                                                                                                                                                  │
+│    613 │   │   assert self._migrations_fn is not None                                                                                                                                         │
+│ ❱  614 │   │   for step in self._migrations_fn(heads, self):                                                                                                                                  │
+│    615 │   │   │   with self.begin_transaction(_per_migration=True):                                                                                                                          │
+│    616 │   │   │   │   if self.as_sql and not head_maintainer.heads:                                                                                                                          │
+│    617 │   │   │   │   │   # for offline mode, include a CREATE TABLE from                                                                                                                    │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/command.py:479 in upgrade                                                                                │
+│                                                                                                                                                                                               │
+│   476 │   │   starting_rev, revision = revision.split(":", 2)                                                                                                                                 │
+│   477 │                                                                                                                                                                                       │
+│   478 │   def upgrade(rev, context):                                                                                                                                                          │
+│ ❱ 479 │   │   return script._upgrade_revs(revision, rev)                                                                                                                                      │
+│   480 │                                                                                                                                                                                       │
+│   481 │   with EnvironmentContext(                                                                                                                                                            │
+│   482 │   │   config,                                                                                                                                                                         │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/base.py:420 in _upgrade_revs                                                                      │
+│                                                                                                                                                                                               │
+│    417 │   def _upgrade_revs(                                                                                                                                                                 │
+│    418 │   │   self, destination: str, current_rev: str                                                                                                                                       │
+│    419 │   ) -> List[RevisionStep]:                                                                                                                                                           │
+│ ❱  420 │   │   with self._catch_revision_errors(                                                                                                                                              │
+│    421 │   │   │   ancestor="Destination %(end)s is not a valid upgrade "                                                                                                                     │
+│    422 │   │   │   "target from current head(s)",                                                                                                                                             │
+│    423 │   │   │   end=destination,                                                                                                                                                           │
+│                                                                                                                                                                                               │
+│ /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py:162 in __exit__                                                                │
+│                                                                                                                                                                                               │
+│   159 │   │   │   │   # tell if we get the same exception back                                                                                                                                │
+│   160 │   │   │   │   value = typ()                                                                                                                                                           │
+│   161 │   │   │   try:                                                                                                                                                                        │
+│ ❱ 162 │   │   │   │   self.gen.throw(value)                                                                                                                                                   │
+│   163 │   │   │   except StopIteration as exc:                                                                                                                                                │
+│   164 │   │   │   │   # Suppress StopIteration *unless* it's the same exception that                                                                                                          │
+│   165 │   │   │   │   # was passed to throw().  This prevents a StopIteration                                                                                                                 │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/kb/.direnv/python-3.14/lib/python3.14/site-packages/alembic/script/base.py:245 in _catch_revision_errors                                                             │
+│                                                                                                                                                                                               │
+│    242 │   │   │   │   resolution = "Can't locate revision identified by '%s'" % (                                                                                                            │
+│    243 │   │   │   │   │   re.argument                                                                                                                                                        │
+│    244 │   │   │   │   )                                                                                                                                                                      │
+│ ❱  245 │   │   │   raise util.CommandError(resolution) from re                                                                                                                                │
+│    246 │   │   except revision.RevisionError as err:                                                                                                                                          │
+│    247 │   │   │   raise util.CommandError(err.args[0]) from err                                                                                                                              │
+│    248                                                                                                                                                                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+CommandError: Can't locate revision identified by '0006'
+```
