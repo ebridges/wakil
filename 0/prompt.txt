@@ -1,0 +1,3 @@
+Re: caveat #1 -- what if you use the branch-name as a key to store the portion of the prompt that is shared across each call? the branch name has to be the same so that all work lands in the same place.  Just thinking out loud -- I'm not sure if that alone will address cross-stage caching.
+
+Hold your thoughts on batching/relevance to resume once we've finished the discussion on prompt caching.
