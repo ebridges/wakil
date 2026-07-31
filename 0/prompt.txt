@@ -1,0 +1,3 @@
+help me to resolve the wakil ingest skill with the legacy ones.  the legacy ones have extremely valuable guidelines and context that occasionally depend on GBrain and/or Hermes.  I'd like to capture those guidelines, and weigh when to create functionality in wakil that mirrors the dependent GBrain functionality.
+
+Example: create a quickcapture ingest in @~/Projects/kb/skills by basing it on this one @../hold.hermes/skills/quickcapture-ingest/SKILL.md : note that it has very strick guidelines on backlinking, quality, etc. that are important, but need my own equivalent guidelines
