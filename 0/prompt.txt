@@ -1,0 +1,15 @@
+this repo had a README.md that was overwritten when i fetched from origin.  I'd like to restore that README if possible
+
+I ran this sequence of commands.  When it did not work, I deleted the remote repo and recreated it.
+
+```
+ 5103  2026-07-09 10:49  git init .
+ 5105  2026-07-09 10:49  git add README.md
+ 5108  2026-07-09 11:28  git remote add origin git@github.com:ebridges/wakil.git
+ 5109  2026-07-09 11:30  git push
+## here's where I recreated the repo
+ 5113  2026-07-09 11:32  git branch -u origin/main main
+ 5114  2026-07-09 11:32  git remote set-head origin -a
+ 5115  2026-07-09 11:32  git fetch origin
+ 5118  2026-07-09 11:32  git pull
+```
