@@ -1,0 +1,243 @@
+<task-notification>
+<task-id>a877305623e985ee8</task-id>
+<tool-use-id>toolu_01SwTcrpvSuUegfuf3R18aHg</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2/tasks/a877305623e985ee8.output</output-file>
+<status>completed</status>
+<summary>Agent "Design the skill best-practices audit and eval plan" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># Plan: Skill audit, reference/script split, eval harness, and CI wiring for wakil's 12 golden skills
+
+I read all 12 `SKILL.md` files in full, `source-types.md`, `docs/skill-refactor.md`, `docs/skill-resolution-specification.md`'s consumer (`src/wakil/skills/resolver.py`), the `skills_app` CLI commands (`src/wakil/cli/main.py:678-771`), `src/wakil/llm/skill_loader.py` (the existing pattern for injecting skill prose into a system prompt), `src/wakil/llm/client.py`, `tests/unit/test_llm_client.py`, `tests/conftest.py`, `tests/fixtures/kb/*`, `.github/workflows/ci.yml`, and `pyproject.toml`. Findings below are grounded in that reading, not assumed.
+
+---
+
+## 1. Per-skill best-practices audit
+
+Legend: only listing concrete, checklist-grounded fixes. "No changes needed" means I checked the specific doc items against the file and found nothing worth changing.
+
+### `content-synthesis` (171 lines)
+- **Examples pattern (concrete, not abstract).** "Verbatim quotes over paraphrase" (lines 46-57) and "Why it matters ties to specific knowledge" (59-69) are pure prose with no input/output pair. Add one worked pair under each, e.g. for the quotes section:
+  - Source: *"We're not going to hit the Q3 number — realistically we're at 60% of plan and the pipeline for Q4 doesn't cover the gap."*
+  - Bad (paraphrase): "The team is behind on Q3 and Q4 looks uncertain."
+  - Good (verbatim): quote the sentence exactly, attributed.
+- **Workflow-as-checklist.** "Cross-note concept synthesis" (82-118) and "Long-document strategy" (120-141) are already numbered and genuinely sequential — convert both to `- [ ] Step N: ...` copyable-checklist form (doc's workflow pattern), medium priority.
+- Everything else (handoff boundaries, extraction integrity, scope statement) already complies — no change.
+
+### `entity-enrichment` (152 lines)
+- **Terminology.** Uses "Compiled Truth" throughout but never "State" (the term `note-revision` and `knowledge-query`/`knowledge-research` use for the same section). Not wrong — `note-revision` is the canonical definer and this file cross-references it — but add one parenthetical on first use: "Compiled Truth (what `note-revision` calls State)" to close the gap for a reader who lands here first. Low priority, optional polish.
+- **Procedure** (53-72) is a 3-branch decision, not a strict sequence — leave as numbered list, not a checklist candidate (checklist format fits *sequential* workflows, not classification branches).
+- No other changes needed — scope boundary, handoff, and "texture over facts" sections already meet the doc's bar.
+
+### `entity-resolution` (110 lines, smallest)
+- **Examples pattern.** "Holder ≠ subject" (90-99) is abstract prose ("A founder describing their own company's prospects is the holder"). Already has one concrete instance embedded in the sentence — arguably sufficient given the file's small size, but could gain one more contrasting example (a claim correctly attributed to a company itself, e.g. a press release) to make the boundary sharper. Low priority.
+- **Decision procedure** (52-71) is a 3-outcome classification, not a checklist candidate.
+- No other changes needed.
+
+### `ingest-source` (167 lines)
+- **Workflow-as-checklist.** "Resuming a failed or interrupted run" (127-146) is a conditional/branching workflow (if X failed, do Y) — this is the doc's *conditional workflow pattern*, already correctly bullet-structured by scenario. No change.
+- The "Full workflow" numbered list (109-126) is a description of stage outputs, not an execution checklist for the agent to check off — leave as-is; converting it to checkboxes would misrepresent it as something to "complete" rather than a reference diagram.
+- No changes needed otherwise — this is the best-structured file in the set already (dispatch table, DAG description, explicit scope statement).
+
+### `kb-commit` (155 lines)
+- **Time-sensitive phrasing (confirmed).** Line 65-66: *"Not yet produced by any shipped wakil command as of this writing; use `note` or `ingest` for anything currently generated."* Replace with a durable-fact form that doesn't reference authorship time, e.g.:
+  &gt; "**`dream`** — reserved for output of a periodic re-synthesis/consolidation pass once `wakil dream` ships (tracked in `TODO.md`). Until then, no wakil command produces this kind — use `note` or `ingest` instead."
+  This states the mechanism ("until X ships") rather than a snapshot claim, so it self-invalidates cleanly (the whole clause gets deleted once `wakil dream` exists) instead of quietly going stale.
+- **Workflow-as-checklist.** The 8-step "Procedure" (74-122) is the single best checklist candidate in the whole catalog — strictly sequential, meant to be followed and checked off exactly (survey → inspect every diff → group → exclude → confirm → write message → commit → re-verify). Convert to `- [ ] Step 1: ...` form.
+- Everything else (commit-kind table, examples, handoff) already complies, including a good existing "Examples pattern" section (124-147) — no change there.
+
+### `knowledge-query` (140 lines)
+- No time-sensitive phrasing, terminology consistent with `note-revision`'s State/Timeline pair, mode-selection guidance already has concrete trigger phrases per mode (lines 39-51) which functions as the doc's examples pattern. No changes needed.
+
+### `knowledge-research` (192 lines, second largest)
+- **Examples pattern.** The five-way claim-verification taxonomy (95-113: Verified/Partially verified/Unverifiable/Misattributed/Retracted-or-disputed) is entirely prose-defined with zero worked examples — this is the sharpest gap in the whole catalog against "examples are concrete, not abstract." Add one short worked example per verdict (or at minimum 2-3 of the five), each showing: claim → trace → verdict, e.g.:
+  &gt; Claim: "Acme's Series B was $40M." Trace: transcript quotes the founder saying "$40M," a public TechCrunch piece independently reports "$38M." Verdict: **Partially verified** — core round is real, exact figure has a minor discrepancy; note both.
+- **Reference-split candidate?** "Worked example: citing a paper or versioned source" (122-143, ~22 lines) is real, occasionally-needed edge-case detail. At 22 lines it's below the threshold where splitting pays off (see §2) — recommend keeping inline, flag as a watch-item if it grows further.
+- No time-sensitive phrasing found (checked "currently"/"as of" — none here).
+
+### `note-conformance` (177 lines)
+- Already has the doc's example pattern done well (YAML frontmatter examples at 95-114). Procedure (28-49) is a 6-item numbered list where each item is "see §below" — functions as a table of contents more than a strict checklist; low-priority checklist conversion, optional.
+- No time-sensitive phrasing, terminology consistent (wikilink form defined once, reused identically in `knowledge-research`/`entity-enrichment`). No changes needed beyond the optional checklist formatting.
+
+### `note-revision` (161 lines)
+- **Workflow-as-checklist.** The 7-step "Procedure" (30-55) is genuinely sequential and safety-critical (read-before-write, re-read-don't-recall, diff-before-save) — strong checklist candidate, convert to `- [ ] Step N: ...`.
+- This file is also where "State (Compiled Truth)" is canonically defined (line 61) — no terminology fix needed here, it's the source of truth other files should (and do) point back to.
+- No changes needed otherwise.
+
+### `note-routing` (126 lines)
+- **Workflow-as-checklist.** The 6-step "Decision tree" (100-119) is sequential with an early-exit branch (step 2: stop and ask if no `RESOLVER.md`) — good checklist candidate, medium priority; note the early-exit branch should stay as prose guidance under the relevant checklist item rather than forcing a false linear read.
+- No time-sensitive phrasing, description already states what+when clearly. No other changes needed.
+
+### `skill-authoring` (233 lines, largest)
+- **Domain-specific-organization split (confirmed, see §2 for detail).** Split "Overriding a built-in" (139-173, ~35 lines) and "Promoting or porting a skill" (175-196, ~22 lines) into `references/`. Core content (MECE scan, extend-vs-create, structural checklist, when-something's-wrong, dangling-reference discipline) stays in `SKILL.md` since it's relevant to nearly every skill-authoring invocation.
+- **Self-invalidating enumeration (new finding, not in your list).** Line 79-80: *"only `source-ingestion` currently ships a `references/` directory"* — this becomes false the moment the split above lands (skill-authoring will then have two `references/` files too), and it's phrased as a point-in-time enumeration that will silently rot again the next time any skill gains a `references/` dir. Reword to a durable statement that doesn't require updating on every future split, e.g.: "a new file under that skill's `references/` ... directory ... (see any skill that already ships one for the pattern)" — drop the specific "only X currently" claim entirely.
+- **Hardcoded skill list is itself a maintenance/dangling-reference risk.** "Dangling-reference discipline" (217-233) hardcodes all 12 skill names in prose. If a skill is ever renamed, this list silently drifts from `wakil skills list`'s actual output — flag this to the new lint tool (§5a) as a check: cross-reference this hardcoded list against `discover_skill_names()`'s actual output and fail lint if they diverge.
+- **Time-sensitive phrasing.** Same "currently" issue as above is the only instance found in this file; no separate "as of this writing" phrasing.
+
+### `source-ingestion` (148 lines) + `references/source-types.md` (161 lines)
+- **TOC (confirmed).** `references/source-types.md` is 161 lines with no table of contents — doc requires one above 100 lines. Add a TOC at the top linking to each `##` section (Meeting transcripts, PDFs, Voice notes, YouTube videos, OCR/scanned documents, Deferred).
+- **Workflow-as-checklist.** "Handing off" (132-148) and the "Test 3-5 before bulk" discipline (118-130) are sequential/procedural but written as prose bullets, not a checklist — convert "Handing off" to a `- [ ] Step N: ...` block (normalize → run `wakil ingest` with `--context` → let `wakil enrich` run automatically → hand off further judgment as needed).
+- `SKILL.md` itself has no changes needed beyond that — it's the only file already using progressive disclosure correctly (points to `references/source-types.md` rather than inlining the dispatch table), and should stay the template other skills' splits (skill-authoring's) are modeled on.
+
+### `kb-commit` cross-check with `docs/skill-refactor.md`
+No cross-reference breakage found — the 12-name catalog in `docs/skill-refactor.md` matches all 12 directory names exactly; none of the proposed changes rename anything, so no cascade risk.
+
+---
+
+## 2. Reference-file/script opportunities
+
+**Confirmed: `skill-authoring` is the one real split candidate.** Splitting "Overriding a built-in" and "Promoting or porting a skill" into two new files:
+- `src/wakil/skills/builtin/skill-authoring/references/overriding-a-builtin.md` (~35 lines)
+- `src/wakil/skills/builtin/skill-authoring/references/promoting-or-porting.md` (~22 lines)
+
+reduces the main file from 233 → ~176 lines and, more importantly, reduces *typical-case* loaded footprint: the two most common skill-authoring tasks ("create a new skill," "fix something wrong with an existing one") never need override or promotion mechanics, but currently pay to load them every time. This is the doc's Pattern 3 (conditional details) more than Pattern 2 (domain-specific organization) — each reference is gated on a specific condition ("if overriding," "if promoting") stated in the existing dispatch list (steps 4 and 5 of the Procedure section already say "see 'Overriding a built-in'"/"see 'Promoting or porting a skill'" — those become pointers to the new files instead of same-file anchors). Neither extracted file needs its own TOC (both under 100 lines).
+
+**Everyone else: no split, confirmed.** I checked each of the other 10 skills for a section that is (a) genuinely rarely needed in the common case and (b) big enough that splitting reduces real footprint, not just moves lines around:
+- `knowledge-research`'s versioned-citation worked example (~22 lines) — below the payoff threshold, and it's arguably core to claim verification, not an edge case; keep inline.
+- `note-conformance`'s "Mechanical fixes: `wakil schema migrate`" section (~30 lines) — used on nearly every conformance pass (step 1 of its own Procedure runs it first), not an edge case; keep inline.
+- `kb-commit`'s commit-kind table — needed to pick a kind every single time; keep inline.
+- Nothing else in `content-synthesis`, `entity-enrichment`, `entity-resolution`, `ingest-source`, `knowledge-query`, `note-revision`, `note-routing` clears the bar — each of these skills is one cohesive procedure without a large low-frequency tail. Splitting any of them for the sake of it would just add indirection (`skill-authoring`'s own guidance: "a `references/` ... file nobody points to is dead weight," and one nobody *needs on the common path* is close to the same problem).
+
+**`scripts/` directory: confirmed, none needed, for any of the 12.** Two independent reasons converge:
+1. `skill-authoring`'s own text is explicit that wakil's resolver "never executes a skill's supporting files itself" — anything under `scripts/` would be reference material for the agent to *read*, not something wakil *runs*. That gives it none of the doc's "scripts solve problems rather than punt to Claude" benefit (no real determinism, no real error handling, no real feedback loop) — it would just be markdown-with-code-fences pretending to be a script.
+2. wakil's actual CLI already is that deterministic layer, and several skills already correctly point at it instead of a bundled script: `note-conformance` → `wakil schema migrate`, `kb-commit` → `wakil git summary`/`git_service.py`'s `commit_message()`, `note-routing` → `schema.directory`, `skill-authoring` → `wakil skills list/which/validate`. Adding a `scripts/` file anywhere in the 12 would duplicate a real CLI command with a worse (non-executed, agent-interpreted) copy. Your lean toward "the CLI already serves that role" is correct — no changes recommended here.
+
+---
+
+## 3. Eval design
+
+**File location: `src/wakil/skills/builtin/&lt;name&gt;/eval.json`, one file per skill.** Not a parallel `evals/` tree. Reasoning, grounded in wakil's own conventions:
+- `skill-authoring`'s "Extend vs. create" section (76-84) already establishes the exact pattern of skill-scoped support files sitting beside `SKILL.md` — `references/`, `templates/`, `scripts/`. An eval file is a fourth instance of the same pattern, not a new one: colocated, versioned with the skill it tests, naturally kept in sync during editing (evaluation-driven development wants "identify gap → build scenario → iterate" as a tight loop against the file you're actively editing).
+- `tests/` is reserved for wakil's *own code* (`test_skill_loader.py`, `test_skills_resolver.py`, `test_skills_cli.py`) — these evals are about *skill-content quality*, a different axis, and mixing them into `tests/fixtures/` would blur that line the project already draws cleanly.
+- One JSON file (not one-file-per-scenario) keeps "12 skills → 12 new files" instead of "12 skills → 36+ new files," matching the "don't build more than 12 skills need" instruction.
+
+**Shape**, adapted from the doc's `{"skills": [...], "query": "...", "files": [...], "expected_behavior": [...]}`:
+
+```json
+{
+  "skill": "kb-commit",
+  "scenarios": [
+    {
+      "id": "group-unrelated-edits-into-separate-commits",
+      "related_skills": [],
+      "query": "I edited jane-doe.md to add a new role, and separately fixed a typo in acme-corp.md. Commit these.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/jane-doe.md": "---\ntype: person\nname: Jane Doe\n...",
+          "companies/acme-corp.md": "---\ntype: company\nname: Acme Corp\n..."
+        }
+      },
+      "expected_behavior": [
+        "Proposes at least two separate commit groups, not one combined commit",
+        "Uses the `wakil &lt;kind&gt;: &lt;description&gt;` message form with kind in {ingest,note,link,memory,dream,source,chore}",
+        "Uses `note` as the kind for both edits (manual edits to existing notes)",
+        "States it will inspect each diff individually before grouping (not `git add -A`)",
+        "Explicitly asks for confirmation before running `git commit`",
+        "States it will not push unless explicitly asked"
+      ]
+    }
+  ]
+}
+```
+
+Field-by-field adaptation:
+- `skills` → `related_skills` (defaults to just the file's own skill; only populate for scenarios that deliberately test a handoff, e.g. a `content-synthesis` scenario that should mention handing off to `entity-resolution` by name).
+- `files` → `workspace.base_fixture` (reuse `tests/fixtures/kb`, which already has `SCHEMA.md`, `people/jane-doe.md`, `meetings/`, `concepts/`, `drafts/`, `sources/transcripts/`) plus `workspace.overlay` (scenario-specific starting state, written on top). This mirrors the existing `kb_path` fixture in `tests/conftest.py` (copy fixture KB into `tmp_path`) rather than inventing a new fixture mechanism.
+- `expected_behavior` → same name, same purpose (a rubric, not a diff), but each item should be one of these five kinds, specific to a markdown-editing/judgment skill rather than a code-generation one:
+  1. **Correct CLI-command citation** — did it name the actual command (`wakil schema migrate`, `wakil skills validate`, `wakil git summary`) rather than inventing one or describing a hand-rolled procedure the code already owns?
+  2. **Correct terminology/convention usage** — `wikilink` form `[[path]]` not `../relative`, `State`/`Timeline` not invented section names, `wakil &lt;kind&gt;: ...` commit form, `COMMIT_PREFIXES` membership.
+  3. **Correct handoff naming** — does it name the right sibling skill by its exact directory name for further action, and not invent a 13th skill or misname one?
+  4. **Anti-pattern avoidance** — does it *not* clobber Timeline, *not* auto-merge an ambiguous entity, *not* guess a directory, *not* fabricate a citation? (Negative assertions matter as much as positive ones for these skills — several are explicitly designed around "never do X.")
+  5. **Preview/confirm discipline** — for any skill whose procedure mandates a preview-before-write step (`note-revision`, `kb-commit`), does the response actually surface a diff/plan and ask before claiming to write?
+
+**Minimum 3 scenarios per skill** (per the doc's checklist item), chosen per-skill to hit: (a) the skill's core happy path, (b) its stated ambiguous/no-match/conflict case (every one of the 12 has one — that's exactly where these skills' judgment is load-bearing), (c) a handoff-boundary case (does it correctly *stop* and defer to a sibling rather than overreaching). Representative picks beyond kb-commit above:
+- `note-revision`: a scenario that reproduces the documented "clobbering bug" shape (three related pages, one new transcript) — `expected_behavior` checks it does NOT regenerate the whole page and DOES flag "my new version is shorter" as a stop signal.
+- `entity-resolution`: an ambiguous two-candidate case — `expected_behavior` checks it returns "ambiguous," not a forced match, and does not auto-merge.
+- `note-routing`: a case with no `RESOLVER.md` in the overlay workspace — `expected_behavior` checks it stops and asks rather than guessing a directory.
+
+**Loading/validation:** a small Pydantic model, `EvalScenario`/`EvalFile`, under `src/wakil/skills/evals.py` (sibling to `resolver.py`, `models.py`), used both by the runner (§4) and by a lint check (§5a) that every builtin skill has an `eval.json` with ≥3 scenarios and well-formed `expected_behavior` (non-empty strings).
+
+---
+
+## 4. Eval runner design
+
+**Location:** `tests/evals/` — a pytest-based runner, not a standalone `scripts/` CLI. Reasoning: pytest already gives collection, parametrization, `-k`/`-m` filtering, and reporting for free; wrapping that machinery in a hand-rolled script would be exactly the "speculative abstraction" CLAUDE.md warns against for a 12-skill, single-developer tool. Concretely:
+
+- `tests/evals/runner.py` — support module, no test collection itself:
+  - `load_scenarios(skill_name) -&gt; list[EvalScenario]` — reads `src/wakil/skills/builtin/&lt;name&gt;/eval.json` via the `evals.py` Pydantic model.
+  - `materialize_workspace(tmp_path, scenario) -&gt; Path` — `shutil.copytree(FIXTURE_KB, target)` (same as `tests/conftest.py`'s `kb_path` fixture) then writes `scenario.workspace.overlay` files on top.
+  - `run_scenario(client, skill: Skill, scenario, workspace: Path) -&gt; str` — builds a system prompt the same shape as `wakil.llm.skill_loader.build_system_prompt` (wakil identity + skill body), but instead of a JSON-contract schema, the "contract" is just: respond as the agent would, describing what you'd do and why. User prompt = `scenario.query` + a serialized listing of the overlay files' paths and contents (since this is a single-shot completion, not real tool use — see tradeoff note below).
+  - `grade_transcript(client, scenario, transcript: str) -&gt; GradeResult` — second `client.complete()` call: system = "You are grading an AI agent's response against a rubric. For each item, answer pass/fail with a one-sentence reason." user = `expected_behavior` list + the transcript. Parse a small JSON array of `{item, pass, reason}` (reusing the existing `validate_model_response`-style strict-JSON parsing pattern from `wakil.llm.schemas`, not a new ad hoc parser).
+- `tests/evals/test_skill_evals.py` — the actual pytest test, parametrized over all 12 skill names × their scenarios, each test:
+  1. `pytest.skip("no model provider configured")` if `resolve_client()` returns `None` (graceful no-key local behavior, matching `test_llm_client.py`'s own null-config test).
+  2. Runs `run_scenario`, then `grade_transcript`.
+  3. Asserts every rubric item passed; on failure, prints the failing item + transcript excerpt for a human to read (pytest's own `-q` failure output is enough; no custom reporter needed).
+  4. Marked `@pytest.mark.eval` (see §5b).
+
+**Explicit design tradeoff, named rather than hidden:** this runner does single-shot transcript grading (skill prose + query → model's described response → graded), not full agentic execution against real files via tool use. A true "spin up Claude Code with the skill loaded and actual file-editing tools" harness would be strictly more faithful but is a materially larger piece of infrastructure (sandboxing, tool-call loop, real filesystem mutation review) that 12 skills don't justify per CLAUDE.md's minimalism directive. The doc's own evaluation-scenario JSON shape (`query`/`files`/`expected_behavior`) doesn't mandate real tool execution either — it's compatible with grading a described response. Recommend transcript grading as the right-sized choice; flag this tradeoff explicitly in the runner's module docstring so a future reader doesn't mistake it for full agentic verification.
+
+**Model choice:** default to whatever `resolve_client()` already resolves (respects `WAKIL_PROVIDER`/`WAKIL_MODEL`, no new config surface). Don't build a Haiku/Sonnet/Opus sweep into the routine runner — that's real API cost multiplied by 3 for no benefit on every run. Instead, support it as an opt-in via the existing `WAKIL_MODEL` env var (a contributor can re-run `uv run pytest -m eval` three times with three different `WAKIL_MODEL` values to satisfy the doc's "tested with Haiku/Sonnet/Opus" checklist item during actual skill-authoring work, without the routine harness needing to know about all three).
+
+---
+
+## 5. CI wiring recommendation
+
+Confirming your proposed split — it's correct — with exact changes:
+
+### (a) Fast, free, deterministic skill lint — extends the blocking `pytest -q` gate, zero `ci.yml` changes
+
+- New module `src/wakil/skills/lint.py`: pure functions operating on a resolved skill's text (no model calls, no network). Checks:
+  - line count (warn/fail thresholds well below the doc's 500-line ceiling — e.g. fail &gt;500, matching the doc exactly);
+  - TOC presence for any `references/*.md` over 100 lines (a heading-scan for a leading list of `##` links);
+  - frontmatter shape/description length (extends what `resolve_skill`/`_load_skill` in `src/wakil/skills/resolver.py` already validates structurally — this lint reuses that same parse, just adds content-quality checks on top rather than duplicating name/skill_api/readability checks that already exist);
+  - a short deny-list of self-referential time-sensitive phrases (`"as of this writing"`, `"as of now"`, `"as of today"`) — mechanically catchable, exactly the `kb-commit` case found in §1;
+  - dangling cross-references: regex-extract skill names mentioned in backticks/prose and check each against `discover_skill_names()`'s real output (catches the `skill-authoring` hardcoded-list drift risk noted in §1, and generalizes it to all 12);
+  - presence of a `references/*.md` file that nothing in `SKILL.md` points to (dead weight, per `skill-authoring`'s own stated rule).
+- Wire it into the existing `skills_app` command family as `wakil skills lint` (extends the space `wakil skills validate` already occupies, doesn't duplicate its structural checks) — human/agent-usable ad hoc during authoring.
+- Wire it into CI for free via `tests/unit/test_skill_lint.py`: parametrize over the 12 builtin skills, call the same `lint.py` functions, assert zero findings. This is picked up by the existing `uv run pytest -q` step with **no `ci.yml` edits at all** — it's just more unit tests, deterministic, no network, no secrets, matching the "structural/mechanical lint fits the existing philosophy fine as a blocking check" framing.
+
+### (b) Live-model evals — separate, non-blocking, opt-in
+
+- `pyproject.toml` — register the marker and change default collection:
+  ```toml
+  [tool.pytest.ini_options]
+  testpaths = ["tests"]
+  markers = ["eval: live-model skill evaluations (real API calls; excluded by default, run with -m eval)"]
+  addopts = "-m 'not eval'"
+  ```
+  This is the only `pyproject.toml` change needed. `ci.yml`'s `uv run pytest -q` stays **byte-for-byte unchanged** and remains zero-network/zero-secret by construction — `addopts` does the exclusion centrally rather than requiring every CI step to remember `-m "not eval"`.
+- New optional workflow `.github/workflows/skill-evals.yml`, `workflow_dispatch`-only (no `push`/`pull_request` trigger, and explicitly no `schedule:` — recurring unsolicited API spend is exactly the "hidden background behavior" CLAUDE.md warns against for a single-developer local-first tool):
+  ```yaml
+  name: Skill Evals
+  on:
+    workflow_dispatch: {}
+  jobs:
+    evals:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v7
+        - uses: astral-sh/setup-uv@v8.3.2
+          with: { enable-cache: true, python-version: "3.12" }
+        - run: uv sync --locked
+        - run: uv run pytest -m eval -q
+          env:
+            ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+            NO_COLOR: "1"
+  ```
+  Requires a repo secret only configured if/when the user chooses to run it manually — the default zero-secret CI posture is untouched.
+- Local usage: `uv run pytest -m eval` (or `-m eval -k kb_commit` for one skill), using whatever provider env var is already set; gracefully skips (not fails) when unset, per `resolve_client() -&gt; None`.
+- **Docs:** add a short "Skill evaluations" subsection to README's existing `## Development` section (next to the two existing `pytest`/`ruff` lines) documenting `uv run pytest -m eval`. Add one sentence to `docs/skill-refactor.md`'s `skill-authoring` section, where it currently says a future `skill-evaluation` skill "is not required for the first release" — note that this evaluation mechanism (`eval.json` + `tests/evals/` + `wakil skills lint`) now fulfills that deferred intention as tooling rather than a 13th skill, so a future reader doesn't wonder why no `skill-evaluation` skill was ever added.
+
+---
+
+### Critical Files for Implementation
+
+- `src/wakil/skills/builtin/skill-authoring/SKILL.md` (largest file, the confirmed split target, plus the self-invalidating "currently ships" fix)
+- `src/wakil/skills/builtin/kb-commit/SKILL.md` (time-sensitive phrasing fix, checklist-formatting candidate)
+- `src/wakil/skills/builtin/source-ingestion/references/source-types.md` (TOC fix)
+- `src/wakil/skills/resolver.py` (existing structural-validation pattern the new `lint.py` extends, not duplicates)
+- `src/wakil/llm/skill_loader.py` (existing prose-injection/system-prompt pattern the eval runner's `run_scenario` should mirror)
+- `pyproject.toml` (marker registration + `addopts` change — the entire mechanism for keeping evals out of the default CI gate)
+- `tests/conftest.py` (existing `kb_path`/fixture-copy pattern the eval runner's `materialize_workspace` should reuse rather than reinvent)</result>
+<usage><subagent_tokens>98156</subagent_tokens><tool_uses>32</tool_uses><duration_ms>306981</duration_ms></usage>
+</task-notification>
