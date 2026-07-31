@@ -1,0 +1,1 @@
+how does wakil know to update a note (e.g. when it's a compiled truth doc) vs. just writing it out (when it's a single occurrence)?
