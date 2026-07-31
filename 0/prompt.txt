@@ -1,0 +1,150 @@
+<task-notification>
+<task-id>adf04b3585c209ba2</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3bf34b02-9b03-4e75-9b11-2ff5adca5354/tasks/adf04b3585c209ba2.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore wakil CLI architecture and commands" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have gathered a thorough map of the codebase. Here is the full report.
+
+## 1. Top-level project layout
+
+Source lives at `src/wakil/` (installable package, `pyproject.toml` → `[project.scripts] wakil = "wakil.cli.main:app"`). Structure:
+
+- `src/wakil/cli/main.py` — the single Typer entry point (1568 lines, all commands)
+- `src/wakil/app/` — **service layer**: `workspace_service.py`, `ingest_service.py`, `memory_service.py`, `query_service.py`, `search_service.py`, `graph_service.py`, `git_service.py`, `context_references.py`, `qmd_service.py`, `schema_migrate_service.py`, `schema_validate_service.py`
+- `src/wakil/storage/` — `schema.py` (SQLAlchemy models), `database.py` (engine/session/Alembic bootstrap), `fts.py` (SQLite FTS5), `migrations/` (Alembic env + 6 versions)
+- `src/wakil/config/` — `settings.py` (`WorkspaceConfig`, workspace root discovery), `registry.py` (named-workspace registry)
+- `src/wakil/integrations/` — `qmd.py`, `git.py`, `github.py`, `web.py` (subprocess/HTTP wrappers to external tools)
+- `src/wakil/llm/` — `client.py` (provider-abstracted model client), `prompts.py`, `schemas.py`, `skill_loader.py`
+- `src/wakil/schema/` — entity Pydantic-schema loader/validator (frontmatter schemas)
+- `src/wakil/skills/` — the skill resolution system (`resolver.py`, `models.py`, `errors.py`, `lint.py`, `evals.py`) plus 18 built-in `SKILL.md` skill directories (`article`, `transcript`, `entity-enrichment`, `ingest-source`, `note-routing`, etc.)
+- `src/wakil/knowledge/` — `markdown.py`, `wikilinks.py` (pure Markdown/frontmatter parsing helpers)
+- `src/wakil/ui/console.py` — all Rich-based CLI output formatting (`print_*` functions), imported by the CLI, not by services
+- `tests/unit/`, `tests/integration/`, `tests/evals/`, `tests/fixtures/kb/` (a copyable fixture knowledge base)
+- `docs/adr/` — 17 ADRs; `docs/DEVELOPMENT.md`/`TROUBLESHOOTING.md` — dev notes
+
+## 2. CLI entry point and full command list
+
+Single Typer app in `src/wakil/cli/main.py:46-70`, with sub-Typers: `ingest`, `git`, `memory`, `schema`, `skills`, `qmd` (+ `qmd collection`), `sources`, `entities`.
+
+Top-level:
+- `wakil init [path]` (L126) — initialize a workspace, index notes, register in `~/.config/wakil/workspaces.yaml`, optionally create a default QMD collection.
+- `wakil status` (L166) — show workspace status (notes, git state, QMD availability).
+- `wakil index` (L172) — re-index Markdown files into the DB.
+- `wakil relationships &lt;note_path&gt;` (L179) — traverse Note↔Note relationship edges (ADR 0006).
+- `wakil search &lt;query&gt;` (L250) — hybrid QMD + FTS search.
+- `wakil query &lt;question&gt;` (L273) — grounded LLM answer with citations.
+- `wakil enrich &lt;source_id&gt;` (L512) — Step 2: analyze a captured source, write/link notes, land git changes.
+- `wakil version` (L1562)
+
+`ingest` sub-app:
+- `ingest transcript &lt;file&gt;` (L633), `ingest text &lt;file&gt;` (L654), `ingest article &lt;url&gt;` (L675) — all route through the shared `_run_ingest` helper (L400) which calls `prepare_capture`/`apply_capture`.
+
+`sources` sub-app:
+- `sources list` (L695), `sources show &lt;id&gt;` (L721), `sources backfill-abstract` (L739).
+
+`entities` sub-app:
+- `entities compile &lt;slug&gt;` (L785) — resynthesize an entity's "Compiled Truth" (has extra inline UI logic for interactive edit/menu, ADR 0017).
+
+`memory` sub-app:
+- `memory list` (L1001), `memory show &lt;id&gt;` (L1042), `memory promote/reject/archive &lt;ids...&gt;` (L1061-1085, via shared `_transition` helper L986).
+
+`schema` sub-app:
+- `schema migrate` (L1088), `schema validate &lt;paths...&gt;` (L1165), `schema list` (L1198), `schema which &lt;type&gt;` (L1220).
+
+`git` sub-app:
+- `git summary` (L1237), `git history &lt;path&gt;` (L1267).
+
+`skills` sub-app:
+- `skills list` (L1288), `skills which &lt;name&gt;` (L1315), `skills describe &lt;name&gt;` (L1348), `skills validate [name]` (L1374), `skills lint [name]` (L1410).
+
+`qmd` sub-app:
+- `qmd sync` (L1506), `qmd embed` (L1537); `qmd collection add/list/remove` (L1452-1503).
+
+## 3. Service-layer boundary (highly relevant to MCP design)
+
+**The CLI is already thin.** Nearly every command follows the pattern: resolve workspace → call one or more `app/*_service.py` functions (imported lazily, inline, inside the command body — presumably to keep `wakil --help` fast) → format output via `wakil.ui.console.print_*`. Business logic, error types, and dataclass/Pydantic return shapes all live in the service modules, not in the Typer functions. Examples of the public service surface (grep of `def ` in each `app/*.py`):
+
+- `workspace_service.py`: `open_session(config)`, `init_workspace(root, name=None)`, `get_status(root)`, `index_notes(...)`
+- `ingest_service.py` (largest, ~2900 lines): `prepare_capture`, `apply_capture`, `prepare_enrichment`, `apply_enrichment`, `validate_proposal`, `list_sources`, `get_source`, `plan_abstract_backfill`, `apply_abstract_backfill`, `prepare_entity_compile`, `prepare_entity_full_resynthesis`, `apply_entity_compile`, plus transcript parsers (`parse_whisper_transcript`, `clean_transcript`, etc.)
+- `memory_service.py`: `list_memories`, `get_memory`, `transition_memories`, `retrieval_rank`, `touch_memories`
+- `query_service.py`: `run_query(config, question, client, ...)` → `QueryResult`
+- `search_service.py`: `search_workspace(session, config, query, ...)` → `list[SearchHit]`, `get_workspace_id`
+- `graph_service.py`: `traverse(session, workspace_id, note_path, ...)` → `TraversalResult`
+- `git_service.py`: `commit_change`, `prepare_landing`, `abandon_landing`, `land_ingestion`
+- `context_references.py`: `resolve_context(context, context_files, workspace_root)` — expands `@file:`/`@url:` references
+- `qmd_service.py`: `add_collection`, `plan_default_collections`, `ensure_default_collection`, `refresh_index`
+- `schema_migrate_service.py` / `schema_validate_service.py`: `plan_schema_migration`, `apply_migrations`, `collect_markdown_files`, `validate_file`
+
+The only exceptions are a few pieces of interactive logic embedded directly in `entities_compile` (the "apply/edit/full/cancel" prompt loop, L881-961) and `schema_migrate` (the per-type confirm loop, L1134-1162) — real UI/confirmation flow, not business logic, and would need adapting (not just re-calling) for a non-interactive MCP tool. Everything else is a near-direct call-through: **a new MCP interface could call almost every `app/*_service.py` function directly, bypassing `cli/main.py` and `ui/console.py` entirely.**
+
+Note: the CLI resolves `WorkspaceConfig` itself via `_resolve_workspace(ctx)` (L85) / `WorkspaceConfig.load(root)` before calling into services — an MCP layer will need its own equivalent of that resolution (workspace root/name → `WorkspaceConfig`), not embedded in services.
+
+## 4. Data layer
+
+`src/wakil/storage/schema.py` — plain SQLAlchemy 2.0 declarative models (`Base(DeclarativeBase)`), no ORM relationships wired (foreign keys only), all workspace-scoped via `workspace_id`:
+
+- `User`, `Workspace` (root_path, git_remote, qmd_enabled)
+- `Source` (raw captured input: source_type, title, content_hash unique-per-workspace, raw_text_path, status, git_branch/git_pr_url)
+- `Note` (indexed Markdown file: path, title, frontmatter_json, content_hash)
+- `Memory` (the memory/lifecycle table: memory_type, content, summary, source_id/note_id, confidence, `stance` casual/formal (ADR 0014), `state` working/candidate/durable/rejected/archived, importance, freshness, event_date)
+- `Relationship` — one shared table for both Memory↔Memory (semantic) and Note↔Note (structural, from wikilinks) edges, distinguished by which nullable FK pair is populated (ADR 0006); `predicate`, `confidence`
+- `IngestRun`, `QueryRun`, `GitChange` — operational/audit tables
+
+`storage/database.py` — `init_db(engine)` handles fresh/pre-Alembic/versioned DB cases; WAL mode + busy_timeout PRAGMAs set on every SQLite connection for concurrent-process safety; `make_session_factory`. `storage/migrations/versions/` has 6 Alembic revisions (0001 baseline → 0006 nullable relationship FKs). Each workspace gets its own SQLite file at `&lt;state_root&gt;/.wakil/wakil.db`.
+
+No vector/embedding storage in wakil's own DB — embeddings live entirely in QMD's separate SQLite index (see #5).
+
+## 5. Search implementation
+
+Two engines, combined in `app/search_service.py::search_workspace(session, config, query, limit, mode)`:
+
+1. **QMD** (`src/wakil/integrations/qmd.py`) — shells out to an external `qmd` binary via `subprocess.run`, scoped per-workspace with `QMD_CONFIG_DIR`/`INDEX_PATH` env vars pointed at `&lt;workspace&gt;/.wakil/qmd/`. Key functions: `qmd_search(root, qmd_dir, query, limit, mode)` (modes: `search`=BM25, `vsearch`=vector, `query`=hybrid+LLM rerank), `qmd_add_collection`, `qmd_list_collections`, `qmd_remove_collection`, `qmd_update`, `qmd_embed`, `detect_qmd`. Results are JSON-parsed defensively (`parse_qmd_results`). `app/qmd_service.py` wraps collection lifecycle/refresh policy on top.
+2. **SQLite FTS5** (`src/wakil/storage/fts.py`) — three virtual tables (`notes_fts`, `memories_fts`, `sources_fts`) kept in sync via SQL triggers on INSERT/UPDATE/DELETE (no app-level sync code needed). `search_notes`, `search_memories`, `search_sources` functions build parameterized bm25-ranked queries; `to_match_expression` sanitizes free text into an FTS5 MATCH expression.
+
+`search_workspace` returns QMD hits first (dedup by note path) then FTS hits (memory hits additionally reranked by `memory_service.retrieval_rank`, lifecycle-state-aware). `app/query_service.py::run_query` builds on top of this for grounded LLM answers.
+
+## 6. Config/settings system
+
+No pydantic-settings; it's a hand-rolled two-layer YAML system, no env-var-driven global settings object:
+
+- **Per-workspace config**: `src/wakil/config/settings.py::WorkspaceConfig` (pydantic `BaseModel`, not `BaseSettings`) persisted as YAML at `&lt;state_root&gt;/.wakil/config.yaml`. Fields: `name`, `root_path`, `state_root` (differs only for linked git worktrees, sharing one DB across worktrees), `git_remote`, `qmd_enabled`, `ingest_directory` (default `"sources"`), `generated_directory` (default `"drafts"`). `WorkspaceConfig.load(root)` / `.save()`. Derived paths: `.wakil_dir`, `.database_path`, `.config_path`, `.qmd_dir`.
+- **Workspace discovery**: `find_workspace_root(start)` walks upward looking for `.wakil/config.yaml`; the CLI's `-w/--workspace`/`WAKIL_WORKSPACE` env var (`cli/main.py:78`) resolves either a directory path or a registered name.
+- **Named-workspace registry**: `src/wakil/config/registry.py` — flat name→path YAML map at `$XDG_CONFIG_HOME/wakil/workspaces.yaml` (default `~/.config/wakil/`), written by `wakil init`, read by `-w &lt;name&gt;`.
+- **Model provider config**: pure env vars, resolved in `src/wakil/llm/client.py::resolve_client()` (L157-178) — `ANTHROPIC_API_KEY` (default provider when set), `OPENAI_API_KEY` (OpenAI-compatible), `WAKIL_PROVIDER` (force), `WAKIL_MODEL` (override model id), `WAKIL_OPENAI_BASE_URL`. Returns `None` if unconfigured (CLI then errors cleanly).
+- **Skill path override**: `WAKIL_SKILL_PATH` env var (colon-separated, like `PATH`), consumed by `skills/resolver.py`.
+
+## 7. "Skills" / skill-orchestration concept (ADR 0008)
+
+There is a real, well-developed **skill system**, but it is deliberately *not* multi-agent orchestration — ADR 0008 (`docs/adr/0008-ingestion-decomposition-reject-multi-agent-mechanism.md`) explicitly **rejects** an agent-orchestrator mechanism in favor of "a fixed, code-sequenced DAG." I did not find the literal phrase "skill-orchestration" anywhere in the repo (grepped `-i` across `.py`/`.md`); the closest matches are `CLAUDE.md:109` and ADR 0008 itself using "multi-agent orchestration" (listed under "Avoid" in the Design Biases section), and skill files (`ingest-source/SKILL.md`) using the word "orchestrate" to describe one skill invoking others' judgment content within the fixed DAG — not a separate orchestration engine.
+
+Key design point from ADR 0008: classification is an **explicit CLI argument** (`wakil ingest &lt;kind&gt;`), not content-inferred routing; each extraction step pairs a mechanical function with a `SKILL.md` prose file (judgment only, no schema) folded into one model call and validated against a shared `ExtractionOutput` Pydantic contract; entity resolution and invariant enforcement (`validate_proposal()`) are explicit DAG nodes, never agent-remembered steps.
+
+Skill machinery:
+- `src/wakil/skills/resolver.py` — precedence-chain resolution: `WAKIL_SKILL_PATH` override → `&lt;kb-root&gt;/skills/` → user-level (`~/.config/wakil/skills`) → built-in (`src/wakil/skills/`). First matching valid directory wins (`resolve_skill`, `resolve_roots`, `discover_skill_names`).
+- `src/wakil/skills/models.py` — `SkillMetadata` (name, description, skill_api version, optional version), `ResolvedSkill` (with a path-traversal-safe `.resource()` accessor).
+- `src/wakil/llm/skill_loader.py` — loads a resolved skill's prose and builds a system prompt combined with a Pydantic contract's `model_json_schema()`; this is the one place skill content actually feeds a model call (used by `wakil enrich`'s DAG).
+- 18 built-in skill dirs under `src/wakil/skills/` (`article`, `transcript`, `text`, `entity-resolve`, `entity-enrichment`, `entity-compile`, `note-routing`, `note-conformance`, `note-revision`, `content-synthesis`, `ingest-source`, `knowledge-query`, `knowledge-research`, `kb-commit`, `skill-authoring`, `entity-resolution`, `source-ingestion`).
+- Related docs: `docs/skill-resolution-specification.md`, `docs/ingestion-model.md`, `docs/ingestion-refactor-spec.md`, `docs/skill-refactor.md` (a design-notes doc that itself flags `mcp__gbrain__*` MCP tool naming from a *different*, prior GBrain project as an anti-pattern example — see #8).
+
+## 8. Existing MCP references
+
+**None in application code or dependencies.** Grep across `*.py`, `*.md`, `*.toml`, `*.yaml`/`.yml` for `mcp`/`MCP`/"model context protocol" turns up exactly one hit, and it's incidental:
+
+`docs/skill-refactor.md:456` — describing problems in a *prior/different* GBrain vault project (not wakil itself): "CLAUDE.md mandates the `mcp__gbrain__*` MCP tools instead, and only quickcapture-ingest actually follows that." This is cited as a cautionary example of skill/tool-naming drift, not a spec for wakil's own MCP surface.
+
+`pyproject.toml` has no `mcp` SDK dependency. No `mcp/` module, no server stub, no ADR mentioning MCP design intent. This is a clean-slate area — the MCP interface will be new.
+
+## 9. Test structure and conventions
+
+`tests/unit/` (pure service/module-level tests, one file roughly per `app/*_service.py` or module) and `tests/integration/` (CLI-level, via Typer's `CliRunner`) and `tests/evals/` (live-model skill evals, marked `@pytest.mark.eval`, excluded from default run via `addopts = "-m 'not eval'"` in `pyproject.toml`, per ADR 0004).
+
+Conventions observed:
+- **`tests/conftest.py`**: autouse fixtures normalize color env vars (`NO_COLOR=1`, `COLUMNS=200`) for deterministic Rich output assertions; `isolated_workspace_registry` fixture points `XDG_CONFIG_HOME` at `tmp_path` so tests never touch the real `~/.config/wakil`; `_no_real_qmd` autouse fixture monkeypatches `wakil.integrations.qmd.shutil.which` to `None` so no test ever shells out to a real `qmd` binary (tests that need qmd behavior explicitly re-enable it, see `test_qmd_cli.py`'s `_patch_qmd`); `kb_path` fixture copies `tests/fixtures/kb/` into a fresh `tmp_path`.
+- **Integration tests** (e.g. `tests/integration/test_search_cli.py`) use `typer.testing.CliRunner()` and `runner.invoke(app, [...])`, asserting on `result.exit_code` and `result.output`. Pattern: `runner.invoke(app, ["init", str(kb_path)])` then `runner.invoke(app, ["-w", str(kb_path), &lt;command&gt;, ...])`.
+- **Unit/service tests** (e.g. `tests/unit/test_memory_service.py`) call `init_workspace(kb_path)` / `WorkspaceConfig.load(kb_path)` directly, then `open_session(config)` and call service functions with a raw SQLAlchemy `Session` + `workspace_id`, bypassing the CLI and Rich output entirely — this is the layer an MCP tool's own tests would most closely mirror.
+- **Model-call mocking**: tests needing an LLM response monkeypatch `wakil.llm.client.resolve_client` with a `FakeClient` stub exposing `.model` and `.complete(system, prompt, max_tokens=..., *, cacheable_prefix=None)`. For DAG-heavy tests (`prepare_enrichment`), `FakeClient` is a fixed-length scripted-response queue — a documented gotcha in `docs/DEVELOPMENT.md` (L85-87) is that adding any new unconditional model call to the DAG breaks every test with an explicit response-length `FakeClient`, requiring a full audit of construction sites.
+- Ruff config: `select = ["E","F","I","UP","B","SIM"]`, line-length 100, target Python 3.12.</result>
+<usage><subagent_tokens>88847</subagent_tokens><tool_uses>25</tool_uses><duration_ms>146453</duration_ms></usage>
+</task-notification>
