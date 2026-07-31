@@ -1,0 +1,1 @@
+rename the "dev-docs" skill to be "development-docs"
