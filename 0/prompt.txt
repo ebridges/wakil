@@ -1,0 +1,1 @@
+yes add the embed command, and re-run it on every ingest so that embeddings remain updated
