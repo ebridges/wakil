@@ -1,0 +1,1 @@
+Does it make sense to organize collections by top level entities? Or will QMD work better with the entire KB in one collection?
