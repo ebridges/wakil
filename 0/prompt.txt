@@ -1,0 +1,12 @@
+<task-notification>
+<task-id>a29e1b8db8d70d6bb</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/a29e1b8db8d70d6bb.output</output-file>
+<status>completed</status>
+<summary>Agent "Council Ada: Round 3 final position" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Rerun-classify all 10 first — cheap and mechanical, no dispute there. The split from A is what happens next: A treats human-validity-checking as a contingent follow-up, triggered only if reruns show verdict-flipping. I hold that grader-as-proxy is a standing risk independent of flip-rate — a grader can be stably, consistently wrong. Editing SKILL.md on the deterministic subset changes the knowledge base per this repo's working agreement ("no silently rewriting," "reviewable diffs"), so a small 5-6 scenario human check before that edit is proportionate cost for an irreversible-ish action, not a nice-to-have. Variance subset stays frozen-and-regraded as originally planned.
+
+STANCE: rerun-plus-validity-check | CONFIDENCE: med | DEALBREAKER: no</result>
+<usage><subagent_tokens>9941</subagent_tokens><tool_uses>0</tool_uses><duration_ms>4838</duration_ms></usage>
+</task-notification>
