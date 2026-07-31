@@ -1,0 +1,3 @@
+that's completed elsewhere.
+
+instead, create a sequence diagram that shows the entire ingest flow in wakil
