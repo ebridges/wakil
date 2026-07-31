@@ -1,0 +1,8 @@
+separately, I've done some confirmation of the fixes and have this feedback.  the agent doing the confirmation has added a new field to the issues in ISSUES.jsonl called "feedback" with information to go on reevaluating the fixes.  for any that are simply waiting on the branches that have not been merged, resolve any conflicts and merge them.  Update the issue status as ready to be confirmed again so that we know which ones to reexamine.
+
+90 still open, each now carrying a feedback entry with today's date and specific repro/code evidence. The largest unfixed clusters:
+- All 27 duplicate-entity-creation issues — root cause pinned to _build_stub_entities' exact-path-only dedup in ingest_service.py, confirmed unpatched in installed main (0f95d90)
+- All 12 dropped-attachment-references issues plus 12 of 13 dropped-content-empty-stub/invalid-name issues — _stub_content() still writes a hardcoded empty placeholder on entity creation regardless of source richness; no code path exists anywhere that embeds inline images/PDFs
+- All 4 status-inference-no-confidence-signal issues — confirmed as a genuine feature gap, not a bug: no confidence field exists anywhere for field-level inference
+
+One thing worth your attention: several of the largest remaining patterns already have draft fixes sitting on unmerged wakil branches — fix/issue-36-duplicate-entity-stubs, fix/issue-43-attachment-url-preservation, fix/issue-45-stub-content-visibility, and others (issues #37–46), all clean, all uncommitted-nowhere-else, dated earlier today. That's presumably separate work already in flight on the wakil side — merging those would likely flip a large fraction of the 90 still-open entries.
