@@ -1,0 +1,1 @@
+with that configuration, hermes timed out on the enrich and switched to running the command directly.  can we increase the MCP timeout for this tool?  it runs a very long llm call to do entity enrichment
