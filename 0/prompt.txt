@@ -1,0 +1,227 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   The overarching, still-active request (most recent turn) was a large multi-part task:
+   > "Let's go ahead and do Stages 1 & 2 -- integrating my feedback from above. Use ultracode in 'auto accept' mode to implement this most efficiently. Write it up as an ADR, moving relevant information from ADR 16 where necessary. Analyze ADR 16 and compare it to what is being incorporated here, and note in the new ADR what is being superseded from previous ADRs. Include in the ADR references to these sources I cited, along with your summary of each and how they have influenced (or not) the decisions in the ADR. Run the ADR through an adversarial review. After the ADR has been approved go ahead and begin work on Stages 1 & 2 in a new PR after merging PR #33. Conduct a distinct adversarial review of that PR, looping at least 2 and not more than 5 rounds."
+
+   The "Stages 1 & 2" referenced the user's own prior confirmations in the immediately preceding turn:
+   - Stage 1: "a target size for Compiled Truth... but as part of the warning present to the user an option to review & revise the compiled truth directly and opening an opportunity to the user to do a 'full resynthesis' of that entity."
+   - Stage 2: "Two distinct compile modes... keep today's safe additive mode as the default/frequent operation, and introduce a separate, rarer 'full resynthesis' mode as the only place lossy compression is ever allowed to happen — gated behind its own trust-building, not bolted onto the existing pilot." Confirmed as "a good approach."
+   - Frequency-of-mention as salience signal: confirmed "a good idea."
+   - Size/growth trigger, not time-based: confirmed "a good idea."
+
+   This built on earlier explicit user requests in the session:
+   - Fix the alembic error when running `wakil ingest transcript`.
+   - Investigate and fix `ModelTruncatedError`/`ModelContractError` issues in `wakil enrich`'s entity-revision call.
+   - Explain various technical concepts (SLUG, additive-only synthesis, confidence vs. relevance) when asked.
+   - "Conduct research on how best to approach 'compiling truth' in a constrained space alongside a limitless timeline," analyzing 4 specific cited sources and comparing to wakil's approach, producing a migration plan if warranted.
+   - Explicit stepwise instruction from two turns ago: "1. create a PR, run an adversarial PR review agent on it, responding to its feedback in a loop until you both agree 2. merge the PR, and then switch to main and refresh from origin. 3. then... review ADR #0016. 4. start an adversarial agent to review ADR 0016 to arrive at a common agreement. 5. if your review leaves us in a place that indicates it's important to build it, then build a step by step plan and then ultracode an implementation" — this was fully completed (PR #32 merged, ADR 0016 narrowed and merged as part of PR #33, entity-compile pilot built and merged as PR #33).
+   - "no need to implement it, but add it as a 'known issue' in @docs/DEVELOPMENT.md" (referring to the `_resolve_entity_slug` cross-type collision gap) — completed.
+
+2. Key Technical Concepts:
+   - Alembic migrations, wheel builds via `uv build`, stale-install diagnosis
+   - Anthropic prompt caching (`cache_control`, `cacheable_prefix`), thinking budget (`thinking={"type":"adaptive"}`, `output_config.effort`, `thinking:{"type":"disabled"}` — none of which bound cost effectively per live testing)
+   - `EntityResolution.relevance` (central/notable/minor/peripheral) vs `confidence` (identity-match certainty) — deliberately separate axes
+   - Truncation-driven bisection (`_revise_candidates`, `_split_candidates_by_content_length`, `ModelContractError.truncated`)
+   - ADR-driven development with adversarial multi-round review (Agent tool + SendMessage loops)
+   - Additive-only vs. lossy compression synthesis; "informationally complete" vs "textually unprocessed"
+   - External research synthesis (4 sources: Medium multi-layered summarization cascade, Agentic Skillset incremental summarization with target token budget + periodic full-rewrite, Chain-of-Key arXiv paper's "updates never reduce information" + frequency-emphasis lossy criterion, Anthropic's context-engineering blog on compaction/external note-taking/sub-agent isolation)
+   - Two-part salience rule: redundancy (frequency-based) vs. durability (durable identity/decision/commitment facts vs. ephemeral logistics facts), with an asymmetric-cost "default to durable when uncertain" bias
+   - Timeline-only prompt design to prevent anchoring/compounding across repeated lossy-compression invocations
+   - `NOTE_EXCERPT_CHARS = 2000` (`query_service.py`) as the anchor for `_COMPILED_TRUTH_TARGET_CHARS`
+   - `click.edit()` for interactive text editing in Typer CLIs; Click's `None`-return semantics ("nothing was saved")
+   - `_TIMELINE_HEADING_RE`, `_H1_RE`, `_split_note_sections` (factored out of `_merge_entity_note`)
+   - `wakil` skill-linting (`lint_skill`, `_check_dangling_cross_references`) — backtick-quoted kebab-case tokens are checked against the skill catalog
+   - `tests/evals/` harness (`EvalFile`/`EvalScenario`/`EvalWorkspace`, `run_scenario` is single-turn only, `grade_transcript`), ADR 0004's live-eval norm (`-m eval`, excluded from default CI)
+   - `Workflow` tool for multi-agent orchestration ("ultracode"), 4-phase pattern: build core → wire CLI/console → tests → adversarial verify
+   - Git worktree conflicts from leftover reviewer isolation checkouts (`git worktree remove --force`)
+   - 1Password SSH-agent instability (both for `git push`/`fetch` and `git commit` signing) — required user intervention to unlock/restart
+   - Shell `cp`/`rm` aliased to interactive forms — required `command cp`/`command rm`
+
+3. Files and Code Sections:
+
+   - **`docs/adr/0015-relevance-gated-entities-and-truncation-driven-batching.md`** — fully written, revised through adversarial review, accepted. Documents relevance-gating + Step A (rejected, tested live) + Step B (bisection, implemented and live-validated).
+
+   - **`docs/adr/0016-entity-compilation-and-gated-timeline-context-trimming.md`** — originally authored by the user directly on `main`, narrowed by me through 2 rounds of adversarial review. Final accepted scope: single-entity additive-only `wakil entities compile SLUG` pilot; gated context-trimming REJECTED (verified bug: `_apply_entity_revisions`/`apply_enrichment`'s stale-guard and `_split_candidates_by_content_length` reuse the same in-memory content read once at prepare-time, trimming it would corrupt all three).
+
+   - **`docs/adr/0017-bounded-compiled-truth-target-size-and-gated-full-resynthesis.md`** — created this turn, ~500 lines, `status: accepted`. Key sections:
+     - Context: recaps ADR 0016's gap, anchors to `NOTE_EXCERPT_CHARS=2000`, summarizes all 4 external sources with explicit "Influence" analysis for each.
+     - Decision, Stage 1: `_COMPILED_TRUTH_TARGET_CHARS` (~1200-1500, calibrated to Mosaic/edward-bridges case studies not vault-wide), stateless check (no new frontmatter — explicitly rejected a `compiled_through`/`last_compiled` marker as unneeded), interactive menu in `entities compile`'s own flow only (NOT wired into `wakil enrich` — that was considered, found to rest on a fabricated citation to ADR 0016, and cut).
+     - Decision, Stage 2: `--full` flag, Timeline-only prompt (explicitly NOT reusing additive mode's top_section-inclusive prompt, to prevent compounding), two-part salience rule (redundancy + durability, with asymmetric-cost default-to-durable bias), 4-scenario hard eval gate (a: actual drop not "dropped or condensed"; b: durable once-stated survives; c: ephemeral once-stated compresses; d: repeat-run doesn't compound), explicitly NO frontmatter marker for Stage 2 eligibility.
+     - I later (Phase 10, step 15 above) amended the edit-flow language to remove the "return to the edit choice" (auto-retry) framing after discovering it caused a real infinite loop — all reject-and-retry cases now uniformly "return to this same three-choice menu," with an explanatory note citing the demonstrated bug and pointing to `docs/TROUBLESHOOTING.md`.
+     - Supersession section explicitly maps what's superseded/refined/unchanged relative to ADR 0016.
+     - Sources section cites all 4 external URLs plus internal ADRs/code.
+
+   - **`docs/TROUBLESHOOTING.md`** — appended multiple entries this session, most recently:
+     - "Citing a prior ADR 'from memory' can cite an earlier draft that no longer exists in the accepted document" (the fabricated ADR-0016 "passive nudge" citation incident).
+     - "A retry-loop distinction that reads reasonable in a design doc can be a genuine infinite loop in a deterministic mock" (the click.edit() auto-retry infinite-loop incident, discovered via `timeout 30 uv run pytest ... -k entities_compile` showing only 5/12 tests completing).
+
+   - **`docs/DEVELOPMENT.md`** — appended "shared candidate content spans prompt/merge/stale-guard" entry earlier; also has the pre-existing "A full live-model eval-suite run has a high baseline failure rate — don't read it as a regression signal" entry that I relied on this turn to treat the `redundant-entries-compile-without-duplication` failure as noise (confirmed by isolated re-run passing).
+
+   - **`src/wakil/app/ingest_service.py`** — extensively modified across the session. Most recent additions (this turn, via Workflow + my manual fixes):
+     - `_COMPILED_TRUTH_TARGET_CHARS = 1400` (comment cites NOTE_EXCERPT_CHARS anchoring)
+     - `prepare_entity_full_resynthesis(config, client, slug) -> EntityUpdate` — mirrors `prepare_entity_compile` but uses `build_full_resynthesis_prompt` (Timeline-only) and reuses `apply_entity_compile`
+     - `compiled_truth_text(content: str) -> str | None` — helper for extracting just the Compiled Truth section for size checks and editor text
+     - `rebuild_entity_update_with_compiled_truth(update: EntityUpdate, compiled_truth: str) -> EntityUpdate | None` — re-runs `_merge_entity_note` against `update.old_content` (never `new_content`) after a user edit
+     - Pre-existing (from PR #33): `_split_note_sections`, `_resolve_entity_slug`, `prepare_entity_compile`, `apply_entity_compile`, `_merge_entity_note` (with its "empty compiled_truth means no change" fallback — explicitly NOT to be reused for the user-edit-rejection path)
+
+   - **`src/wakil/llm/prompts.py`** — added `build_full_resynthesis_prompt(entity_name, timeline_section) -> tuple[str, str]`, Timeline-only (no top_section param at all), matching `build_compile_prompt`'s `(cacheable_prefix, variable_suffix)` shape.
+
+   - **`src/wakil/llm/schemas.py`** — `EntityCompileOutput` (one required `compiled_truth: str` field) reused as-is for both additive and full-resynthesis modes; no new schema needed for Stage 2.
+
+   - **`src/wakil/cli/main.py`** — `entities_compile` command extensively rewritten this turn. Current final structure (after my infinite-loop fix) inside the size-check `while True:` loop:
+     ```python
+     if choice != "e":
+         console.print("[red]Please answer a, e, f, or c.[/red]")
+         continue
+
+     # Every reject-and-retry case here returns to this same outer
+     # a/e/f/c menu, deliberately, not an automatic re-invocation of
+     # click.edit(). ... [comment explaining the infinite-loop risk discovered]
+     edited = click.edit(text=text)
+     if edited is None:
+         console.print("[dim]Edit cancelled; nothing changed.[/dim]")
+         continue
+     if not edited.strip():
+         console.print(
+             "[red]Compiled Truth can't be emptied via edit — write real content, "
+             "or cancel.[/red]"
+         )
+         continue
+     if _TIMELINE_HEADING_RE.search(edited):
+         console.print(
+             "[red]That text contains a '## Timeline' heading, which would collide "
+             "with the note's real Timeline section — remove it, or cancel.[/red]"
+         )
+         continue
+     rebuilt = rebuild_entity_update_with_compiled_truth(update, edited)
+     if rebuilt is None:
+         console.print("[red]Could not merge the edited text — try again, or cancel.[/red]")
+         continue
+     update = rebuilt
+     text = edited
+     size = len(edited)
+     if size <= _COMPILED_TRUTH_TARGET_CHARS:
+         break
+     console.print(
+         f"[yellow]Still {size} chars, over the {_COMPILED_TRUTH_TARGET_CHARS}-char "
+         "target.[/yellow]"
+     )
+     ```
+     Also added `--full` flag, `_run_full_resynthesis()` closure (reports before/after size, explicit "still over target" message if applicable), `_apply_and_commit()` shared closure.
+
+   - **`src/wakil/skills/entity-compile/SKILL.md`** — original (PR #33) additive-only content unchanged; this turn added a "## Full resynthesis mode" section (~line 117 onward) containing:
+     - Explanatory intro (differs from additive mode; never touches Timeline; never sees current Compiled Truth)
+     - **NEW (my fix, just added)**: explicit "**Your output is the synthesized Compiled Truth prose, and nothing else.**" paragraph forbidding meta-commentary like "What was dropped, and why" inside the actual output, explaining the worked example's such commentary is documentation-for-humans only
+     - "### The two-part salience rule" (redundancy + durability, asymmetric default-to-durable)
+     - "### Worked example" using `people/carla-nunez.md` fixture, with a Timeline block, "A correct Compiled Truth:" blockquote (line ~233), and "What it dropped, and why:" explanatory prose (line ~240) — **I was in the middle of further sharpening these two labels when interrupted** (planned: relabel to something like "**Your entire output would be:**" and "**(For this documentation only — not part of your output)** What was dropped, and why:")
+     - **NEW**: "### A note on `eval.json`'s repeat-run scenario" disclosure subsection (fixed once already for a lint false-positive: changed backtick-quoted scenario ID `full-resynthesis-repeat-run-no-additional-loss` to plain prose reference "The repeat-run scenario in this skill's `eval.json` (eval scenario d)")
+
+   - **`src/wakil/skills/entity-compile/eval.json`** — extended from 3 to 7 scenarios. New 4: `full-resynthesis-drops-superseded-restatement` (a), `full-resynthesis-keeps-durable-once-stated-fact` (b), `full-resynthesis-compresses-ephemeral-once-stated-fact` (c), `full-resynthesis-repeat-run-no-additional-loss` (d, acknowledged single-turn proxy).
+
+   - **`tests/integration/test_ingest_cli.py`** — `_OVER_TARGET_TRUTH` fixture (`"**Recruiter** at [[companies/acme|Acme]]. " + "Extensive detail about this ongoing relationship. " * 30`, >1400 chars), `OVER_TARGET_COMPILE_JSON`. Added by Workflow: 9 CLI tests for the size-menu/edit/full-resynthesis/--full flows. Added by me (this turn, after Finding 1): 
+     - `test_entities_compile_over_target_edit_cancelled_returns_to_full_menu` (mocks `click.edit` to always return `None`, expects "Edit cancelled" then "Aborted")
+     - `test_entities_compile_over_target_edit_still_over_target_returns_to_full_menu` (mocks `click.edit` to return `_OVER_TARGET_TRUTH`, expects "still" + "over the" message then "Aborted")
+
+   - **`tests/unit/test_ingest_service.py`** — added `test_prepare_entity_full_resynthesis_happy_path_and_timeline_only_prompt` with a `_PromptCapturingClient` subclass verifying the actual prompt sent to the model never contains the note's prior compiled_truth text.
+
+   - **`pyproject.toml` / `uv.lock`** — added `"click>=8.1"` as an explicit direct dependency (root-caused: Typer 0.26.8 vendors its own click fork and no longer transitively provides the real `click` package with `click.edit()`; every `entities compile` call was crashing with `ModuleNotFoundError` before this fix).
+
+4. Errors and fixes:
+   - **Alembic revision mismatch**: kb venv had stale wheel missing migrations 0005/0006 while db was stamped at 0006. Fixed by rebuilding wheel and reinstalling.
+   - **Uncommitted Step B work lost track**: implemented, tested, live-validated but never `git commit`ed before a branch switch stashed it. PR #32 opened against stale commit. Caught by adversarial PR review grepping for claimed function names. Recovered via `git stash pop`. Documented in TROUBLESHOOTING.md; user explicitly did not ask me to change process, just fix and document.
+   - **SSH agent failures**: `git fetch`/`push` failed with `sign_and_send_pubkey ... agent refused operation`. Not fixable by me; worked around by using `gh` (different auth path) and later confirmed it resolved itself. Documented in memory (`feedback_1password_ssh_agent_stuck.md`).
+   - **1Password commit-signing failure**: `git commit` failed twice with "1Password: failed to fill whole buffer" / "fatal: failed to write commit object." I explicitly refused to bypass signing (`--no-gpg-sign`) without permission, per user's own strict instruction embedded in system prompt ("Never skip hooks... or bypass signing... unless the user has explicitly asked"). Asked user via `AskUserQuestion`; user chose "I'll unlock/restart 1Password, then retry" — I retried after their message and it succeeded.
+   - **Fabricated ADR citation**: I cited "ADR 0016's originally-deferred 'passive nudge' idea (its Decision section's 'Passive nudge from `wakil enrich`' bullet)" — this text never existed in ADR 0016's actual accepted text (verified via `grep -i nudge`, zero matches). It existed only in an early pre-narrowing draft I'd read from memory. Caught by round-1 adversarial review of ADR 0017. Fixed by removing the false citation and cutting the underlying mechanism (wakil-enrich passive nudge) entirely rather than defending an unreviewed decision.
+   - **Stale/misleading eval scenario wording**: scenario (a)'s original rubric accepted "either dropped or condensed" as passing — a Stage 2 that behaved identically to additive mode (did nothing new) could still pass. Fixed by tightening to require an actual drop.
+   - **Salience rule gave near-zero real compression power**: original "never drop a uniquely-stated fact" rule (first correction of Chain-of-Key's naive frequency-emphasis idea) would have protected even trivial one-off logistics facts, giving Stage 2 almost no real power beyond what additive mode's dedup already does. Fixed with a second correction: two-part rule (redundancy + durability), where only DURABLE once-stated facts are protected, ephemeral ones are compressible.
+   - **Unaddressed compounding-invocation risk**: repeated Stage 2 runs could anchor on a prior (already-lossy) run's output since the original design reused additive mode's prompt shape (which includes current top_section). Fixed by specifying Stage 2's prompt as Timeline-only, structurally preventing anchoring.
+   - **`click` not a declared dependency**: found by the workflow's tests phase — every `entities compile` invocation crashed with `ModuleNotFoundError: No module named 'click'` because Typer 0.26.8 no longer transitively provides it. Fixed by adding `click>=8.1` to `pyproject.toml`, re-locked with `uv sync`.
+   - **Edit-flow control-flow collapsed a spec'd distinction (workflow verify Finding 1)**: initially "fixed" by introducing a nested inner loop where empty/collision cases auto-retry `click.edit()` directly (matching literal reading of ADR wording "return to the edit choice"). **This introduced a genuine infinite loop**: the existing test's mock (`lambda text=None, **kwargs: "   \n"`) returns the same invalid value on every call, so the auto-retry never terminates. Discovered via `timeout 30 uv run pytest ... -k entities_compile` showing only 5/12 tests completing before hang (both earlier full-suite background runs had been silently `killed` at the same point without pointing at a cause). **Fixed by reverting to a flat structure** where ALL reject-and-retry cases return to the same outer menu (no auto-retry at all) — eliminating the hang by construction. Corrected ADR 0017's text to match, with an explanatory note citing the demonstrated bug. Added a new TROUBLESHOOTING.md entry.
+   - **Skill-linter false positive**: my SKILL.md disclosure note backtick-quoted the eval scenario ID `full-resynthesis-repeat-run-no-additional-loss`, which matches the skill-linter's dangling-cross-reference check's kebab-case pattern, causing `test_real_builtin_skill_has_no_lint_findings[entity-compile]` to fail. Fixed by rewording to avoid the backtick-quoted bare identifier.
+   - **Live eval failure — real bug**: `full-resynthesis-drops-superseded-restatement` failed because the model included a "What was dropped, and why" commentary (explicitly naming the dropped $8M figure) inside its actual `compiled_truth` output — directly mimicking a pattern from my own SKILL.md worked example, which I'd intended as documentation-for-humans but never explicitly told the model was not part of its expected output. Root-caused and partially fixed (added explicit "your output is ONLY the synthesized prose" instruction to SKILL.md) — **fix not yet re-verified against the live eval, and worked-example labeling not yet sharpened** (in progress when interrupted).
+   - **Live eval failure — likely flaky, not a regression**: `redundant-entries-compile-without-duplication` failed once, passed on isolated re-run — treated as consistent with the project's own documented eval-suite flakiness pattern (`docs/DEVELOPMENT.md`), not a real regression, per established project precedent for handling this exact situation.
+
+5. Problem Solving:
+   Most problems were solved definitively (alembic, caching/relevance/bisection implementation and merge, ADR 0015/0016/0017 all accepted and merged, entity-compile pilot merged). The CURRENT, unresolved problem is: **Stage 1 & 2 implementation on branch `feat/compiled-truth-size-management` has real, self-discovered bugs that have been fixed in code but not yet fully re-verified.** Specifically:
+   - The `click` dependency bug: fixed, verified via full suite passing.
+   - The infinite-loop edit-flow bug: fixed, verified via targeted test run (12/12 passing in 3.65s) and full suite (501 passing).
+   - The skill-linter false positive: fixed, verified via full suite passing.
+   - The "What was dropped, and why" leaking into output bug: root-caused, ONE fix applied (explicit "output is only the prose" instruction added to SKILL.md), but **not yet re-run against the live eval to confirm the fix actually works**, and I was in the middle of a secondary, reinforcing fix (sharpening the worked example's own labeling) when interrupted.
+   - Still outstanding: full 7-scenario live eval re-run, final full test suite + ruff check, commit, push, PR creation, and the user-mandated bounded (2-5 round) adversarial PR review — none of these final steps have happened yet.
+
+6. All user messages (non-tool-result, this conversation):
+   - "Explain this statement: 'The compile mechanism itself was narrowed from...'" (asked for clarification of a PR description passage)
+   - "What is meant by 'SLUG' in this context?"
+   - "should the slug include the directory prefix? what if there's a company named 'edward-bridges' in the future (odd example, but you get what i mean)."
+   - "no need to implement it, but add it as a 'known issue' in @docs/DEVELOPMENT.md"
+   - "Conduct research on how best to approach 'compiling truth' in a constrained space alongside a limitless timeline. Here're references on how this has been addressed elsewhere: [4 URLs]. Analyze those and compare & contrast to the approach we're adopting. Are there any learnings in those approaches that can be applied here? If there are features that are worth integrating with, produce a plan based on that for us to migrate to a more stable approach to managing the 'Compiled Truth' and the 'Timeline log' sections of the KB entities."
+   - Detailed confirmation message with feedback on each of the 4 proposed learnings:
+     > "1. A target size for Compiled Truth, surfaced as a warning first, not silently enforced... Let's do this, but as part of the warning present to the user an option to review & revise the compiled truth directly and opening an opportunity to the user to do a 'full resynthesis' of that entity.
+     > 2. Two distinct compile modes... Confirmed, I think this is a good approach.
+     > 3. Frequency-of-mention as the salience signal... Confirmed, I think this is a good idea.
+     > 4. A size/growth trigger, not a time-based one... Confirmed, I think this is a good idea.
+     > ---
+     > Let's go ahead and do Stages 1 & 2 -- integrating my feedback from above. Use ultracode in 'auto accept' mode to implement this most efficiently.
+     > Write it up as an ADR, moving relevant information from ADR 16 where necessary. Analyze ADR 16 and compare it to what is being incorporated here, and note in the new ADR what is being superseded from previous ADRs. Include in the ADR references to these sources I cited, along with your summary of each and how they have influenced (or not) the decisions in the ADR. Run the ADR through an adversarial review.
+     > After the ADR has been approved go ahead and begin work on Stages 1 & 2 in a new PR after merging PR #33. Conduct a distinct adversarial review of that PR, looping at least 2 and not more than 5 rounds."
+   - (This is the most recent and currently-governing user message; no further user messages have arrived since — all subsequent turns have been my own tool-driven work plus one system tool-use rejection forcing this summary.)
+
+7. Pending Tasks:
+   - Finish sharpening the worked-example labeling in `entity-compile/SKILL.md` (in progress: changing "A correct Compiled Truth:" and "What it dropped, and why:" labels to be more unambiguous that the latter is documentation, not model output).
+   - Re-run the live eval (`uv run pytest -m eval -k "entity-compile"`, or at minimum `-k "full-resynthesis-drops-superseded-restatement"`) to confirm the "output is only the synthesized prose" fix actually resolves the failure.
+   - Ideally re-run all 7 entity-compile eval scenarios to confirm the full gate passes (matching the hard-eval-gate discipline ADR 0017 itself mandates).
+   - Run the full test suite (`uv run pytest tests/unit tests/integration -q`) and `ruff check` one final time after all fixes.
+   - Commit all outstanding changes on `feat/compiled-truth-size-management` (the edit-flow revert, the two new tests, the SKILL.md disclosure note + lint fix + "output is only the prose" fix + worked-example label sharpening, the `pyproject.toml`/`uv.lock` click dependency addition, the corrected ADR 0017 language, the new TROUBLESHOOTING.md entry).
+   - Push the branch.
+   - Open the PR (`gh pr create`) for Stages 1 & 2.
+   - Conduct the adversarial PR review the user explicitly required: "at least 2 and not more than 5 rounds" — via the Agent tool + SendMessage loop pattern established earlier in the session (matching how PR #32's review was conducted), not skipped or replaced by only the internal workflow-verify phase.
+   - Apply the `development-docs` skill judgment before any further commits (per the pre-commit hook reminder pattern established throughout this session) — likely nothing new clears the bar beyond what's already been added, but should be checked each commit.
+
+8. Current Work:
+   Immediately before this summary was requested, I was mid-fix on the live-eval failure `full-resynthesis-drops-superseded-restatement`. I had:
+   1. Diagnosed the root cause: the model's actual `compiled_truth` output included a "What was dropped, and why" meta-commentary section (explicitly naming the superseded $8M figure), directly mirroring a pattern from my own `entity-compile/SKILL.md` worked example, which I had intended as documentation for a human reader but never explicitly told the model was NOT part of its expected output.
+   2. Applied a first fix: inserted a new paragraph into SKILL.md's "Full resynthesis mode" section (right after the intro paragraph, before "### The two-part salience rule"):
+      ```
+      **Your output is the synthesized Compiled Truth prose, and nothing else.**
+      Do not explain, inside your output, what you added, dropped, or why — no
+      "What was dropped, and why" section, no aside naming a superseded value
+      you removed, no meta-commentary about the compression itself. Whatever you
+      return becomes the note's actual Compiled Truth section verbatim; any
+      explanation of your reasoning bloats exactly the thing this operation
+      exists to keep small, and a dropped value named in an "originally X, now
+      Y" aside is still present in the output, which the redundancy rule above
+      already forbids once a fact is judged clearly superseded. The worked
+      example below labels its "what was dropped and why" commentary
+      separately, after the example output, precisely because that commentary
+      is for a human reading this skill file — it documents the *reasoning*
+      behind the example, it is not part of the *result* the example shows.
+      ```
+   3. Was in the process of applying a SECOND, reinforcing fix — sharpening the worked example's own labels to make the human-documentation-vs-model-output distinction even harder to miss. I had just re-read lines 228-244 of `entity-compile/SKILL.md` to view the exact current text:
+      ```
+      228: What survives intact, and must: Carla's title (VP of Underwriting,
+      229: Northfield Mutual) and Priya Shah as the pilot's team lead — both durable,
+      230: once-stated identifying/relationship facts, neither eligible for
+      231: compression under any size pressure.
+      232:
+      233: A correct Compiled Truth:
+      234:
+      235: > Carla Nunez is VP of Underwriting at Northfield Mutual. Her team is
+      236: > running a risk-scoring model pilot, on track for a Q3 go-live against a
+      237: > 90-day evaluation window as of the 2026-03-19 check-in; Priya Shah leads
+      238: > the pilot on Carla's team.
+      239:
+      240: What it dropped, and why: the original "no timeline given yet" framing
+      241: (superseded by the confirmed Q3 target — redundancy rule) and the
+      242: Tuesday-to-Thursday reschedule detail (ephemeral, its consequence already
+      243: folded into "as of the 2026-03-19 check-in" — durability rule). Everything
+      244: else — the title, the pilot's existence, the Q3 target, the 90-day window,
+      ```
+      I had NOT yet made the actual edit to sharpen these labels when the conversation was interrupted by the mandatory summary request.
+
+9. Optional Next Step:
+   Directly continue the in-progress fix, exactly where it was left off: apply the label-sharpening edit to `src/wakil/skills/entity-compile/SKILL.md` lines 233 and 240 (e.g., relabeling "A correct Compiled Truth:" to something like "**Your entire output would be:**" and "What it dropped, and why:" to something like "**(For this documentation only — not part of your output)** What was dropped, and why:"), then re-run the live eval for `full-resynthesis-drops-superseded-restatement` to confirm the fix works, per my own stated intent immediately before interruption: "Let's also strengthen the worked example's own labeling to be extra unambiguous, changing 'A correct Compiled Truth:' and 'What it dropped, and why:' to make the distinction even sharper." After that verification, proceed through the remaining pending tasks in order: re-run the full eval suite, full test suite + ruff, commit/push, open the PR, and conduct the user-mandated bounded 2-5 round adversarial PR review.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/0d040421-da1c-44ba-aeb0-8cd05f206644.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
