@@ -1,0 +1,3 @@
+Currently the organization of the workflow (named "release.yml") is coarse and uninformative (a single job named "release"). break up the monolithic job "release" into multiple, logically distinct jobs that display as discrete nodes in the UI, as shown in the attached UI.
+
+[Image #1]
