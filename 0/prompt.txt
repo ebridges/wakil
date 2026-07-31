@@ -1,0 +1,1 @@
+what's your proposal to resolve the skills in @src/wakil/skills/ with @src/wakil/skills/builtin/?
