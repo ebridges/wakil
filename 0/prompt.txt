@@ -1,0 +1,6 @@
+create a vscode debug launch configuration that will launch this command with these arguments:
+
+```
+export WAKIL_WORKSPACE='/Users/ebridges/Projects/kb'
+uv run wakil enrich --context 'see prep documents at @meetings/2026/2026-07-20-mosaic-contract-negotiation-prep.md and @meetings/2026/2026-07-20-mosaic-ian-gutwinski-catchup-prep.md' --force 2
+```
