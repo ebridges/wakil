@@ -1,0 +1,1 @@
+Analyze @../kb/schema.md and create a whitepaper using that as a worked example of how one might establish rich metadata per entity in a KB. Provide critical feedback and examine areas that it may be missing, investigate the surrounding KB structure to ground the whitepaper in real practice. Establish clear conventions for each of the entity types as defined elsewhere
