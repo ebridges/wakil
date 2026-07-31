@@ -1,0 +1,278 @@
+When running `wakil enrich` I again have run into a max_token limit because wakil has put too much in the request than the budget has allowed. can the request be organized in a better way to make the most of each request?
+
+```
+wakil enrich --force --context "Lawrence Krubner (CTO, Scorealytics) and Edward Bridges — planning meeting on scoping a 1-week AI mentoring/consulting engagement, follow-up to the 2026-07-20 CTO Summer Lunch conversation." --context-file "meetings/2026/2026-07-23-scorealytics-lawrence-krubner-mentoring-prep.md" 6
+On branch wakil/ingest/2026-07-25-2026-07-25-scorealytics-ai-engagement-sc
+╭───────────────────────────────────────────────────────────────────────────────────── Enrichment preview ──────────────────────────────────────────────────────────────────────────────────────╮
+│ Scorealytics — planning meeting: scoping the AI consulting engagement (Krubner / Bridges)                                                                                                     │
+│ source #6                                                                                                                                                                                     │
+│ Context: Lawrence Krubner (CTO, Scorealytics) and Edward Bridges — planning meeting on scoping a 1-week AI mentoring/consulting engagement, follow-up to the 2026-07-20 CTO Summer Lunch      │
+│ conversation.                                                                                                                                                                                 │
+│                                                                                                                                                                                               │
+│ ---                                                                                                                                                                                           │
+│                                                                                                                                                                                               │
+│ ---                                                                                                                                                                                           │
+│ type: meeting                                                                                                                                                                                 │
+│ title: "Scorealytics — Lawrence Krubner, mentoring program follow-up (prep)"                                                                                                                  │
+│ date: 2026-07-23                                                                                                                                                                              │
+│ source: notes                                                                                                                                                                                 │
+│ attendees:                                                                                                                                                                                    │
+│   - "Edward Bridges"                                                                                                                                                                          │
+│   - "[]"                                                                                                                                                                                      │
+│ company: scorealytics                                                                                                                                                                         │
+│ project: scorealytics-ai-mentoring-program                                                                                                                                                    │
+│ stage: scoping                                                                                                                                                                                │
+│ decisions: []                                                                                                                                                                                 │
+│ action-items: []                                                                                                                                                                              │
+│ transcript: ""                                                                                                                                                                                │
+│ tags:                                                                                                                                                                                         │
+│   - scorealytics                                                                                                                                                                              │
+│   - mentoring                                                                                                                                                                                 │
+│   - consulting                                                                                                                                                                                │
+│ status: prep                                                                                                                                                                                  │
+│ created: 2026-07-23                                                                                                                                                                           │
+│ updated: 2026-07-23                                                                                                                                                                           │
+│ ---                                                                                                                                                                                           │
+│ # 2026-07-23-scorealytics-lawrence-krubner-mentoring-prep                                                                                                                                     │
+│                                                                                                                                                                                               │
+│ **Session:** Today, 2026-07-23. Meeting with [] (CTO, []) about a consulting project — likely the [].                                                                                         │
+│                                                                                                                                                                                               │
+│ ## Context going in                                                                                                                                                                           │
+│                                                                                                                                                                                               │
+│ Last documented KB state said the program was "on hold until after July 1" — that's now stale/corrected. Lawrence and Edward met offline at his 2026-07-20 CTO Summer Lunch at Fabrik and     │
+│ covered a lot of ground that hadn't been captured yet:                                                                                                                                        │
+│                                                                                                                                                                                               │
+│ - The July 1 date was never a real blocker to the relationship. Lawrence had been proactively managing Edward's expectations about it the whole time, and Edward doesn't feel out of sync     │
+│ with him. No need to "check in" on this defensively — it's resolved.                                                                                                                          │
+│ - Lawrence already knows about the Mosaic role and its timeline — no need to re-explain that context.                                                                                         │
+│ - Lawrence still wants to engage Edward. He floated a **2-week consulting arrangement**; Edward said he could only commit to **1 week**. This scope/duration question is the main open        │
+│ thread.                                                                                                                                                                                       │
+│ - They discussed **agentic memory systems** (Mem0 was named specifically) and the challenges Scorealytics is having with **context management** — likely tied to their                        │
+│ news-digestion/extraction pipeline and possibly relevant to the ground-truth/eval framework work from June ([]).                                                                              │
+│ - Team has grown to (at least) 4 engineers: [], [], [], and now [] — no context yet on Murtaza's relationship with AI tooling.                                                                │
+│ - Team continues actively using Cursor/Claude Code day to day. Brian remains the relative laggard — consistent with his original "cautious in this context" characterization from the program │
+│ design doc, not a new concern.                                                                                                                                                                │
+│                                                                                                                                                                                               │
+│ ## Talking points                                                                                                                                                                             │
+│                                                                                                                                                                                               │
+│ ### 1. Nail down the shape of the engagement — the main open thread                                                                                                                           │
+│ - Lawrence proposed 2 weeks; Edward countered 1 week. Use today to actually close this: what's realistically achievable in 1 week vs. what he had in mind for 2? Is this a compressed version │
+│ of the original 4-week/3-engineer curriculum, or a narrower, more targeted engagement (e.g., one specific problem, like the memory/context-management thread)?                                │
+│ - Decide format: is this full days on-site (like May), or scheduled blocks over the week? What's the actual start-date target?                                                                │
+│                                                                                                                                                                                               │
+│ ### 2. Anchor the engagement on a concrete deliverable: memory/context management                                                                                                             │
+│ - The Mem0 / agentic-memory conversation is a good candidate to turn into the "real work" anchor that the original program design flagged as missing (the "Score" benchmark question). Ask    │
+│ directly: what's the specific context-management pain point? Is it about the extraction/voting-agents pipeline losing context across long documents, or something in their day-to-day         │
+│ coding-agent usage?                                                                                                                                                                           │
+│ - Ask whether this could be the single focused topic for a 1-week engagement, rather than trying to compress the full 3-engineer, 4-week mentoring curriculum into a week.                    │
+│                                                                                                                                                                                               │
+│ ### 3. Update on team composition — Murtaza Mister                                                                                                                                            │
+│ - Get basic context: what's Murtaza's background, and where does he currently sit on AI/Cursor/Claude Code adoption? Does he fold into the existing per-engineer tracks (see program doc), or │
+│ is his scope different?                                                                                                                                                                       │
+│ - Confirm whether the engagement (whatever shape it takes) covers 3 engineers or now 4.                                                                                                       │
+│                                                                                                                                                                                               │
+│ ### 4. Since Cursor/Claude Code usage has moved forward without formal mentoring                                                                                                              │
+│ - Worth understanding what's changed organically since May: is the team more consistent now, or still "all over the map" per Lawrence's original framing? This affects whether a 1-week       │
+│ engagement should be foundational (getting everyone to a baseline) or advanced (addressing specific friction points).                                                                         │
+│ - Brian being the one lagging is consistent with the original read (caution in a low-test, unfamiliar codebase, not general AI skepticism) — worth a light touch check that this framing      │
+│ still holds before assuming his track from the original design doc is still right.                                                                                                            │
+│                                                                                                                                                                                               │
+│ ### 5. Practical logistics for a 1-week engagement                                                                                                                                            │
+│ - Given Edward's Mosaic timeline, get a candidate week on the calendar today if possible, or at least bound the window (e.g., "sometime before/after X").                                     │
+│ - Clarify expectations: is this priced/scoped as consulting (deliverable-based) or more like the original informal mentoring cadence compressed into a week?                                  │
+│                                                                                                                                                                                               │
+│ ### 6. Loop closed, not reopened                                                                                                                                                              │
+│ - No need to re-litigate the "were you upset about the delay" question — that's resolved. Frame today as: "let's lock in what a 1-week engagement looks like and when."                       │
+│                                                                                                                                                                                               │
+│ ## Related                                                                                                                                                                                    │
+│ - [] — original 4-week/3-engineer curriculum design, now under revision for a shorter engagement                                                                                              │
+│ - [] — ground-truth/eval framework; possible connective tissue to the memory/context-management thread                                                                                        │
+│ - [] · [] · [] · [] · [] · []                                                                                                                                                                 │
+│ - [] — the new role that bounds Edward's available time                                                                                                                                       │
+│                                                                                                                                                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────────────────────────────────── Summary ───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Follow-up to the 2026-07-20 CTO lunch, Lawrence Krubner and Edward Bridges scoped the consulting engagement. The 1-week-vs-2-week question landed on a diffuse, very part-time arrangement:   │
+│ Edward will run ~one-hour 1:1s with roughly ten Scorealytics engineers, inject his ideas (adversarial code-review agents, a click-through context-doc pipeline, decision-record logging,      │
+│ AI-generated tests), give Lawrence an objective read on where each engineer sits, and help stand up basic adversarial-review infrastructure. Lawrence will seek budget approval               │
+│ Friday/Monday, with a possible Tuesday/Wednesday start. The technical anchor shifted away from the prep note's 'memory/context management' framing toward AI code review, onboarding context  │
+│ for coding agents, and the team's regulatory-graph data-modeling and cultural-silo problems.                                                                                                  │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Key points:
+  • Engagement resolved as short-term, very part-time — Edward is starting a full-time role soon — not the full 1- or 2-week block discussed in prep.
+  • Concrete shape: Lawrence sets up ~10 one-hour 1:1s; Edward shares ideas, reports back on each engineer, and helps set up adversarial PR-review agents.
+  • Budget approval targeted for tomorrow or Monday; possible start Tuesday/Wednesday.
+  • Team is much larger than the prep note's 3–4: ~10 engineers across news/litigation/regulation plus a Philippines group (Full Suite, 3 devs) and a Middle East group (3, incl. front-end
+Fatima & Wasim).
+  • Core technical pain: regulatory documents must be modeled as a graph; naming overlapping 'regulatory clusters' is unsolved; currently handled by heavy duplication.
+  • Several developers trust AI-generated code without review; test coverage is 'terrible' (Lawrence).
+  • Edward's proposed methods: adversarial writer/reviewer agent loop, a browser click-through context document, JSONL troubleshooting + ADR-style decision logs, AI-generated tests, keep infra
+cheap and local-first.
+Related notes:
+  projects/scorealytics/scorealytics-ai-mentoring-program.md Scorealytics Ai Mentoring Program
+  meetings/2026/2026-07-23-scorealytics-lawrence-krubner-mentoring-prep.md Scorealytics — Lawrence Krubner, mentoring program follow-up (prep)
+  meetings/2026/2026-05-27-1nsp-lyon-szot-followup.md 1NSP follow-up call with Joe Smith (Lyon Szot Architecture)
+  projects/scorealytics/scorealytics-news-accuracy-framework.md Scorealytics News Accuracy Framework
+  companies/google.md Google
+  companies/meta.md Meta
+  companies/mosaic-app.md Mosaic App
+  companies/mosaic-private-markets.md Mosaic
+  companies/new-york-times.md New York Times
+  companies/ro.md Ro
+  companies/scorealytics.md Scorealytics
+  companies/square.md Square
+  companies/squarespace.md Squarespace
+  companies/updater.md Updater
+  concepts/differentiation-and-continuity.md Differentiation And Continuity
+  concepts/how-google-sold-its-engineers-on-management.md How Google Sold Its Engineers On Management
+  concepts/template-engineering-metrics-update.md Template Engineering Metrics Update
+  concepts/vp-vs-director.md Vp Vs Director
+  organization/employer-history/greenlite/m6-engineering-director.md M6 Engineering Director
+  organization/employer-history/greenlite/m7-sr-engineering-director.md M7 Sr Engineering Director
+  organization/employer-history/squarespace/migration-of-analytics-from-a-standalone-app-into-the-squarespace-app.md Migration Of Analytics From A Standalone App Into The Squarespace App
+  organization/employer-history/squarespace/squarespace-app-js-architecture.md Squarespace App Js Architecture
+  organization/practice/motivations/what-motivates-you-as-a-person-and-in-your-career.md What Motivates You As A Person And In Your Career
+  organization/star-stories/describe-a-time-when-i-identified-a-drop-in-teams-performance.md Describe A Time When I Identified A Drop In Teams Performance
+  organization/star-stories/describe-a-time-when-i-identified-a-skill-gap.md Describe A Time When I Identified A Skill Gap
+  organization/star-stories/describe-a-time-when-i-improved-developer-experience.md Describe A Time When I Improved Developer Experience
+  organization/star-stories/squarespace-cms-integration-starl-hovnanian.md Squarespace CMS integration STARL for Hovnanian
+  people/brian-corr.md Brian Corr
+  people/edward-bridges.md Edward Bridges
+  people/jake-mcguire.md Jake McGuire
+  people/lawrence-krubner.md Lawrence Krubner
+  people/murtaza-mister.md Murtaza Mister
+  people/prabhuddha-bhan.md Prabhuddha Bhan
+  people/victor-vives.md Víctor Vives
+  projects/aetion/aetion-introductory-training-series.md Aetion Introductory Training Series
+  projects/aetion/projects-system-refactoring.md Projects System Refactoring
+  projects/greenlite/2026-03-31-atlas-dashboard-ws.md 2026 03 31 Atlas Dashboard Ws
+  projects/greenlite/2026-04-01-atlas-dashboard-ws.md 2026 04 01 Atlas Dashboard Ws
+  projects/greenlite/2026-04-02-document-orchestration-ws.md 2026 04 02 Document Orchestration Ws
+  projects/greenlite/2026-04-02-planset-review-ws.md 2026 04 02 Planset Review Ws
+  projects/greenlite/2026-04-03-weekly-status.md 2026 04 03 Weekly Status
+  projects/greenlite/2026-04-13-weekly-status.md 2026 04 13 Weekly Status
+  projects/greenlite/2026-04-14-planset-review-ws.md 2026 04 14 Planset Review Ws
+  projects/greenlite/2026-04-15-ai-standup-ws.md 2026 04 15 Ai Standup Ws
+  projects/greenlite/2026-04-16-building-code-ingestion-ws.md 2026 04 16 Building Code Ingestion Ws
+  projects/greenlite/2026-04-16-detection-ws.md 2026 04 16 Detection Ws
+  projects/greenlite/2026-q2-planning-brief.md 2026 Q2 Planning Brief
+  projects/greenlite/aws-costs-2026-01.md Aws Costs 2026 01
+  projects/greenlite/aws-costs-2026-02.md Aws Costs 2026 02
+  projects/greenlite/aws-costs-2026-03.md Aws Costs 2026 03
+  projects/greenlite/github.md Github
+  projects/greenlite/greenlite-quick-reference-feb2026.md Greenlite Quick Reference Feb2026
+  projects/greenlite/metabase-setup.md Metabase Setup
+  projects/greenlite/updates.md Updates
+  projects/mosaic/onboarding.md Mosaic Onboarding
+  projects/squarespace/commerce-x-squarespace-app-conflict.md Commerce X Squarespace App Conflict
+  projects/squarespace/mobile-x-cms.md Mobile X Cms
+  projects/squarespace/squarespace-analytics-apps.md Squarespace Analytics Apps
+  projects/squarespace/squarespace-app-org.md Squarespace App Org
+                                                                                       Candidate memories
+┏━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┓
+┃ # ┃ Type     ┃ Content                                                                                                                                                                 ┃ Conf ┃
+┡━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━┩
+│ 0 │ event    │ Edward Bridges and Lawrence Krubner (CTO, Scorealytics) met on 2026-07-23 to scope a short consulting engagement, following up on their 2026-07-20 CTO Summer Lunch     │ 0.95 │
+│   │          │ conversation.                                                                                                                                                           │      │
+│ 1 │ decision │ The engagement shape resolved to a short-term, very part-time arrangement: Lawrence Krubner will set up ~ten one-hour 1:1s between Edward Bridges and Scorealytics      │ 0.90 │
+│   │          │ engineers so Edward can inject his ideas, give Lawrence an objective assessment of where each engineer sits, and help stand up basic adversarial code-review agent      │      │
+│   │          │ infrastructure. Lawrence: 'Mostly I just want your ideas injected into the team.'                                                                                       │      │
+│ 2 │ fact     │ Lawrence Krubner said he would try to get the engagement budget approved 'tomorrow or Monday at the latest,' with Edward Bridges potentially starting Tuesday or        │ 0.85 │
+│   │          │ Wednesday; the engagement will be very short-term and part-time because Edward is starting a full-time role soon.                                                       │      │
+│ 3 │ fact     │ Scorealytics' engineering team is around ten engineers spread across news, litigation, and regulation teams, plus a Philippines group (Full Suite, ~3 developers) and a │ 0.80 │
+│   │          │ Middle East group (~3, including front-end engineers Fatima and Wasim from a wound-down company); Lawrence Krubner described the groups as operating like 'whole        │      │
+│   │          │ separate cultures.'                                                                                                                                                     │      │
+│ 4 │ fact     │ Scorealytics' core data-modeling problem: regulatory documents (e.g. the Clean Air Act with cascading amendments and cross-influencing regulations) must be modeled as  │ 0.85 │
+│   │          │ a graph, but naming overlapping 'regulatory clusters' is an unsolved problem; the original outsourced work by Mix/Nix Dynamics modeled it as a simple parent-child      │      │
+│   │          │ hierarchy. Lawrence Krubner said they currently cope via heavy duplication (three separate Clean Air Act entries).                                                      │      │
+│ 5 │ fact     │ Scorealytics is migrating off Google spreadsheets onto a self-built CMS (based on the open-source Payload CMS); news and litigation teams are migrated, regulation is   │ 0.80 │
+│   │          │ not. Lawrence Krubner told the junior developer leading regulation (Jamaisha) to just copy the existing duplication rather than solve the cluster-modeling problem, so  │      │
+│   │          │ it could ship in a week instead of a month.                                                                                                                             │      │
+│ 6 │ fact     │ Lawrence Krubner reported that several Scorealytics developers trust AI-generated code completely and do not review it — citing a case where developer Alan let the AI  │ 0.85 │
+│   │          │ add an unwanted GraphQL API to the CMS despite a team decision not to use GraphQL — and that the team's test coverage is 'terrible.'                                    │      │
+│ 7 │ opinion  │ Edward Bridges frames AI coding agents as 'a never-ending supply of brand new senior software engineers' — capable and motivated but ignorant of your domain and        │ 0.80 │
+│   │          │ codebase — so the highest-value investment is building the onboarding context (narrative product docs, decision records, troubleshooting logs) that brings each agent   │      │
+│   │          │ up to speed on every run.                                                                                                                                               │      │
+│ 8 │ opinion  │ Edward Bridges recommended an adversarial two-agent setup (a code-writing agent and a strict reviewing agent looping until the reviewer is satisfied), plus a browser   │ 0.85 │
+│   │          │ click-through pipeline that describes app functionality and links it to code, and advised keeping infrastructure cheap and local-first before wiring it into CI/CD.     │      │
+│   │          │ Lawrence Krubner called these 'great, great ideas.'                                                                                                                     │      │
+│ 9 │ opinion  │ Lawrence Krubner's main organizational concern is cross-team communication and cultural silos — the front-end and Full Suite (Philippines) groups behave as if they     │ 0.80 │
+│   │          │ work for a different company — while wanting to preserve the high autonomy and initiative those engineers show. Edward Bridges suggested cross-cutting technical guilds │      │
+│   │          │ / an AI working group (as he ran at Squarespace) to connect distributed teams.                                                                                          │      │
+└───┴──────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────┘
+Candidate relationships:
+  [1] --elaborates--> [0]
+  [2] --elaborates--> [1]
+  [3] --related_to--> [1]
+  [5] --elaborates--> [4]
+  [6] --related_to--> [4]
+  [8] --related_to--> [6]
+  [7] --supports--> [8]
+  [9] --related_to--> [3]
+                                                        Entity resolution
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┓
+┃ Entity                               ┃ Type    ┃ Action ┃ Target                                                        ┃ Conf ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━┩
+│ Lawrence Krubner                     │ person  │ update │ people/lawrence-krubner.md                                    │ 0.99 │
+│ Edward Bridges                       │ person  │ update │ people/edward-bridges.md                                      │ 0.99 │
+│ Brian Corr                           │ person  │ update │ people/brian-corr.md                                          │ 0.95 │
+│ Jake McGuire                         │ person  │ update │ people/jake-mcguire.md                                        │ 0.95 │
+│ Prabhuddha Bhan                      │ person  │ update │ people/prabhuddha-bhan.md                                     │ 0.90 │
+│ Murtaza Mister                       │ person  │ update │ people/murtaza-mister.md                                      │ 0.85 │
+│ Scorealytics                         │ company │ update │ companies/scorealytics.md                                     │ 0.99 │
+│ Mosaic                               │ company │ update │ companies/mosaic-private-markets.md                           │ 0.95 │
+│ Scorealytics AI Mentoring Program    │ project │ update │ projects/scorealytics/scorealytics-ai-mentoring-program.md    │ 0.97 │
+│ Scorealytics News Accuracy Framework │ project │ update │ projects/scorealytics/scorealytics-news-accuracy-framework.md │ 0.70 │
+│ Mia                                  │ person  │ skip   │ -                                                             │ 0.40 │
+│ Jamaisha                             │ person  │ skip   │ -                                                             │ 0.40 │
+│ Alan                                 │ person  │ skip   │ -                                                             │ 0.40 │
+│ Fatima                               │ person  │ skip   │ -                                                             │ 0.35 │
+│ Wasim                                │ person  │ skip   │ -                                                             │ 0.35 │
+│ Lizzie Palmer                        │ person  │ skip   │ -                                                             │ 0.40 │
+│ Full Suite                           │ company │ skip   │ -                                                             │ 0.40 │
+│ Nix Dynamics                         │ company │ skip   │ -                                                             │ 0.30 │
+│ Meta                                 │ company │ skip   │ -                                                             │ 0.30 │
+│ Squarespace                          │ company │ skip   │ -                                                             │ 0.30 │
+│ Google                               │ company │ skip   │ -                                                             │ 0.20 │
+│ Payload CMS                          │ company │ skip   │ -                                                             │ 0.30 │
+│ Adversarial code-review agent loop   │ concept │ skip   │ -                                                             │ 0.50 │
+└──────────────────────────────────────┴─────────┴────────┴───────────────────────────────────────────────────────────────┴──────┘
+Proposed note:
+╭──────────────────────────────────────────────────────────────── NEW meetings/2026/2026-07-23-scorealytics-planning-meeting.md ────────────────────────────────────────────────────────────────╮
+│ ---                                                                                                                                                                                           │
+│ type: meeting                                                                                                                                                                                 │
+│ title: "Scorealytics — planning meeting: scoping the AI consulting engagement (Krubner / Bridges)"                                                                                            │
+│ date: 2026-07-23                                                                                                                                                                              │
+│ source: transcript                                                                                                                                                                            │
+│ status: synthesized                                                                                                                                                                           │
+│ attendees:                                                                                                                                                                                    │
+│   - "Edward Bridges"                                                                                                                                                                          │
+│   - "[[people/lawrence-krubner|Lawrence Krubner]]"                                                                                                                                            │
+│ company: scorealytics                                                                                                                                                                         │
+│ project: scorealytics-ai-mentoring-program                                                                                                                                                    │
+│ decisions:                                                                                                                                                                                    │
+│   - "Engagement resolved to short-term, very part-time: ~10 one-hour 1:1s with engineers, idea injection, per-engineer assessment for Lawrence, and basic adversarial review-agent setup"     │
+│ action-items:                                                                                                                                                                                 │
+│   - "Lawrence Krubner to seek budget approval Friday or Monday"                                                                                                                               │
+│   - "Lawrence Krubner to schedule ~10 one-hour 1:1s between Edward and Scorealytics engineers"                                                                                                │
+│   - "Edward Bridges to potentially start Tuesday/Wednesday, help set up adversarial PR-review agents, and report back on each engineer"                                                       │
+│ transcript: "sources/transcripts/2026-07-23-scorealytics-planning-meeting.md"                                                                                                                 │
+│ tags:                                                                                                                                                                                         │
+│   - scorealytics                                                                                                                                                                              │
+│   - mentoring                                                                                                                                                                                 │
+│   - consulting                                                                                                                                                                                │
+│ created: 2026-07-23                                                                                                                                                                           │
+│ updated: 2026-07-23                                                                                                                                                                           │
+│ ---                                                                                                                                                                                           │
+│ # Scorealytics — planning meeting: scoping the AI consulting engagement                                                                                                                       │
+│                                                                                                                                                                                               │
+│ ## Summary                                                                                                                                                                                    │
+│                                                                                                                                                                                               │
+│ Follow-up to the 2026-07-20 CTO Summer Lunch. [[people/lawrence-krubner|Lawrence Krubner]] (CTO, [[companies/scorealytics|Scorealytics]]) and Edward Bridges scoped the consulting engagement │
+│ …                                                                                                                                                                                             │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+warning: Entity updates failed while revising 10 entities in one call (Lawrence Krubner, Edward Bridges, Brian Corr, Jake McGuire, Prabhuddha Bhan, Murtaza Mister, Scorealytics, Mosaic,
+Scorealytics AI Mentoring Program, Scorealytics News Accuracy Framework); existing notes left unchanged: EntityRevisionOutput: model output failed validation twice: model response was
+truncated: it hit the max_tokens=16384 limit before finishing (2644 chars generated). This usually means the request asked for more output than the budget allows — e.g. too many items in one
+batch.
+```
