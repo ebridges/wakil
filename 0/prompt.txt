@@ -1,0 +1,35 @@
+<task-notification>
+<task-id>a46b0fad7a6b82cef</task-id>
+<tool-use-id>toolu_0149aY4wLX1SjLjh84VmQ4zJ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3bf34b02-9b03-4e75-9b11-2ff5adca5354/tasks/a46b0fad7a6b82cef.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix ty findings in test_ingest_service.py" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All 51 `ty` findings in this file are resolved, verification commands both pass, and only `tests/unit/test_ingest_service.py` was touched.
+
+## Summary
+
+Fixed all 51 findings in `tests/unit/test_ingest_service.py` by inserting 28 `assert ... is not None` narrowing lines (net +28 insertions, 0 other changes).
+
+**Mechanical `assert X is not None` pattern** — 48 of 51 findings, covering:
+- `Source | None` from `session.get(Source, ...)` (status, title, metadata_json, raw_text_path, retrieved_at/created_at reads and assignments)
+- `IngestRun | None` from `session.scalar(select(IngestRun))`
+- `ProposedFile | None` via `proposal.proposed_note` (path, content, confidence) — appeared repeatedly across the reconciliation tests
+- `ResolvedContext | None` from `resolve_context(...)` (text, digest, referenced_paths)
+- `dict | None` from `transcript_frontmatter_template(...)`
+- `str | None` from `_merge_entity_note(...)`
+
+**The 3 special-cased findings**, investigated individually per instructions:
+- **Line 243 (`invalid-argument-type` on `list.__init__`)**: `transcript_frontmatter_template` returns `dict | None` (confirmed in `src/wakil/app/ingest_service.py:2694`). This was the same narrowing issue one level removed — added `assert template is not None` right after the call, before `list(template)`.
+- **Lines 256-257 (`not-subscriptable`)**: Same root cause as above — `template["type"]` on a possibly-`None` dict. Resolved by the same single assert added for the line-243 fix (both are on the same `template` variable).
+- **Lines 965-967 (`unsupported-operator`, `in` on `None`)**: `_merge_entity_note` returns `str | None` (confirmed in `src/wakil/app/ingest_service.py:1720`, docstring explicitly says "Returns None if the note doesn't have the expected H1 + shape"). Same narrowing pattern — added `assert new_content is not None` before the `in` checks. No logic change needed; the test's own fixture (`REAL_SHAPED_PERSON`) does have the expected shape, so the invariant holds.
+
+One deduplication note: findings at lines 700/736/771 in the original dump were 3 separate occurrences of an identical `assert proposal.proposed_note.content == markdown` pattern across three separate test functions (`test_reconcile_leaves_already_matching_link_untouched`, `test_reconcile_ignores_md_suffix_when_comparing_the_same_target`, `test_reconcile_does_not_touch_unresolved_display_text`) — each needed its own `assert proposal.proposed_note is not None`, applied individually since they're in different functions.
+
+**Verification:**
+- `uvx ty check tests/unit/test_ingest_service.py` → `All checks passed!`
+- `uv run pytest tests/unit/test_ingest_service.py -q` → `143 passed`
+
+No other files were modified (confirmed via `git status`/`git diff --stat`; the other modified files listed in `git status` are pre-existing changes from parallel work on other test files, untouched by me).</result>
+<usage><subagent_tokens>65257</subagent_tokens><tool_uses>53</tool_uses><duration_ms>251374</duration_ms></usage>
+</task-notification>
