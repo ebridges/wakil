@@ -1,0 +1,3 @@
+I am running a large migration of notes from a legacy notebook (~/Documents/notebook) to a new personal KB (~/Projects/kb-personal).  In doing this the agent doing the work has been logging issues in the migration that you can find here: @../kb-personal/ISSUES.jsonl 
+
+analyze these and identify areas of improvement for wakil
