@@ -1,0 +1,9 @@
+When I ran enrich I used this command:
+
+```
+uv run wakil enrich --context 'see prep documents at @meetings/2026/2026-07-20-mosaic-contract-negotiation-prep.md and @meetings/2026/2026-07-20-mosaic-ian-gutwinski-catchup-prep.md' 2
+```
+
+As you can see I included both prep documents in context, but the resulting entity enrichment (see <https://github.com/ebridges/kb/pull/6>) did not incorporate input from the prep documents.
+
+How can I ensure that the context actually influences the resulting output more effectively?
