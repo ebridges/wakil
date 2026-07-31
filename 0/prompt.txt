@@ -1,0 +1,1 @@
+going back through your memory of previous sessions, where did things land on building a "porcelain" API (in the "git" sense) of workflows over the low-level skills that this has implemented.  For example: ingesting a meeting should be a single command that combines: ingest, enrich, branch, commit, PR.
