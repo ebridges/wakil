@@ -1,0 +1,80 @@
+<task-notification>
+<task-id>a7c19717fec4bb8e5</task-id>
+<tool-use-id>toolu_01FuyWTqLfZav4qP3FKuFpxK</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/a7c19717fec4bb8e5.output</output-file>
+<status>completed</status>
+<summary>Agent "Find code that parses wakil commit message format" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Findings
+
+### 1. Code that reads git commit messages back and parses/matches the `wakil &lt;kind&gt;:` prefix
+
+**None found.** I searched the whole codebase (`src/`, `tests/`) for `git log`/`git show` usage, regexes like `wakil (\w+):`, `.startswith("wakil ")`, and any parsing of `GitChange`/`IngestRun` message fields. The only two places that read commit messages back from git are both non-parsing, pass-through displays:
+
+- `src/wakil/integrations/git.py:171,177` — `inspect_git()` runs `git log --oneline -5` and stores the raw lines verbatim in `GitInfo.recent_commits` (a `list[str]`). No regex, no `.startswith`, no splitting on `wakil` or `:`.
+- Consumers of `recent_commits` just print each line unchanged:
+  - `src/wakil/ui/console.py:137-140`
+  - `src/wakil/cli/main.py:916-919`
+
+Both are `for line in recent_commits: console.print(f"  [dim]{line}[/dim]")` — cosmetic display only, no parsing of the message shape.
+
+`file_history()` in `src/wakil/integrations/git.py:151-155` (`git log --follow -N --format="%h %ad %s" ...`, used by `wakil git history &lt;path&gt;`) likewise just returns raw formatted lines for display — no parsing of the `%s` subject against the `wakil &lt;kind&gt;:` pattern.
+
+`GitChange.summary` (`src/wakil/storage/schema.py:179`) is populated in `_record_change()` (`src/wakil/app/git_service.py:375`) as `f"{kind}: {title}"` — note this is **not** the commit message itself and does not include the `"wakil "` prefix at all; it's a separately-constructed DB field, independent of `commit_message()`'s output string. Nothing reads `GitChange.summary` back and re-parses it either (only one write site, one test read at `tests/unit/test_git_service.py:194-196` which asserts on `operation`/`branch_name`, not `summary`'s string shape).
+
+### 2. Every call site of `commit_message()`
+
+All three call sites are in `src/wakil/app/git_service.py`, and all pass the string straight into a `git commit -m` invocation (or a PR title) — none store it for later comparison or re-parse it:
+
+- `git_service.py:111` — in `commit_change()`: `message = commit_message(kind, description)`, then passed directly to `git.stage_and_commit(config.root_path, files, message)` (line 113). The returned `CommitOutcome.message` (line 117) is just carried back to the caller for display; nothing downstream parses it.
+- `git_service.py:189` — in `land_ingestion()`: `message = commit_message(kind, f"add {title}")`, optionally appended with `\n\n{summary}` (line 191), then passed to `git.stage_and_commit(...)` (line 193). Again returned via `CommitOutcome.message` for display only.
+- `git_service.py:344` — inside `_land_pr()`: `commit_message(kind, f"add {title}")` is passed as the **PR title** argument to `create_pull_request(...)` (lines 341-347). This is a GitHub PR title, not stored/read-back for pattern matching either.
+
+`git.stage_and_commit()` (`src/wakil/integrations/git.py:140-144`) itself just forwards the message string to `git commit -m &lt;message&gt;` — no inspection of its contents.
+
+### 3. Assertions on the exact bare-string format
+
+Only one, in `tests/unit/test_git_service.py`:
+
+- **`tests/unit/test_git_service.py:62`** — `assert commit_message("ingest", "add transcript") == "wakil ingest: add transcript"` (inside `test_commit_message_conventions`, lines 61-64). This is the sole exact-string assertion on `commit_message()`'s output anywhere in the test suite.
+
+No other test asserts on `CommitOutcome.message`'s content, `GitChange.summary`'s content, or `recent_commits`/`file_history` line contents via regex/startswith/equality against the `wakil &lt;kind&gt;:` shape. (`test_land_ingestion_*` tests check `outcome.commit_sha`, `outcome.pr_url`, `outcome.branch`, `source.git_branch`, `change.operation`, `change.branch_name` — never `outcome.message` or `change.summary`.)
+
+### 4. `src/wakil/skills/kb-commit/SKILL.md` and `eval.json`
+
+**SKILL.md** (full emoji table, lines 51-59):
+
+| Kind | Emoji | Use for |
+|---|---|---|
+| `source` | 📥 | raw capture landing in the KB, before processing |
+| `ingest` | 🧠 | enrichment output — raw capture turned into structured knowledge |
+| `note` | 📝 | manual note edit or note-revision result |
+| `link` | 🔗 | cross-reference / back-link addition or repair |
+| `chore` | 🔧 | tooling, config, schema fixes |
+| `memory` | 💾 | memory-lifecycle change (candidate → active, retirement) |
+| `dream` | 💭 | reserved: periodic re-synthesis/consolidation pass output |
+
+Rationale stated (lines 44-49, 85-90): the emoji is described explicitly as **"a presentation layer this skill adds on top of `commit_message()`'s output"** — applied only when this skill hand-constructs a `git commit` message itself; `commit_message()` "still returns the bare `wakil &lt;kind&gt;: &lt;description&gt;` string, so anything parsing commit subjects programmatically is unaffected" (line 47-49, the sentence you already found). Lines 85-90 reiterate: there's no general-purpose `wakil commit` CLI — `commit_message()` is invoked by `ingest`/`enrich`/`schema migrate`'s own `--commit` flags *and* by this skill's manual `git commit` calls alike, and this skill should "match its output exactly (`wakil &lt;kind&gt;: &lt;description&gt;`) as the base subject, adding only the emoji prefix." No other rationale (e.g., a downstream consumer relying on the bare format) is stated beyond that one sentence — it reads as a hedge/precaution, not a reference to a concrete parsing call site.
+
+**eval.json**: four scenarios, all behavioral evals for the skill's grouping/confirmation workflow. The only format-relevant detail is scenario `happy-path-single-note-revision` (eval.json:17), which expects the agent to produce `📝 wakil note: &lt;description&gt;` — consistent with SKILL.md's stated convention, but this is a test of agent *behavior*, not of any code that parses commit messages back.
+
+Minor aside (not requested but noted): SKILL.md line 64 attributes the `source`/`ingest` kind split to `commit_ingest`'s docstring, but no `commit_ingest` function exists in the current codebase (the actual functions are `commit_change()` and `land_ingestion()` in `git_service.py`) — likely a stale reference from a prior refactor, unrelated to the emoji question.
+
+### 5. `docs/adr/0003-git-native-change-tracking.md`
+
+Full read — no statement anywhere that the commit message format is machine-parseable, parsed, or relied upon by `wakil git summary`/`wakil git history` for categorization. Specifically:
+
+- Line 46-48: "Commit messages follow a fixed convention (`wakil ingest: add &lt;title&gt;`, summary as body), and every commit is recorded in `git_changes` and back-filled onto the `IngestRun`." — this describes the *convention* and that the commit is *recorded* (via `_record_change()`, i.e. structured DB fields written at commit time, not derived by re-parsing the message string later).
+- Lines 49-51: `wakil git summary` / `wakil git history &lt;path&gt;` are described only as surfacing "current branch, pending changes, recent commits, and per-file history" — consistent with the plain-display behavior confirmed in code (finding #1); no mention of categorizing/parsing by kind.
+- No other passage in Context, Decision, Consequences, or Sources sections mentions parsing, regex matching, or any downstream reliance on the exact commit-subject string shape.
+
+### Conclusion
+
+Adding an emoji prefix directly into `commit_message()`'s output would only affect:
+1. The one exact-string test assertion at `tests/unit/test_git_service.py:62`.
+2. The example/scenario strings in `src/wakil/skills/kb-commit/SKILL.md` and `eval.json` (which currently describe the emoji as a separate presentation layer added *on top of* `commit_message()`'s bare output — that framing would need updating/removing since it would become redundant/wrong).
+3. `docs/adr/0003-git-native-change-tracking.md`'s line 46 description of the convention as `wakil ingest: add &lt;title&gt;` (a factual doc update, not a code dependency).
+
+No production code (`git.py`, `git_service.py`, `workspace_service.py`, `main.py`, `console.py`) parses, regex-matches, or `.startswith()`-checks a wakil-generated commit message anywhere — commit messages are write-only from wakil's perspective (constructed and passed straight to `git commit -m`/PR title) and read back only for verbatim display (`recent_commits`, `file_history`).</result>
+<usage><subagent_tokens>44034</subagent_tokens><tool_uses>16</tool_uses><duration_ms>55634</duration_ms></usage>
+</task-notification>
