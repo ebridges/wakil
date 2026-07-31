@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b29b9okkh</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/0d040421-da1c-44ba-aeb0-8cd05f206644/tasks/b29b9okkh.output</output-file>
+<status>failed</status>
+<summary>Background command "Re-run the original failing enrich command with relevance filtering + caching now in place" failed with exit code 1</summary>
+</task-notification>
