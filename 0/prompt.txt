@@ -1,0 +1,26 @@
+<task-notification>
+<task-id>a4b782c35ebb816af</task-id>
+<tool-use-id>toolu_01RotWhSkFitzQypWeMTtok7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2/tasks/a4b782c35ebb816af.output</output-file>
+<status>completed</status>
+<summary>Agent "Survey wakil's test, CI, and LLM-client conventions" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>This gives me everything needed. Report below.
+
+## Findings
+
+**1. `.github/workflows/ci.yml`** — Single job `lint-and-test` on `ubuntu-latest`, triggered on push to `main` and on every `pull_request`. Steps: checkout, `astral-sh/setup-uv@v8.3.2` (Python 3.12, caching enabled), `uv sync --locked`, `ruff check .`, `pytest -q` (with `NO_COLOR=1`). No secrets referenced anywhere. Concurrency group cancels superseded runs. It's fast/cheap (lint + unit tests only, no API calls) — no timing info recorded, but there's nothing slow in it today.
+
+**2. `src/wakil/llm/client.py`** — Minimal provider-abstracted client with a `ModelClient` Protocol (`complete(system, prompt, max_tokens) -&gt; str`). Two implementations: `AnthropicClient` (via `anthropic` SDK, default model `claude-opus-4-8`, uses `thinking={"type": "adaptive"}`, raises `ModelError` on `stop_reason == "refusal"`) and `OpenAICompatibleClient` (via raw `httpx.post` to any `/chat/completions` endpoint). `resolve_client() -&gt; ModelClient | None` is exactly the reusable factory: picks provider from `WAKIL_PROVIDER`, else infers from whichever key is set (`ANTHROPIC_API_KEY` preferred over `OPENAI_API_KEY`), returns `None` if nothing configured. Also reads `WAKIL_MODEL` and `WAKIL_OPENAI_BASE_URL`.
+
+**3. `tests/unit/test_llm_client.py`** — Pure unit tests, **no real API calls**. `clean_env` autouse fixture strips all provider env vars via `monkeypatch`; tests only exercise `resolve_client()`'s branching logic (returns `None`, prefers Anthropic, model override, OpenAI requires model, unknown provider raises). Nothing here instantiates a live client or hits the network — this is the pattern to follow (mock/monkeypatch env, not real calls) for anything that must run in default CI.
+
+**4. `pyproject.toml`** — `anthropic&gt;=0.116.0`, `httpx&gt;=0.28.1`, dev group `pytest&gt;=8.0`, `ruff&gt;=0.5`. `[tool.pytest.ini_options]` currently only sets `testpaths = ["tests"]` — **no marker system exists yet** (no `slow`/`integration`/`live` markers, no `addopts -m "not ..."`). You'd need to add markers/`-m` filtering yourself to gate an eval suite from the default `pytest -q` run.
+
+**5. Repo-wide "eval" search** — No existing eval harness/code. The one directly relevant hit is `docs/skill-refactor.md` (design doc for the skills system), which names a **planned but explicitly deferred** future skill `skill-evaluation`: "It could review skill scope, internal consistency, maintainability, and observed results, but it is not required for the first release." Worth aligning naming/scope with this so you don't contradict the documented intention — this doc anticipates something like your task, just not built yet.
+
+**6. `skills/resolver.py` + `wakil skills validate`** — `resolve_skill`/`_load_skill` in `resolver.py` validate: skill name matches kebab-case regex, directory exists, `SKILL.md` exists/readable, frontmatter parses, `SkillMetadata` schema validates (via pydantic), declared `name` matches directory name, `skill_api` version matches `SKILL_API_VERSION`. The `skills_app.command("validate")` CLI command (main.py ~738) just calls `resolve_skill` for each discovered name (or one named skill) and reports root issues + pass/fail per skill — it's purely structural/metadata validation, nothing about content quality (no line-count, TOC, description-length, or best-practices checks). A new "lint" step has clear room to extend without duplication.
+
+**7. README "## Development" + CLAUDE.md** — README's Development section is just `uv run pytest` / `uv run ruff check` — no mention of live-model tests. CLAUDE.md states strong philosophy relevant here: "Keep the implementation simple unless added complexity has clear, self-evident impact," avoid speculative abstraction, "Keep model behavior behind deterministic application controls," avoid "hidden background behavior," and model access should be "provider-abstracted but minimal." No explicit CI-cost or secrets statement, but the overall bias (boring/local/no hidden behavior, no secrets currently in CI) strongly implies a live-Claude-API eval suite should be **opt-in/manually triggered** (e.g., separate workflow or `workflow_dispatch`, gated by a pytest marker not run by default) rather than blocking the default PR gate — consistent with the existing test suite having zero network dependency today.</result>
+<usage><subagent_tokens>28530</subagent_tokens><tool_uses>13</tool_uses><duration_ms>41034</duration_ms></usage>
+</task-notification>
