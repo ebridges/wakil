@@ -1,0 +1,32 @@
+<task-notification>
+<task-id>a00e56c81173ad5a5</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/a00e56c81173ad5a5.output</output-file>
+<status>completed</status>
+<summary>Agent "Council Ada: Round 1 analysis" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Essential Question
+Given a two-stage stochastic pipeline (`run_scenario` → `grade_transcript`), each independently noisy, what ordering of interventions maximizes reduction in observed failure rate per unit of engineering effort — and does the pipeline's architecture itself bound how low that rate can go?
+
+### Computational Skeleton
+Model each scenario as a function `f(skill_prose, seed₁) → transcript`, then `g(transcript, rubric, seed₂) → pass/fail`. Observed failure `F = 1 - P(g(f(x,seed₁),seed₂)=pass)`. This decomposes into three independent error sources: (a) deterministic content gaps in `skill_prose` — `f` fails identically regardless of seed; (b) generation variance — `f` is stochastic in outcome-relevant ways; (c) grading variance/bugs — `g` misjudges a correct transcript. The diagnostic script already partitions failures into (a) vs (b)/(c) by re-running with fixed inputs. That partition *is* the computational skeleton — everything else is a scheduling problem over it.
+
+### What Can Be Mechanized
+Classifying each of the 10 failures into the (a)/(b)/(c) bucket is fully mechanizable: rerun each failing scenario N times (e.g., 5-10x) holding skill_prose fixed. If failure rate ≈100% across reruns → category (a), fix via SKILL.md/references edit (deterministic, verifiable, same class as the 16 already fixed). If failure rate is intermediate → category (b) or (c), requiring a second mechanizable test: hold the transcript fixed and rerun only `grade_transcript` N times. Variance concentrated in `g` alone implicates rubric/grader ambiguity — also fixable deterministically (tighten rubric wording, add few-shot grading examples). Only residual variance in `f` given fixed prose is irreducible by prose-editing.
+
+### What Cannot Be Mechanized
+Whether irreducible `f`-variance represents unacceptable skill unreliability or acceptable creative latitude requires human judgment — no rubric formalizes "how much phrasing variance is tolerable." Also, deciding the acceptable floor failure rate (0%? 10%?) for a suite explicitly excluded from CI is a policy choice, not a formal one.
+
+### Abstraction Assessment
+Right level: don't lift to "should generation be stochastic at all" yet — that's premature architecture change. Ground first: the classification step is cheap (reruns, no code change) and directly tells you which of the 10 are still in the already-successful "fix category" versus a genuinely new category (variance) requiring different tooling (e.g., temperature=0 for grading, or multi-sample majority voting).
+
+### Verdict
+Do the N-rerun classification first, on both stages independently, before writing any new fixes. This is strictly higher leverage than more root-cause triage by inspection, because it converts "mixed picture" into a partition that tells you, per-scenario, whether to edit prose or fix the grader.
+
+### Confidence
+High — this is a measurement-before-intervention argument with low cost and clear decision value, not a speculative architectural claim.
+
+### Where I May Be Wrong
+If API cost/rate limits make 5-10x reruns per scenario expensive, the classification pass itself may be disproportionately costly relative to just fixing the 2-3 most obviously deterministic gaps by inspection first.</result>
+<usage><subagent_tokens>10408</subagent_tokens><tool_uses>0</tool_uses><duration_ms>15516</duration_ms></usage>
+</task-notification>
