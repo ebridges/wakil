@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bc9nvvjof</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2/tasks/bc9nvvjof.output</output-file>
+<status>completed</status>
+<summary>Background command "Run the full test suite" completed (exit code 0)</summary>
+</task-notification>
