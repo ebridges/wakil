@@ -1,0 +1,1 @@
+how can I search across all of my claude code sessions?  I'm looking for examples of where the agent counter-proposed something because of guidance I gave it (in @PROMPT.md : "Do not over-engineer this project.").
