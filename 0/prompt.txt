@@ -1,0 +1,5 @@
+let wakil's built-in schema be the sole authority for field shape and validation (which is already almost true), and shrink schema.md down to a much smaller, prose-only document carrying only the things that genuinely don't reduce to schema — naming philosophy, page-shape convention, citation format.
+
+let's also discuss integrating into wakil:
+- the non-schema parts of `schema.md`
+- the non-entity resolution that `RESOLVER.md` handles
