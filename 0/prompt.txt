@@ -1,0 +1,1 @@
+<bash-input> open docs/relationship-graph-traversal-proposal.md</bash-input>
