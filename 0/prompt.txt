@@ -1,0 +1,21 @@
+When I reran the enrich, it appears to have removed the "Compiled truth" section and replaced it with "Timeline / Log".  
+
+```
+│  created: 2026-06-22                                                                                                                                                                           │
+│ -updated: 2026-07-19                                                                                                                                                                           │
+│ +updated: '2026-07-20'                                                                                                                                                                         │
+│  confidence: high                                                                                                                                                                              │
+│  ---                                                                                                                                                                                           │
+│                                                                                                                                                                                                │
+│  # mosaic-private-markets                                                                                                                                                                      │
+│                                                                                                                                                                                                │
+│ -## Compiled Truth                                                                                                                                                                             │
+│ +## Timeline / Log                                                                                                                                                                             │
+│                                                                                                                                                                                                │
+│ -AI-native **deal-OS for private markets** — software that lets PE firms and investment banks run deal modeling, scoring, and investment-committee analysis, positioned by the recruiter as "a │
+│ -                                                                                                                                                                                              │
+│ -- **Status: current employer.** Edward accepted the **VP of Engineering** offer (see 2026-07-15 offer terms below) and joined Mosaic, ending the job search that ran 2026-04 through 2026-07. │
+│ -- **Hiring history (for context):** rec                                                                                                                                                       │
+│ …                                                                                                                                                                                              │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
