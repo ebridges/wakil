@@ -1,0 +1,1 @@
+I believe this is the same JSON format as the json file that's included in a Whisper file.  If so, it should be able to handle it already?  If not, then update the wakil ingest to recognize this schema of JSON -- the result of ingesting a JSON transcript like this should be a markdown structured document like the other transcripts.
