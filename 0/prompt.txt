@@ -1,0 +1,33 @@
+<task-notification>
+<task-id>a9b08acdabba15eb1</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/0d040421-da1c-44ba-aeb0-8cd05f206644/tasks/a9b08acdabba15eb1.output</output-file>
+<status>completed</status>
+<summary>Agent "Adversarial review of PR #35, round 1" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Verified. Re-checked out the branch at HEAD `8fb4000`, read the fix and its test, and re-ran the full gate myself:
+
+- `uv run ruff check .` → all checks passed
+- `uv run pytest -q -m "not eval"` → 502 passed, 62 deselected (one more pass than before, the new test), no hang
+- Ran the new test in isolation (`test_prepare_entity_full_resynthesis_rejects_empty_compiled_truth`) — passes.
+- Re-traced the actual code path: the check `if not result.compiled_truth.strip():` in `src/wakil/app/ingest_service.py` sits immediately after `complete_with_contract(...)` returns and before `target_note_path`/`EntityRevision` are built or `_merge_entity_note` is ever called — so it's a true choke point, not a check that some later code could route around.
+
+**Confirming the fix is correct and complete:**
+
+- `grep`'d every call site of `_merge_entity_note` and `prepare_entity_full_resynthesis` in the tree. There is exactly one production path into a merge from full resynthesis — `prepare_entity_full_resynthesis` → `_merge_entity_note` (`src/wakil/app/ingest_service.py:1637`) — and it is now gated by the new check. Both CLI triggers for full resynthesis (`--full`, and the Stage‑1 menu's `"f"` choice) route through the same `_run_full_resynthesis` closure → the same `prepare_entity_full_resynthesis` call, so there's only one call site to guard, and it's guarded.
+- **On your specific question — the edit-then-still-empty path**: full resynthesis has no edit sub-step at all. `_run_full_resynthesis` (`src/wakil/cli/main.py:846-877`) only does preview → confirm → apply/report; `click.edit()` and `rebuild_entity_update_with_compiled_truth` are exclusively part of the *additive*-mode Stage‑1 menu's `"e"` choice, and that path was already independently guarded before this session's review (`if not edited.strip(): continue`, unrelated to the bug I found). So there's no edit-driven route into an empty full-resynthesis merge to miss — the two mechanisms (model-response emptiness vs. hand-edit emptiness) are genuinely separate code paths, and both are now covered, each by its own guard.
+- Both CLI call sites that invoke `prepare_entity_full_resynthesis`/its callers already catch `ModelContractError` (`src/wakil/cli/main.py:850` and `884`), so the new exception surfaces as a clean red error line and exit code 1, consistent with every other model-contract failure in this command — no new uncaught-exception risk introduced.
+
+**One non-blocking observation, not a new bug**: `ModelContractError`'s class docstring says "The model failed to produce schema-valid output twice in a row" (`src/wakil/llm/schemas.py:22`), which describes the retry-exhaustion case `complete_with_contract` raises it for elsewhere. This new raise is a same-exception-different-reason reuse — an immediate, no-retry semantic check (schema-valid but empty), not a "failed twice" case. It's still the right exception type from the CLI's point of view (generic catch-and-print-cleanly behavior is exactly what's wanted here), so I wouldn't block on this — just flagging the docstring is now slightly narrower than actual usage, in case it's worth a one-line docstring tweak later.
+
+I also re-confirmed, per your question, that `prepare_entity_compile`'s additive-mode path (`src/wakil/app/ingest_service.py:1559`) still has the same theoretical fallback-swallow shape if the model ever returned an empty `compiled_truth` there — but that's pre-existing (unrelated to this PR, and additive mode's contract makes an empty response far less plausible since it's always asked for a union/superset). Out of scope for Finding 1, not something I'd hold this PR on.
+
+**Verdict: ready to merge as-is.** No other issues found in this follow-up pass. All prior findings from my first review are resolved (the loop-termination fix and Timeline-only prompt were already correct and verified; the one real bug — silent empty-compiled_truth fallback in full resynthesis — is now fixed and tested); the two coverage suggestions I raised were optional nice-to-haves, and I agree they don't block merge given the existing failure-branch coverage already exercises the risk that matters.
+
+Files referenced this round:
+- `/Users/ebridges/Projects/wakil/src/wakil/app/ingest_service.py:1612-1626` (the fix)
+- `/Users/ebridges/Projects/wakil/tests/unit/test_ingest_service.py:1478-1489` (the new test)
+- `/Users/ebridges/Projects/wakil/src/wakil/cli/main.py:846-877, 815, 884` (catch sites)
+- `/Users/ebridges/Projects/wakil/src/wakil/llm/schemas.py:21-33` (`ModelContractError`)</result>
+<usage><subagent_tokens>96276</subagent_tokens><tool_uses>7</tool_uses><duration_ms>112588</duration_ms></usage>
+</task-notification>
