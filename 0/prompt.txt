@@ -1,0 +1,3 @@
+start a branch and commit/push the progress thus far before continuing
+
+Then let's revisit batching for the entities that still make the cut: would it make sense to logically group the entities? or is it okay to submit each entity as a separate reasoning call.  If we submit each entity as a separate call: will the caching that we did benefit that?  how else can we optimize those interactions?
