@@ -1,0 +1,1 @@
+I'm looking at this Hermes: https://github.com/nousresearch/hermes-agent
