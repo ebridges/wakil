@@ -1,0 +1,27 @@
+<task-notification>
+<task-id>a2acd12cc2c67fee9</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/a2acd12cc2c67fee9.output</output-file>
+<status>completed</status>
+<summary>Agent "Refactor build_server in mcp/server.py" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Checked against the development-docs bar: this was a straightforward, one-off organizational refactor (splitting one function into four grouped helpers, no behavior change, no bug found, no new pattern established). Nothing here rises to a recurring dev pattern or a gotcha worth recording in docs/DEVELOPMENT.md or docs/TROUBLESHOOTING.md, so no doc update was made.
+
+Summary of the completed task:
+
+**Diff**: `src/wakil/mcp/server.py`, +21/-8 lines. Added four module-level helpers — `_register_coordinator_resource(mcp)`, `_register_read_tools(mcp, config)` (status, search, query, memory_list, memory_show, relationships, sources_list, sources_show, skills_list), `_register_git_tools(mcp, config)` (git_summary, git_history), `_register_write_tools(mcp, config, cache)` (ingest_prepare, ingest_apply, enrich_prepare, enrich_apply). `build_server` now just builds `mcp`/`cache`, calls the four helpers, and returns `mcp` (10-line body, lines 163-172). All decorators, inner function names, and docstrings preserved verbatim — pure regrouping, no behavior change.
+
+**Tests run**:
+- `tests/unit/test_mcp_tools.py` — 16 passed
+- Full suite `uv run pytest -q -m "not eval"` — 621 passed, 62 deselected, no regressions
+- No dedicated test imports `build_server` directly (verified via grep), so no additional targeted test needed
+
+**Lint/type check**:
+- `uv run ruff check src/wakil/mcp/server.py` — all checks passed
+- `uvx ty check src/wakil/mcp/server.py` — all checks passed (plain `uv run ty` isn't on PATH in this repo, as expected; `uvx ty` worked)
+- Confirmed `Direction`, `tools`, `WorkspaceConfig`, `ProposalCache` are all still referenced correctly across the split functions
+
+**Commit**: `72bf68a` — `♻️ refactor(mcp): split build_server into per-category registration helpers` (not pushed, per instructions).</result>
+<usage><subagent_tokens>42817</subagent_tokens><tool_uses>16</tool_uses><duration_ms>151786</duration_ms></usage>
+<worktree><worktreePath>/Users/ebridges/Projects/wakil/.claude/worktrees/agent-a2acd12cc2c67fee9</worktreePath><worktreeBranch>worktree-agent-a2acd12cc2c67fee9</worktreeBranch></worktree>
+</task-notification>
