@@ -1,0 +1,47 @@
+<task-notification>
+<task-id>a07789fe35f985b08</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/a07789fe35f985b08.output</output-file>
+<status>completed</status>
+<summary>Agent "Review PR #114 enrich refactor" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Review: PR #114 — Refactor: split `enrich` into prepare/confirm-and-apply helpers
+
+**Verification performed:** checked out the PR branch (`refactor/enrich`, single commit `35caf6f`, touching only `src/wakil/cli/main.py`), and ran independently:
+- `uv run ruff check .` — clean
+- `uv run pytest -q -m "not eval"` — 621 passed, 62 deselected (matches the PR description's claim)
+- `uvx ty check .` — clean
+
+All claims in the PR description check out.
+
+**Correction to my own background briefing:** the general guidance I was given says "no type checker runs in CI" for this repo. That's now stale — `.github/workflows/ci.yml` has a `type-check` job running `uvx ty check .` on every PR, and it passed for this one (confirmed both via `gh pr checks 114` and by running it myself). Worth knowing for future reviews of this repo.
+
+### Correctness of the extraction
+
+I traced the pre/post control flow line by line. It's a faithful, behavior-preserving extraction:
+
+- `_prepare_enrichment_or_exit` (src/wakil/cli/main.py:418) wraps the `console.status(...)` + `prepare_enrichment(...)` call and still catches exactly `(IngestError, ModelError)`, still calls `abandon_landing(config, landing)` before `raise typer.Exit(code=1) from exc` — identical to the original.
+- `_confirm_and_apply_enrichment` (main.py:450) preserves the exact original sequence: print proposal → `validate_proposal` → issues abort path → confirm-or-abort path → `apply_enrichment` try/except → `print_enrichment_result`. Every one of the three `abandon_landing` + `typer.Exit` call sites from the original function is present and in the same order.
+- Back in `enrich()` (main.py:610–662), the top-level import list correctly retains `GitServiceError, abandon_landing, prepare_landing` (all three still used directly in `enrich` — `prepare_landing` at 628, `GitServiceError` at 633, `abandon_landing` at 661 for the "no files written" branch) and correctly drops `IngestError`, `apply_enrichment`, `prepare_enrichment`, `validate_proposal`, `ModelError` since those moved into the helpers. No leftover unused imports, nothing missing.
+- I confirmed this isn't just "tests happen to pass" — `tests/integration/test_ingest_cli.py::test_enrich_unknown_source` exercises the `IngestError` path inside `_prepare_enrichment_or_exit` (via `prepare_enrichment` raising "No source with id..."), and `test_enrich_blocked_on_schema_gap` exercises the validation-issues abort path inside `_confirm_and_apply_enrichment`. Both pass, confirming the extraction didn't silently swallow or reroute either error path.
+
+No correctness or safety issues found.
+
+### Fit with file conventions
+
+Matches the established `_land_written_files`/`_resolve_context_or_exit` "do a thing or raise `typer.Exit`" pattern well: same lazy per-function imports (this file already duplicates imports like `abandon_landing` across `enrich`, `_run_ingest`, and now these two helpers — that's the pre-existing convention, not new duplication introduced badly), same lack of docstrings on private helpers, same placement (grouped with the other `_..._or_exit` helpers before `_run_ingest`).
+
+Two minor nits, neither blocking:
+
+1. **Untyped parameters/returns on the new helpers** (main.py:418–472): `client`, `proposal`, and both functions' return values are unannotated, even though concrete types exist and are already imported/available in this codebase (`ModelClient` in `wakil.llm.client`, `EnrichmentProposal`/`EnrichmentResult` in `wakil.app.ingest_service`). The file already uses the `TYPE_CHECKING`-forward-ref pattern for exactly this purpose (`resolved_context: "ResolvedContext | None"` on the very same function signature), so it would've been cheap and consistent to type `client: ModelClient`, `-&gt; EnrichmentProposal` on the first helper and `proposal: EnrichmentProposal`, `-&gt; EnrichmentResult` on the second. `ty` doesn't flag this (it infers rather than requiring annotations), so it won't fail CI, but per this repo's review bar ("no type checker enforces annotation completeness, so annotation correctness needs a human check") it's the one place this diff falls short of the bar it otherwise meets. Suggestion, not a blocker.
+2. **Minor kwonly-arg inconsistency**: `_prepare_enrichment_or_exit` uses `config, *, source_id=..., client=..., ...` (keyword-only, per the PR description's stated intent), but `_confirm_and_apply_enrichment(config, proposal, landing, yes)` (main.py:450) is all-positional with no `*` marker, despite being introduced in the same PR for a parallel purpose. That said, the file itself is already inconsistent on this point (`_run_ingest` is also all-positional), so this isn't a new deviation from an established norm — just worth noting since the PR description explicitly calls out kwonly-consistency as a goal and only half-delivers it.
+
+### Proportionality (CLAUDE.md anti-over-engineering bar)
+
+This earns its complexity. It's a pure mechanical split of a 109-line function into two named steps that already map onto a real conceptual boundary (model-call/prepare vs. review/confirm/apply — the same two-step shape ADR 0010/the ingest-service split already uses), it doesn't add any new abstraction, flag, config knob, or generalization, and it doesn't touch anything ADR 0003/0007/0008/0019 govern (no new write path, no dynamic dispatch, no model-decided control flow, no parallel Markdown-content storage in SQLite). No README changes needed since no user-facing behavior changed, and none were made — correct.
+
+**Overall:** approve. The only actionable feedback is the missing type annotations on `client`/`proposal`/return values in the two new helpers (main.py:418-472) — a small, easy follow-up, not a blocker.
+
+Files reviewed: `/Users/ebridges/Projects/wakil/src/wakil/cli/main.py` (lines 399–662), `/Users/ebridges/Projects/wakil/src/wakil/app/ingest_service.py` (lines 560-600, for `prepare_enrichment`/`get_source` return types), `/Users/ebridges/Projects/wakil/src/wakil/llm/client.py` (for `ModelClient`), `/Users/ebridges/Projects/wakil/tests/integration/test_ingest_cli.py` (lines 156-207), `/Users/ebridges/Projects/wakil/.github/workflows/ci.yml`, `/Users/ebridges/Projects/wakil/CLAUDE.md`, `/Users/ebridges/Projects/wakil/docs/adr/` (listing), `/Users/ebridges/Projects/wakil/README.md`.</result>
+<usage><subagent_tokens>43375</subagent_tokens><tool_uses>29</tool_uses><duration_ms>226682</duration_ms></usage>
+</task-notification>
