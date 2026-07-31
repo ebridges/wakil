@@ -1,0 +1,7 @@
+When working with claude on this project I regularly notice things like the below while working on a distinct issue.  Further, there are things that you're learning along the way that remain local to the session yet may be valuable later on.
+
+What are some techniques that I can employ to collect this knowledge "along the way" and make it available in future sessions so that you're learning as you go along?
+
+---
+
+> 2. A second gap found while testing it live: the losing process was left stranded on its throwaway git branch instead of returning to where it started. Fixed by splitting _run_ingest's error handling to match the pattern enrich already used.
