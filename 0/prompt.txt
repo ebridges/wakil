@@ -1,0 +1,50 @@
+Read /Users/ebridges/Projects/kb-personal/ISSUES.jsonl for full context — 115 tracked issues from repeated confirmation passes against wakil (currently at commit 14938d4, after issues #36–46 and #58–62 were fixed and merged). 82 are "fixed", 3 are "closed" (not actionable — see their feedback for why, don't reopen), and 30 are "open" — every one has been freshly re-confirmed this session with a live reproduction and/or direct code citation, so treat the feedback array's most recent entry per id as ground truth, not stale.
+
+File GitHub issues, fix, and merge in priority order below. After each merge, note the commit SHA and issue/PR numbers so the next confirmation pass can target the right ids — same handoff format as WAKIL-FIXES-2026-07-27.md in the repo.
+
+## Priority 1 — highest-impact, broadest-reach
+
+A. Dated-record duplicate creation bypasses the #60 fix entirely (ids 96–107, 12 issues, all high severity)
+Root cause, code-confirmed and live-reproduced repeatedly: in ingest_service.py, proposal.proposed_note is set by the extraction step (~line 683) before entity resolution runs. Both _suppress_stubs_matching_updates (line 1088) and _suppress_dated_record_stubs_matching_updates (line 1137, the #60/PR#67 fix) only ever prune proposal.stub_entities/proposal.entity_resolutions — neither one ever inspects or nulls proposal.proposed_note. So when extraction independently decides a dated journal-style source is "worth a durable note," it writes a duplicate entity alongside a perfectly correct Timeline update to the real project entity, and #60's fix structurally cannot catch it because it's checking the wrong field. Fix direction: extend the suppression check (or add a new one) to also compare proposal.proposed_note's subject/slug against proposal.entity_updates targets, same logic as the existing functions, just applied to the field they're currently missing.
+
+B. RESOLVER-precedence deferral failure — dated meeting should defer to existing journal entry (id=113, medium)
+A different, cross-proposal variant of the same theme: when a dated journal/YYYY/ entry already exists for an event (e.g. a contractor call), and a separate source describing the same event gets ingested later, entity resolution should defer to the existing entry per RESOLVER.md rule #4 — instead it invents a new entity every time, and which wrong destination it picks has now varied across three confirmation rounds (meetings/ → project/ → people/). This is not the same bug as (A) — it's not an intra-proposal duplicate, it's a failure to search/prefer an existing same-day entity across proposals. Needs its own fix, likely in whatever step decides create-vs-defer for a new source, checking existing dated entries for the same date/subject before proposing a new entity at all.
+
+C. Fresh entity creation never synthesizes source content — _stub_content() hardcoded placeholder (ids 4, 10, high)
+_build_stub_entities always calls _stub_content() for any action=create entity resolution, which returns a literal hardcoded empty template ("_Synthesized current state — rewrite when facts change._") regardless of how much real content the source actually contains (Kindle highlights, technique writeups, etc.). This is the most severe remaining content-fidelity gap — it's why every fresh-create note needs manual authoring. Not touched by any of the 16 merged fixes so far (they all target the update/revision path or entity-resolution typing, never the synthesis-on-create step itself). Fix direction: _stub_content() needs to actually invoke synthesis (the same mechanism _run_entity_updates/note-revision uses) rather than returning a fixed string.
+
+## Priority 2 — real gaps, moderate impact
+
+D. No landing entity for index/list-shaped sources (ids 83, 85, medium)
+A source that's itself an index of other entities (e.g. a project-list or reading-list file linking ~20 other pages) resolves to the builtin index type, which has no schema.directory to route into — so it silently (well, now visibly, per #40's warning fix) produces 0 files and no landing entity. Fix direction: either give index sources a real destination (a generic drafts/-style catch-all, or let kb-local schemas declare an index-shaped type the way hobby-concept etc. already exist), or make entity-resolution route index content into whatever type fits (e.g. hobby-concept for a woodworking project list) rather than defaulting to the dead-end builtin.
+
+E. Field-level status inference has no confidence signal, and it's CREATE-path only (ids 20–23, low, but architectural)
+EntityRevision.confidence (added by #39/PR#52) is wired only into _run_entity_updates (the update path). EntityResolution.proposed_frontmatter, which is what _build_stub_entities uses for a fresh action=create book/article, is a plain dict with no per-field confidence anywhere. A book's status: finished gets asserted with the same confidence whether it's backed by one early highlight or a full read-through. Fix direction: extend whatever mechanism produces EntityRevision.confidence to also run against proposed_frontmatter on the create path, or add a lighter per-field confidence dict there.
+
+F. Entity-resolution and page-synthesis can disagree, synthesis wins (id=115, medium, newly discovered — not yet filed)
+With sibling hobby-concept precedents present, entity-resolution now correctly proposes type: hobby-concept for a third-party instructional article (confidence 0.90) — but the synthesis stage that follows ignores that decision and writes type: article anyway. This is a genuinely new bug surfaced by #62's own fix working correctly at the resolution stage while a downstream stage doesn't honor it. Fix direction: whatever stage does final type/path selection during synthesis needs to read from the resolution's decision rather than re-deriving type independently.
+
+G. "Whose build is this" signal still not reliably driving hobby-project vs hobby-concept classification (id=49, medium)
+Across 3 confirmation rounds this has landed on 3 different wrong answers for the same content (misfiled as article, then a resolution/synthesis mismatch — see F above, which was discovered testing this exact id — then reverted to hobby-project). The underlying signal ("is this the user's own in-progress build, or a third-party article describing someone else's build") isn't being captured deterministically anywhere in the prompt/resolution logic. Fix direction: probably needs explicit instruction in entity-resolve/SKILL.md naming this exact distinction, since #62's sibling-precedent guidance alone isn't sufficient — it only helps when a matching precedent already exists, not when reasoning about the source's own voice/perspective.
+
+H. Hand-authored multi-date reflective journal never uses the builtin journal type (id=14, high)
+A two/three-date personal reflection (discussing external works in passing) gets split into 2-3 empty stub entities for the works mentioned, never landing as an actual journal entry — 100% of the real reflective content is lost. Reproduced consistently across all rounds with zero variance. Fix direction: entity-resolution needs a stronger signal for "this source's primary subject is the author's own first-person reflection, not the things it references" — likely needs explicit guidance alongside whatever handles #62's category-context routing, since it's the same class of "whose content is this really about" question.
+
+## Priority 3 — low-severity, mostly cosmetic
+
+I. Book title/slug carries the full marketing subtitle (ids 2, 5, low)
+title: "11/22/63: A Novel" instead of "11/22/63"; slug/title generation for document-category types (book/article) is entirely model-chosen with no code-level subtitle-stripping. Consistent 3/3 reproduction across rounds (though which artifact shows it — title vs. filename — varies).
+
+J. Attachment paths on the UPDATE path aren't vault-root-absolute and files never get copied (id=8, low but functionally breaks links)
+On a merge/update into an existing entity, new image references get written as literal source-relative paths (not vault-root-absolute per RESOLVER.md), and the referenced files are never copied into the vault — so the resulting ![[...]]/![]() links are always dangling. #59/PR#65 fixed attachment preservation (the reference now survives) but not correctness (the path is wrong and the file doesn't exist).
+
+K. Timeline entries can get a placeholder heading instead of a real date (id=47, medium)
+_insert_timeline_entry (ingest_service.py:1027-1038) inserts whatever heading text the model generates verbatim — "### (date not recorded)" or "### Undated — source: clipping" — with no code-level fallback to the source's captured/retrieved date when the source text itself lacks one. Recurred spontaneously in an unrelated test, so it's not source-specific.
+
+L. updated:/created: frontmatter quoting inconsistency (id=51, low)
+ingest_service.py:1096 sets metadata['updated'] = today as a plain str, which yaml.safe_dump quotes to disambiguate from a date; created survives as an already-parsed date object from the original frontmatter and stays unquoted. Purely cosmetic but easy fix (cast updated to a date object before dumping, matching created's type).
+
+M. Raw capture filename ignores its own generated title (id=94, low)
+When a source file's own filename is just a bare date (e.g. 2014-02-17.md), the raw capture lands as sources/clippings/<date>-untitled.md instead of using the frontmatter title wakil itself generated. Root cause: _LEADING_DATE_RE.sub runs twice in the capture path (once on the origin filename's stem, once again on the slugified result in _build_raw_file, ~lines 260 and 1978) — both passes strip a bare-date filename to empty and fall back to "untitled", independent of the title. Note: this was originally assumed to be an intentional ADR-0010 tradeoff, but a confirming pass found this specific root cause contradicts that assumption — it's a real bug, not a tradeoff.
+
+Once fixes are merged, I'll run another isolated-workspace confirmation pass the same way as the last several rounds.
