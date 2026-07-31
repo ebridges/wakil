@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b994sayd9</task-id>
+<tool-use-id>toolu_01Pf1p1kNXfJSA6QyKptRqMG</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/b994sayd9.output</output-file>
+<status>completed</status>
+<summary>Background command "Run full eval suite for PR 22 (retire SCHEMA.md) in background" completed (exit code 0)</summary>
+</task-notification>
