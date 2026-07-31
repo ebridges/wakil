@@ -1,0 +1,167 @@
+<task-notification>
+<task-id>a3b7505d3d92eea43</task-id>
+<tool-use-id>toolu_01TgLcTcqoXkDf1H5CgvHs1W</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/2b074d35-4bb7-4b7d-b00f-b4d58a00d8a8/tasks/a3b7505d3d92eea43.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore memory lifecycle &amp; promotion model" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I now have all the grounding facts needed. Here is the report.
+
+## 1. README.md — "Memory lifecycle" section
+
+`README.md:64-69` (CLI examples under "Memory lifecycle" heading):
+```
+uv run wakil -w kb memory list --state candidate
+uv run wakil -w kb memory show 3
+uv run wakil -w kb memory promote 3 7
+uv run wakil -w kb memory reject 4
+uv run wakil -w kb memory archive 1
+```
+
+`README.md:72-85` (full prose section):
+&gt; "Ingests propose memories in `candidate` state; you review and decide:
+&gt;
+&gt;     working → candidate → durable
+&gt;                       ↘ rejected
+&gt;     durable → archived
+&gt;
+&gt; `wakil memory list` (with `--state`/`--type` filters) reviews them, `promote` moves them to durable, `reject` removes them from search, and `archive` keeps them searchable but downranked. Invalid transitions are refused. Rather than deleting, retrieval fades memories: durable ranks first, then candidate, then working (fading further after 30 days), then archived. Memories used to answer a query get their `last_seen_at` bumped for future ranking."
+
+States: `working`, `candidate`, `durable`, `rejected`, `archived`.
+
+Promotion trigger: none automatic — the doc only describes `promote` as a user-run CLI command ("you review and decide"). Archival: same — user-run `archive` command. "Durability" = a lifecycle *state* value (`durable`) set only by explicit human `promote`; it earns the top retrieval rank and is what "shapes future answers" (per the CLI help text, see §5 below), not a numeric/confidence-derived property.
+
+## 2. ADRs discussing memory type/promotion/confidence/state
+
+Twelve ADRs exist in `docs/adr/` (0001–0012). Only one substantively discusses the Memory lifecycle/type/promotion machinery:
+
+**ADR 0005** — `docs/adr/0005-timeline-entries-as-memory-rows.md`, "Timeline Entries Live in Memory, Not a Dedicated `timeline_entries` Table" (status: accepted, date 2026-07-10).
+
+Relevant quotes:
+- Line 21-22: "`wakil` already has a `Memory` table with a lifecycle (state transitions, promotion, dedup) built for exactly this kind of durable, provenance-carrying record."
+- Line 30-32 (the decision): "Timeline entries are existing `Memory` rows with `memory_type='event'` (a new value on the already free-string column, requiring no migration), `note_id` set to the entity's `Note`, and `source_id` set to the originating `Source`."
+- Line 48-51 ("Consequences"): "No new table, no new lifecycle to maintain, no new promotion/dedup path to keep in sync with the one `Memory` already has. Timeline entries go through the same review/promote flow as every other Memory (`wakil memory promote &lt;id&gt;`), with no special-casing by type."
+- Line 56-60: pairs this decision with rejecting a `links` table and a `page_versions` table, all "following the same rule: reuse `Note`/`Memory`/`Relationship` rather than add parallel schema, unless the addition is a genuinely new column with no existing home."
+
+This ADR establishes precedent that: (a) `memory_type` is treated as a free-string column that new values can be added to "for free" without migration (exactly what the proposal under review also claims for `opinion`); (b) any new memory concept is expected to flow through the *existing* state/promotion lifecycle rather than fork a new one, matching the proposal's own "phase 1" framing.
+
+No other ADR (0001-0004, 0006-0012) discusses `confidence`, memory-type governance, or lifecycle state — a `grep -n "type\|confidence\|state\|lifecycle" docs/adr/*.md` search found no additional hits pertaining to Memory's `type`/`confidence`/`state` fields specifically.
+
+## 3. `src/wakil/llm/schemas.py` — `CandidateMemoryModel`
+
+`src/wakil/llm/schemas.py:30-41`:
+```python
+class CandidateMemoryModel(BaseModel):
+    type: str = Field(
+        default="fact",
+        description="fact | summary | relationship | question | hypothesis | decision "
+        "| theme | event (event = something dated that happened)",
+    )
+    content: str = Field(description="One self-contained claim, observation, or question.")
+    confidence: float | None = None
+    event_date: dt.date | None = Field(
+        default=None,
+        description="ISO date of the event itself, only for type=event.",
+    )
+```
+
+Fields:
+- `type: str`, default `"fact"`, no `Literal`/enum — plain `str` with an enumerated value list only in the `Field(description=...)` prose (i.e., not machine-enforced).
+- `content: str`, required, no default.
+- `confidence: float | None`, default `None` (implicit), no `Field(...)` description, no min/max constraint declared at the Pydantic level (clamping happens later in application code, see §5).
+- `event_date: dt.date | None`, default `None`, description ties it to `type=event`.
+
+## 4. `src/wakil/storage/schema.py` — `Memory` table
+
+`src/wakil/storage/schema.py:82-103`:
+```python
+class Memory(Base):
+    __tablename__ = "memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    memory_type: Mapped[str] = mapped_column(String(30))
+    content: Mapped[str] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text, default=None)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"), default=None)
+    note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id"), default=None)
+    confidence: Mapped[float | None] = mapped_column(default=None)
+    state: Mapped[str] = mapped_column(String(20), default="working")
+    importance: Mapped[float | None] = mapped_column(default=None)
+    freshness: Mapped[float | None] = mapped_column(default=None)
+    # When the described event happened (Timeline ordering) — distinct from
+    # created_at, which records when this row was written (entity-model.md).
+    event_date: Mapped[date | None] = mapped_column(default=None)
+    last_seen_at: Mapped[datetime | None] = mapped_column(default=None)
+    metadata_json: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+```
+
+Confirmed: `memory_type` is `String(30)` with **no** `CheckConstraint`, `Enum`, or DB-level enum of any kind — matches the proposal's claim ("no DB enum, no migration needed"). `state` is `String(20)`, also free-form at the DB level, default `"working"` — governance of allowed values lives entirely in application code (see §5, `MEMORY_STATES`/`_TRANSITIONS` in `memory_service.py`), not the schema. `confidence` is an unconstrained nullable float column (no `CHECK (confidence BETWEEN 0 AND 1)`); range clamping to [0,1] happens only in `ingest_service.py` (see §5). No separate `importance`/`freshness` columns are currently populated anywhere in the grepped code (they exist as columns but no writer was found).
+
+## 5. Where promotion/archival actually happens today
+
+`src/wakil/app/memory_service.py:1-37` (module docstring + constants):
+```python
+"""Memory lifecycle: review, promotion, rejection, archiving, and fading.
+...
+"""
+MEMORY_STATES = ("working", "candidate", "durable", "rejected", "archived")
+
+_TRANSITIONS: dict[str, set[str]] = {
+    "working": {"candidate", "durable", "rejected", "archived"},
+    "candidate": {"durable", "rejected", "archived"},
+    "durable": {"archived"},
+    "archived": set(),
+    "rejected": set(),
+}
+
+_STATE_RANK = {"durable": 0.0, "candidate": 1.0, "working": 2.0, "archived": 4.0}
+WORKING_FADE_DAYS = 30
+_FADED_WORKING_RANK = 3.0
+```
+
+`transition_memories()` (`memory_service.py:77-95`) is the only mutator of `Memory.state`; it enforces the `_TRANSITIONS` table and is invoked exclusively from the CLI's `_transition()` helper (`src/wakil/cli/main.py:669-681`), which is called from the three explicit commands `memory promote` / `memory reject` / `memory archive` (`main.py:735-759`, e.g. `memory_promote`'s docstring: "Promote memories to durable so they shape future answers."). **There is no automatic/background promotion path** — no cron, scheduler, "auto-promote," or confidence-threshold-driven state change was found anywhere in `src/wakil` (grep for "auto\|scheduled\|cron" against promotion logic returns nothing relevant). Promotion is 100% manual/human-review, consistent with CLAUDE.md's "human review" design bias (`CLAUDE.md:94`, under "Design Biases: Prefer").
+
+Confidence's role in ingestion: in `src/wakil/app/ingest_service.py:566-578`, every extracted memory is created with `state="candidate"` unconditionally at write time (`ingest_service.py:1228-1238`, `Memory(..., state="candidate", ...)`), regardless of `confidence`. Confidence is only clamped to [0,1] by `_clamp01()` (`ingest_service.py:1621-1625`) and stored — it does **not** gate state, does **not** affect `MEMORY_STATES`/`_TRANSITIONS`, and is not referenced anywhere in `memory_service.py` at all (confirmed via `grep -rln "confidence" src/wakil`: only `ui/console.py` (display formatting, `console.py:235,258,371,392`), `llm/schemas.py`, `ingest_service.py`, `storage/schema.py`, and several `skills/*/SKILL.md` prompt files reference it — `memory_service.py` and `cli/main.py`'s transition logic do not).
+
+So: the proposal's Phase-1 plan to "let confidence do the hot-take work" via lifecycle-state interaction (i.e., relying on confidence to keep something in `candidate`/`archived` rather than being promoted) describes a coupling that **does not exist in the code today** — confidence and state are currently two independent, unrelated columns; nothing reads `confidence` when deciding or restricting a state transition.
+
+## 6. Existing retrieval/ranking for `query`
+
+A ranking function does exist:
+
+`src/wakil/app/memory_service.py:98-106`:
+```python
+def retrieval_rank(state: str, created_at: datetime | None) -&gt; float:
+    """Lower ranks first. Encodes the fading rules described above."""
+    rank = _STATE_RANK.get(state, 2.0)
+    if state == "working" and created_at is not None:
+        created = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
+        age_days = (datetime.now(UTC) - created).days
+        if age_days &gt; WORKING_FADE_DAYS:
+            rank = _FADED_WORKING_RANK
+    return rank
+```
+
+It is used from `src/wakil/app/search_service.py:71-79`:
+```python
+def _ranked_memory_hits(rows: list[dict]) -&gt; list[SearchHit]:
+    """Order memory hits by lifecycle rank (durable first, faded/archived last),
+    ...
+    """
+    def sort_key(row: dict) -&gt; tuple[float, float]:
+        return (retrieval_rank(row["state"], _parse_dt(row["created_at"])), row["score"])
+```
+
+The underlying SQL, `search_memories()` in `src/wakil/storage/fts.py:74-92`, selects only `state`, `created_at`, and the FTS `bm25()` score column — **`confidence` is not in the SELECT list, not in the sort key, and is not referenced anywhere in `fts.py` or `search_service.py`**. So today's ranking sort key is `(state-derived rank, bm25 text-match score)` only; confidence plays no role in retrieval ranking at all. This directly confirms the proposal's own caveat at `docs/memory-opinion-and-register.md:96-100` ("Where memories are ranked for `query`... consider letting low-confidence memories rank below high-confidence ones within the same state... Only if a ranking function already exists to extend — do not build a new ranker for this") — a ranking function *does* exist (`retrieval_rank`/`_ranked_memory_hits`) but it is state-and-bm25-only, and would need to be extended (not built from scratch) to add confidence as a tiebreaker.
+
+## 7. Git history of the proposal doc and ADRs
+
+`docs/memory-opinion-and-register.md` is **untracked** in git — `git status --porcelain` shows `?? docs/memory-opinion-and-register.md`, and `git log --oneline --all -- docs/memory-opinion-and-register.md` returns no results. It has never been committed; this is a brand-new, uncommitted proposal draft.
+
+No ADR currently exists for this proposal or an in-flight variant of it — none of ADR 0001-0012 titles or content concern an `opinion` memory type, a `register`/stance field, or confidence-driven ranking (only ADR 0005 touches the general Memory-lifecycle/type-extensibility precedent, summarized in §2). The 5 most recent ADR-directory commits (`git log --oneline -5 -- docs/adr/`) are ADR 0012 (`d8a441c`), plus commits `6fd0877`, `1b4a21a`, `e26f3dd`, `9f7c1ad` — none relate to memory types/confidence/promotion. The repo's 10 most recent commits overall are unrelated feature/fix work (context-file references, stopword filtering, eval-suite fixes, capture-time metadata, RESOLVER.md strategy, etc.) — nothing in-flight touches the Memory lifecycle, `CandidateMemoryModel`, or ranking code.</result>
+<usage><subagent_tokens>42179</subagent_tokens><tool_uses>24</tool_uses><duration_ms>94695</duration_ms></usage>
+</task-notification>
