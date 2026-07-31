@@ -1,0 +1,5 @@
+create a prompt that I can feed to Claude Code on the Web to build out docs/relationship-graph-traversal-proposal.md 
+
+- it should abide by guidelines already in place in @docs/DEVELOPMENT.md and ADRS in @docs/adr/ 
+- it should prompt for guidance when anything is ambiguous
+- it should work with many agents concurrently
