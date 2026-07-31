@@ -1,0 +1,1 @@
+are there any skills that are simply shell wrappers with little added value, and that may be candidates for pruning?
