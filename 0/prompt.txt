@@ -1,0 +1,1 @@
+I'd like to now create a release.  Analyze changes since the last release tag and tell me if this should be a major, minor, or patch release
