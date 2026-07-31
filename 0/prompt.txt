@@ -1,0 +1,1 @@
+add a thin pointer from .hermes/skills and .claude/skills for @skills/wakil-ingest
