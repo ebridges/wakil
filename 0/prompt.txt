@@ -1,0 +1,125 @@
+<task-notification>
+<task-id>a7dd1b4a5b9cbd872</task-id>
+<tool-use-id>toolu_01VX6ZNJHPfVSuc26fyw66cb</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3bf34b02-9b03-4e75-9b11-2ff5adca5354/tasks/a7dd1b4a5b9cbd872.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore wakil ADRs and docs" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># wakil Architecture Report — ADRs and Design Docs for MCP Server Planning
+
+All ADRs live in `/Users/ebridges/Projects/wakil/docs/adr/0001-...` through `0017-...`. None is titled "Porcelain CLI vs. skill-orchestration split" — see the note under point 2.
+
+## 1. All ADRs (number, title, status, summary)
+
+| # | Title | Status | Summary |
+|---|---|---|---|
+| 0001 | Skill resolution precedence — first-match-wins, no merging | accepted | Skills resolve via a 4-tier search path (`WAKIL_SKILL_PATH` → kb-root/skills → user-config → built-in); the first matching directory wins entirely, no merging across tiers, and a broken override blocks fallback rather than silently degrading. |
+| 0002 | QMD as First-Class Search Over SQLite FTS5 | accepted | `wakil search`/`query` combine two engines: QMD (external CLI, BM25/vector/hybrid over the raw Markdown vault) as first-class, and SQLite FTS5 as a synced index over wakil's own operational records (notes/memories/sources). QMD results take precedence; FTS fills gaps. |
+| 0003 | Git-Native Change Tracking (Branches/PRs for Ingest) | accepted | Knowledge-base changes land via git branches, scoped commits, and optional `gh`-CLI pull requests rather than direct working-tree writes — the mechanism satisfying "show reviewable diffs" / "do not silently rewrite user knowledge." (Full detail under point 4 below.) |
+| 0004 | Exclude Live-Model Skill Evals from the Default CI Gate | accepted | Live-model evals (real API calls, cost, non-determinism) are excluded from the default push/PR CI gate since they don't reflect code correctness; run separately (`pytest -m eval`). |
+| 0005 | Timeline Entries Live in Memory, Not a Dedicated `timeline_entries` Table | accepted | Rejects a GBrain-style dedicated timeline table; Timeline entries reuse the existing `Memory` table/lifecycle instead of forking a parallel storage concept. |
+| 0006 | Backlinks as a Live Query Over a Widened Relationship Table | accepted | Rejects both a new dedicated `links` table and storing backlinks as churny prose in Timeline; widens the existing `Relationship` table (previously Memory↔Memory only) to also model Note↔Note structural wikilink edges, computed live. |
+| 0007 | Markdown as source of truth, SQLite as operational store | accepted | Compiled Truth/Timeline content stays Markdown-only (git already gives version/diff/revert history); everything operational (frontmatter parse, memory rows, relationship edges, FTS index) lives in SQLite as an index, not a duplicate source of truth. Frontmatter itself is stored as an opaque JSON blob, not modeled per-field in SQLite. |
+| 0008 | Decompose ingestion into classify/extract/resolve/enforce/finalize, reject the multi-agent mechanism | accepted | See point 2 — full detail below. |
+| 0009 | Prioritize @-referenced notes in related-notes search, thread `resolve_context` past the CLI layer | accepted | An `@file:`/`@url:` reference in `--context` is now a guaranteed, capped, separately-tracked signal (not folded wholesale into an undifferentiated search string), fixing both missing backlinks and diluted FTS/QMD ranking. |
+| 0010 | Generate title and abstract at capture time with a single model call | accepted | Capture (Step 1 of ingest) gains one small structured model call for `title`/`abstract` (previously mechanical filename massaging only), improving search relevance; the raw file's path/slug stays fully deterministic and dedup-safe — the model call runs only after the content-hash duplicate check. Backfillable via `wakil sources backfill-abstract`. |
+| 0011 | Retire code dependency on workspace `SCHEMA.md`; derive frontmatter template from the entity-schema catalog | accepted | Removes `SCHEMA.md` as a code-read dependency (it duplicated what the YAML entity-schema catalog already expressed structurally); `RESOLVER.md` is untouched and remains the sole free-text workspace guide file. |
+| 0012 | Strategy for a built-in, overridable default `RESOLVER.md` | **proposed** (not yet implemented) | Proposes shipping a built-in default `RESOLVER.md` (subject-filing/notability/routing judgment) using the same first-match-wins precedence pattern as skills (ADR 0001), so a workspace isn't starting from a blank page for this judgment call. |
+| 0013 | Opinion Memory Type as a Free-String Addition; Confidence Becomes a Retrieval-Ranking Input | accepted | Adds `opinion` as a free-string `memory_type` value (no migration) and wires previously-inert `confidence` into ranking as a same-state tiebreak. Lifecycle `state` remains 100% human-controlled (`promote`/`reject`/`archive`) — confidence never changes durability. |
+| 0014 | Explicit register/commitment Field on Memory, Excluded from Query Grounding by Default | accepted | Adds a real `stance` column (DB/Python name — user/CLI-facing name is `register`, renamed to avoid colliding with `ABCMeta.register`) for `formal|casual`. `wakil query` excludes `casual` memories from grounding by default (`--include-casual` opts in); `wakil search` is unaffected. |
+| 0015 | Relevance-Gated Entity Selection and Truncation-Driven Batching for Entity Revision Calls | accepted | Fixes real truncation failures in the entity-revision model call by (1) separating `relevance` from `confidence` as independent judgments and excluding low-relevance entities before the expensive revision call, with exclusions surfaced as visible warnings, and (2) truncation-driven bisection batching. |
+| 0016 | Periodic Entity Compilation and Gated Timeline-Context Trimming | accepted (narrowed scope) | Accepts a single-entity, additive-only `wakil entities compile SLUG` pilot (re-synthesizes Compiled Truth as the union of full Timeline history, Timeline itself untouched). Explicitly **rejects as specified** (not deferred) lossy "collapse stale detail" compression and gated context-trimming in the enrich revision call, per adversarial review. |
+| 0017 | Bounded Compiled Truth — Target-Size Warning and Gated Full Resynthesis | accepted | Follow-on to 0016: adds a target-size constant for Compiled Truth surfaced as an interactive warning (not silently enforced) and a stateless per-run size check, addressing long-term unbounded growth. Was still pending merge (on `feat/entity-compile-pilot`) as of writing. |
+
+## 2. ADR 0008 in full detail
+
+**Note on naming:** No ADR in this repo is titled "Porcelain CLI vs. skill-orchestration split." The closest and most relevant match to your description is **ADR 0008** — `docs/adr/0008-ingestion-decomposition-reject-multi-agent-mechanism.md` — "Decompose ingestion into classify/extract/resolve/enforce/finalize, reject the multi-agent mechanism." It's the ADR that explains why ingestion isn't one router-agent-driven command, which is functionally the same territory your description points at (why there's no single ingest+enrich+PR command — the split is between fixed, code-sequenced steps vs. agent-decided orchestration, not literally a "porcelain CLI" naming). If a differently-named doc exists elsewhere (e.g. in git history or an uncommitted draft), I did not find it under `docs/adr/`, `docs/`, `README.md`, or `CLAUDE.md`.
+
+**Full text of ADR 0008:**
+
+&gt; **Context.** `docs/ingestion-model.md` works through a concrete worked example — a GBrain/Obsidian vault whose ingestion is organized as a dozen cooperating Claude Code "skills" that an LLM agent reads and follows, with one agent classifying input and delegating to other agents for type-specific extraction. The document's central claim is that ingestion decomposes into five separable concerns regardless of how each one is executed: **classify** the input, **extract** type-specific structure, **resolve entities** against the existing knowledge base (shared across all source types), **enforce invariants** that gate every write, and **finalize** (commit). The document argues this decomposition is what keeps ingestion code from rotting into an `if kind == ...` ladder as source types grow, and that the benefit comes from not conflating the five concerns — not from how each one is executed.
+&gt;
+&gt; The document's "Where this meets wakil's principles" section addresses the worked example's *mechanism* directly: a router agent inferring content type and dispatching to other agents, each following its own markdown procedure, is exactly what `CLAUDE.md`'s Design Biases section lists under "Avoid" — "large agent frameworks," "multi-agent orchestration," and "overly abstract plugin architectures" — in favor of "explicit commands" and "small composable services." Importing that mechanism wholesale would violate wakil's stated design biases.
+&gt;
+&gt; **Decision.** Keep the five-concern decomposition (classify / extract / resolve entities / enforce invariants / finalize) but implement it as a fixed, code-sequenced DAG rather than agent-decided delegation:
+&gt; - Classification stays an explicit CLI argument (`wakil ingest &lt;kind&gt; ...`), not content-inferred routing.
+&gt; - Each extraction path pairs a mechanical function (fetch/parse/OCR, no model call) with a `wakil/skills/&lt;kind&gt;/SKILL.md` prose file (judgment only, no schema) that code loads and folds into a model call, validated against a shared `ExtractionOutput` Pydantic contract.
+&gt; - Entity resolution is split out into its own always-invoked DAG node (not agent-remembered), producing `EntityResolution` results.
+&gt; - Invariant enforcement (`validate_proposal()`) sits between `prepare_ingest`/`prepare_enrichment` and `apply_ingest`/`apply_enrichment` as one explicit step.
+&gt; - Finalize is git-native (`--commit`/`--branch`/`--pr`), already implemented in `app/git_service.py`.
+&gt;
+&gt; This captures the worked example's real asset — accumulated, editable judgment per source kind — without adopting agent-decided control flow: **a step that must run, runs because code calls it, not because an agent remembered to.**
+&gt;
+&gt; **Consequences.**
+&gt; - New source kinds (PDF, tweet, webhook capture) add a mechanical extractor and a prose skill file, not a longer `if/elif` branch or a bloated shared prompt.
+&gt; - Entity-resolution bugs get fixed in one place instead of being re-implemented per source kind.
+&gt; - The DAG's topology is never agent-decided, avoiding the class of failure the worked example's own skill docs guard against with repeated anti-pattern warnings (e.g. "a meeting is NOT fully ingested until enrich runs for every entity").
+&gt; - wakil does not get an "adjacent maintenance" analogue (backlink repair, stale-page detection) yet; that remains a deliberately separate, lower-frequency command to build later.
+
+Implementation: PR #9 (enrichment DAG, merged 2026-07-15), PR #13 (skill resolver wired into DAG, merged 2026-07-16), PR #14 (entity-revision DAG, schema page-shapes, merged 2026-07-18).
+
+**Why this matters for the ingest/enrich split specifically:** the README and `docs/ingestion-model.md` establish that ingest is deliberately **two explicit steps** — `wakil ingest &lt;kind&gt;` (deterministic capture, one small title/abstract model call per ADR 0010) and `wakil enrich &lt;source-id&gt;` (the fixed two-model-call DAG: extraction, then always-invoked entity resolution) — rather than one combined command, because each step is its own code-sequenced, previewable, confirmable unit; a single "ingest+enrich+PR" command would collapse two independently reviewable checkpoints into one, and would reintroduce exactly the kind of implicit, agent-decided sequencing ADR 0008 rejects for reasons of predictability (every step runs because code calls it) and reviewability (each step previews before writing).
+
+## 3. ADRs touching interfaces / model abstraction / memory lifecycle / git-native flow / search architecture
+
+- **Interfaces to the agent:** No ADR directly proposes an alternative interface (API, MCP, etc.) — this is greenfield territory. But `PROMPT.md` (lines ~89-110, "Product Shape") states the governing constraint explicitly:
+  &gt; "The CLI should be the primary interface." ... "The first version should not require a server, browser UI, or remote runtime." ... **"However, the design should not prevent additional interfaces later."**
+  This is the load-bearing sentence for MCP planning — additional interfaces are explicitly not ruled out, just not the initial focus. `CLAUDE.md`'s "Avoid" list also names "remote runtimes," "hidden background behavior," and "hosted product assumptions" as things to keep away from, which likely bears on how an MCP server should be scoped (e.g., no new hosted state, no bypassing the existing review gates).
+- **Model/provider abstraction:** `CLAUDE.md` states "Model access should be provider-abstracted but minimal" (Anthropic, OpenAI-compatible, Gemini/local later "only if needed"). README documents the concrete env-var-based provider selection (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` + `WAKIL_MODEL`/`WAKIL_OPENAI_BASE_URL`, `WAKIL_PROVIDER`). No ADR is dedicated solely to this; ADR 0004 (live-eval CI exclusion) references the same "provider-abstracted but minimal" principle as part of its rationale.
+- **Memory lifecycle:** ADR 0005 (timeline-as-memory), ADR 0013 (opinion type + confidence-as-ranking-input), ADR 0014 (register/stance field + query-exclusion) are the three ADRs that shape memory. `docs/memory-model.md` is the broader design doc (candidate → active/dormant → archived lifecycle, decay computed lazily, no background jobs, "the model proposes, the human decides, the result is a reviewable diff").
+- **Git-native workflow / PR review flow:** ADR 0003 is the core one (full detail in point 4). ADR 0015 and 0016 both explicitly cite ADR 0003/CLAUDE.md's "show reviewable diffs" / "do not silently rewrite user knowledge" language as governing constraints on later features (entity relevance-gating, entity compilation).
+- **Search architecture (QMD vs FTS5 vs embeddings):** ADR 0002 is the core ADR. `CLAUDE.md`'s Search block lists the intended stack order: "QMD as first-class search / SQLite FTS5 for internal records / optional embeddings later / optional Neo4J deep dive later" — so embeddings and a graph DB are named as explicit future options, not yet built. ADR 0009 refines search precision (capping/isolating `@file:`-referenced context from the FTS/QMD query).
+
+## 4. Human-in-the-loop / review gating mechanism
+
+Yes — this is a first-class, repeatedly-cited mechanism, not just aspirational CLAUDE.md language. Key sources:
+
+- **`CLAUDE.md`, "Working Agreement for Agents," items 11-12** — the exact lines you quoted: "Show reviewable diffs for knowledge-base modifications." / "Do not silently rewrite user knowledge." These are treated as binding design constraints and are cited by name in ADRs 0003, 0015, 0016, 0017, and in `docs/TROUBLESHOOTING.md`.
+- **ADR 0003 (`docs/adr/0003-git-native-change-tracking.md`)** is the concrete mechanism: git branches + scoped commits (staged to *exactly* the files wakil wrote — never `git add -A`, so the user's own uncommitted work is structurally protected) + optional GitHub PRs via the `gh` CLI, as an alternative to direct working-tree writes. Notably, the ADR author states plainly: *"I could not find a document or transcript that lays out why git branches/commits/PRs were chosen over an alternative review mechanism (e.g., an in-app diff/approval queue, a database-only staged-changes table...). The choice appears to follow directly from the project's stated thesis and design biases... rather than a recorded comparison of alternatives."* So the git/PR flow is the review mechanism, but no ADR justifies it against alternatives from first principles — useful to know since MCP planning will need to decide whether to preserve the same PR-review checkpoint or design something else.
+- **Command-level gating:** both `wakil ingest` and `wakil enrich` **preview before writing** (`--yes` skips the interactive confirm), and `validate_proposal()` runs as an explicit invariant-enforcement step between "prepare" and "apply" for every proposal (schema-validated frontmatter; a `type:` with no matching schema is a hard stop, never a best-guess write).
+- **Entity resolution decisions** (create/update/skip) are always shown in the preview before anything is written (README, ADR 0008).
+- **`docs/memory-model.md`** (lines ~250-270): frames the same shape generally — "The model proposes; the human decides; the result is a reviewable diff. This is the same shape as the current confirm-before-write flow" — and extends it conceptually to future memory-interference/reconsolidation features ("Reconsolidation as a reviewable proposal").
+- **Follow-on evolution (still in-flight per ADR 0003):** PR #15 (open as of the ADR's writing) moves toward one branch/one PR per source across its whole capture→enrich lifecycle (rather than one per command invocation), records phase landings as PR *comments* (not body rewrites, to avoid clobbering manual edits), and fixes branches to always fork from the resolved default branch.
+- **Practical enforcement example:** `docs/TROUBLESHOOTING.md` (line 154) cites the "never silently rewrite user knowledge" rule directly as the reason a heading-regex was loosened in code rather than bulk-editing existing notes to match — i.e., the rule is applied as an actual engineering tiebreaker, not just documentation.
+
+This is the mechanism an MCP server will need to either preserve (tool calls that stop at "prepare"/preview and require a separate "apply" confirmation, or that always land on a branch/PR) or deliberately and visibly diverge from.
+
+## 5. DEVELOPMENT.md / TROUBLESHOOTING.md entries relevant to interface design, external integrations, or orchestration
+
+`docs/DEVELOPMENT.md` (recurring dev patterns) — entries most relevant:
+- "Split error handling around a git-landing step" (git integration boundary)
+- "A skill's `references/*.md` files are never loaded into the model's context" (skill/context loading contract, relevant if MCP tools also load skill prose)
+- "An ADR's `status: accepted` means the decision was made, not that it was implemented" (useful caveat — several ADRs above, e.g. 0012 `proposed`, 0016/0017, are not fully landed)
+- "Anthropic prompt caching needs an identical prefix through `system` too, not just a matching shared block" and "`thinking.budget_tokens` doesn't exist on `claude-opus-4-8` and later..." (model-client integration gotchas, relevant if an MCP server shares the same model client)
+- "Adding a mandatory model call to the enrichment DAG means auditing every `FakeClient(...)` construction, not just bumping a default" (orchestration/test-surface coupling)
+
+`docs/TROUBLESHOOTING.md` — entries most relevant:
+- "Commit-message emoji was a 'manual commits only' presentation layer, so automatic commits silently lacked it" (git integration surface-area gap between manual/automatic paths — directly relevant if an MCP tool triggers commits programmatically)
+- "Workspace guide file (RESOLVER.md) is silently truncated at 4,000 chars, with no warning" (external/context-file integration gotcha)
+- "CI-only test failures after a command starts requiring a model provider (a local API key masks the gap)" (provider-abstraction test gotcha)
+- "A Pydantic field literally named `register` silently shadows `ABCMeta.register`" (naming-collision gotcha, directly explains the `stance`/`register` split in ADR 0014 — relevant if an MCP tool schema surfaces the same field)
+- "Git worktrees fix the ingest lock race, but wakil's workspace identity isn't worktree-aware" (concurrency/workspace-identity gotcha, relevant if MCP invocations could run concurrently with CLI usage against the same workspace)
+- "Duplicate Source rows under concurrent ingest (content-hash dedup race) — resolved" (concurrency, same relevance)
+
+## 6. README — current stated feature set / command list
+
+Source: `/Users/ebridges/Projects/wakil/README.md`. User-facing commands as currently documented:
+
+- `wakil init &lt;path&gt; --name &lt;name&gt;` — initialize a workspace (`.wakil/` config + SQLite db, registers workspace name)
+- `wakil -w &lt;ws&gt; status` — notes indexed, git state, QMD availability
+- `wakil -w &lt;ws&gt; index` — re-index Markdown after edits
+- `wakil -w &lt;ws&gt; search "&lt;query&gt;"` — QMD + FTS5, `--mode search|vsearch|query`
+- `wakil -w &lt;ws&gt; query "&lt;question&gt;"` — grounded, cited answer from a model; `--include-casual` to include casual-register memories
+- `wakil -w &lt;ws&gt; ingest transcript|article|text &lt;path/url&gt;` — Step 1 capture (`--context`/`-C`, `--commit`/`-c`, `--branch`/`-b`, `--pr`)
+- `wakil -w &lt;ws&gt; enrich &lt;source-id&gt;` — Step 2 enrichment (extraction + always-invoked entity resolution; `--force` to re-run)
+- `wakil -w &lt;ws&gt; sources backfill-abstract` — retroactive title/abstract for old sources (metadata-only)
+- `wakil -w &lt;ws&gt; git summary` / `wakil -w &lt;ws&gt; git history &lt;path&gt;` — git awareness
+- `wakil -w &lt;ws&gt; memory list [--state] [--type] [--register formal|casual]` / `show &lt;id&gt;` / `promote &lt;id&gt; &lt;target&gt;` / `reject &lt;id&gt;` / `archive &lt;id&gt;` — memory lifecycle (`working → candidate → durable → archived`, or `rejected`)
+- `wakil -w &lt;ws&gt; skills list` / `skills which &lt;name&gt; -v` / `skills validate`
+- Global `-w`/`--workspace` flag (omitted = search upward from cwd; a path; or a registered name via `~/.config/wakil/workspaces.yaml`); `WAKIL_WORKSPACE` env var as default.
+- Provider config via env vars: `ANTHROPIC_API_KEY` (default), `OPENAI_API_KEY` + `WAKIL_MODEL` (+ `WAKIL_OPENAI_BASE_URL`) for OpenAI-compatible/local endpoints, `WAKIL_MODEL`/`WAKIL_PROVIDER` overrides.
+- Dev commands: `uv run pytest`, `uv run ruff check`, `uv run pytest -m eval` (live-model skill evals).
+
+Note the README's own framing at the top: "`wakil` is a local-first Python CLI agent for working with a personal Markdown knowledge base (GBrain / Obsidian style): ingest, search, connect, revise, and reason over Markdown notes. Markdown is the source of truth; SQLite is the operational index; git provides history and review. See `PROMPT.md` for the full plan and `TODO.md` for what's next." Both `PROMPT.md` and `TODO.md` exist at the repo root and are worth reading directly for future-phase planning context (`PROMPT.md` especially — it's the source of the "CLI should be the primary interface... should not prevent additional interfaces later" language in point 3).</result>
+<usage><subagent_tokens>59659</subagent_tokens><tool_uses>21</tool_uses><duration_ms>150431</duration_ms></usage>
+</task-notification>
