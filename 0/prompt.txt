@@ -1,0 +1,5 @@
+<task-notification>
+<task-id>w0kv41vs2</task-id>
+<status>failed</status>
+<summary>Background workflow "Implement the wakil skill resolver + CLI per docs/skill-resolution-specification.md" was checkpointed for the background fork but could not be resumed (adopt scriptPath rejected).</summary>
+</task-notification>
