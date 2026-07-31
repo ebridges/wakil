@@ -1,0 +1,1 @@
+I'm struggling to arrive at a nuanced workflow that will allow for HITL but will also allow for uploading 5-10 meeting transcripts at a time (e.g. a typical work day)
