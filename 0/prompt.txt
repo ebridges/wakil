@@ -1,0 +1,1 @@
+if wakil knows that an entity should be updated, then wakil should do the update as part of the process (e.g. enrich) -- no need to create a separate command for that at this time.
