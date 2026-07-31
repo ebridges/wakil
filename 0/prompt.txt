@@ -1,0 +1,109 @@
+<task-notification>
+<task-id>adfd39f3ff7ae3c34</task-id>
+<tool-use-id>toolu_01E5JddAN7fnL4TrxT9G4fGt</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/adfd39f3ff7ae3c34.output</output-file>
+<status>completed</status>
+<summary>Agent "Investigate SCHEMA.md/RESOLVER.md usage vs entity schema catalog" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Now I have a complete picture. Here is the research report.
+
+## Part 1: SCHEMA.md / RESOLVER.md
+
+### 1. Where they're loaded
+
+The only loader is `load_workspace_guides` in `src/wakil/app/ingest_service.py:1351-1363`:
+
+```python
+def load_workspace_guides(config: WorkspaceConfig) -&gt; dict[str, str]:
+    """SCHEMA.md (page shape) and RESOLVER.md (routing) excerpts, when present."""
+    guides = {}
+    for name in ("SCHEMA.md", "RESOLVER.md"):
+        path = config.root_path / name
+        if path.is_file():
+            try:
+                guides[name] = path.read_text(encoding="utf-8", errors="replace")[
+                    :GUIDE_MAX_CHARS
+                ]
+            except OSError:
+                continue
+    return guides
+```
+
+`GUIDE_MAX_CHARS = 4_000` (line 71) — a hard truncation with no warning; `docs/TROUBLESHOOTING.md:52-60` documents this as a known gotcha.
+
+It's called once, in `prepare_enrichment` (line 407: `guides = load_workspace_guides(config)`), then threaded into both `_run_extraction` (line 423) and `_run_entity_resolution` (line 456), which pass it as `guides=guides` into `build_extraction_prompt` (line 606) and `build_resolution_prompt` (line 633).
+
+There's a second, independent SCHEMA.md-specific reader: `transcript_frontmatter_template` (`ingest_service.py:1370-1402`), which regex-scans SCHEMA.md for a fenced yaml block under a heading mentioning "transcript"/"source" and uses it to build the raw-capture frontmatter template (`_transcript_metadata`, line 1457) — this is a *separate* mechanism from `load_workspace_guides`, used only at capture time, not enrichment.
+
+Also, `SCHEMA.md`/`RESOLVER.md` are two of four `SPECIAL_FILES` (`src/wakil/config/settings.py:33`, alongside `README.md`/`AGENTS.md`), surfaced in `wakil status` via `workspace_service.py:196` (`special = [name for name in SPECIAL_FILES if (config.root_path / name).is_file()]`) — purely a presence check, not content.
+
+### 2. How `guides` flows into the prompts
+
+In `src/wakil/llm/prompts.py`, both `build_extraction_prompt` (lines 78-80) and `build_resolution_prompt` (lines 112-114) render guides identically:
+
+```python
+for name, content in (guides or {}).items():
+    purpose = "page shape and metadata" if name == "SCHEMA.md" else "where notes belong"
+    parts += [f"Workspace guidance from {name} ({purpose}):", content, ""]
+```
+
+The raw file content is dumped verbatim (post-truncation) into the prompt with a one-line label — no parsing, no structuring, no cross-referencing against the entity-schema catalog.
+
+### 3. `src/wakil/schema/loader.py` — what `load_entity_schemas` returns
+
+`EntitySchema` (lines 58-89):
+
+```python
+class EntitySchema(BaseModel):
+    type: str
+    directory: str | None = None  # canonical directory, None = no single home
+    category: Category            # identity | document | hybrid
+    page_shape: str
+    fields: dict[str, FieldSpec]
+    origins: dict[str, dict[str, FieldSpec]] = Field(default_factory=dict)
+```
+
+`FieldSpec` (lines 41-55): `required: bool`, `kind: FieldKind` (`string|list|ref|enum|date|bool|int`), `values` (enum only), `ref_type` (ref only).
+
+So per entity type it already carries: `directory` (single canonical directory or `None`), `category`, `page_shape` (a *name*, resolved separately via `resolve_page_shape_template`/`schema/templates/*.md` — narrative-structure prose, not stored on the type itself), and a full required/optional field catalog with kinds/enum values/ref targets, plus per-`origin` additive sub-schemas (source.yaml only). `load_entity_schemas` (lines 159-170) returns `dict[str, EntitySchema]`, resolved across override/kb-local/user/built-in roots, first-root-wins, cached.
+
+There is **no free-text "how to use this type" field** on `EntitySchema` itself — only the comment-header prose in each YAML file (author-facing, not loaded into the model). The narrative-guidance role is split off into `page_shape` templates (`schema/templates/*.md`, resolved by `resolve_page_shape_template`, lines 252-262), which do carry prose body-structure guidance, separately from `EntitySchema`.
+
+In `src/wakil/llm/prompts.py`, `describe_entity_types_full` (lines 185-206) and `describe_entity_types` (lines 165-182) already mechanically render, per type: directory, category, page_shape name, and the full required/optional field list with kinds — this is exactly the "page shape and metadata" content `guides["SCHEMA.md"]` is separately, redundantly supplying as free text.
+
+### 4. Real SCHEMA.md/RESOLVER.md content vs. the YAML catalog
+
+- `tests/fixtures/kb/SCHEMA.md` is a 3-line stub (`# Schema\n\nPages use YAML frontmatter with type, and name (entities) or title (documents).`) — never exercises truncation, and predates/duplicates what the entity-schema catalog now expresses structurally.
+- **No RESOLVER.md exists anywhere in this repo** (no fixture, no docs example file) — the RESOLVER.md discussed at length in `docs/entity-resolution.md` is a critical read of an *external, real user's own vault's* RESOLVER.md, used as design research, not something wakil ships.
+- `docs/entity-resolution.md:23-45` documents that real RESOLVER.md as a **ten-rule priority waterfall** (first-match-wins) that is far more than a directory lookup: rule 1 is a sensitivity override that pre-empts everything else; rule 5 vs. 6 (project vs. concept) is disambiguated by an explicit owner/due-date test with a `split` escape hatch for mixed content; there's a dedicated linking-convention rule (absolute paths only); and (per `src/wakil/skills/note-routing/SKILL.md:56-81`, wakil's own design response to this) RESOLVER.md is expected to carry **subject-matter subdirectory routing** ("file by primary subject, not format/source") and a **sui-generis-synthesis exception**, none of which a flat `directory:` string can express.
+- The critical read also documents real RESOLVER.md failure modes that are judgment gaps, not schema gaps: rule 8 (`organization`) is structurally pre-empted by rule 6 (`concept`) because of first-match-wins ordering (finding #2); the document claims total authority but only routes ~10 of ~20 real top-level directories (finding #5); `inbox/` is prescribed but doesn't exist (finding #6); no stated raw-to-synthesized promotion threshold for meetings vs. sources (finding #9).
+- Conclusion from direct evidence: **workspace placement routing is not fully covered by `schema.directory`.** `schema.directory` gives a single canonical directory per *entity type* (deterministic, code-owned — `note-routing/SKILL.md:31-40` explicitly calls this "not a judgment call"). RESOLVER.md's job, per `note-routing/SKILL.md:42-54`, is explicitly scoped to **everything that is not a single resolved entity** — raw sources, synthesized notes, journal entries, meeting records — and covers subject-based sub-routing, sensitivity overrides, naming conventions, and hard-call disambiguation that the YAML schema catalog has no field for at all.
+
+### 5. Relevant ADRs
+
+Checked all 8 ADRs in `docs/adr/`; **none mention `SCHEMA.md`/`RESOLVER.md`** by name. The closest is ADR 0007 (`docs/adr/0007-markdown-source-of-truth-sqlite-operational-store.md`), which establishes Markdown as source of truth and frontmatter as an opaque blob in SQLite — relevant context (workspace content stays workspace-owned) but doesn't address these two files specifically.
+
+The actual design history lives in `docs/ingestion-model.md:315-324` and `docs/ingestion-refactor-spec.md:31-35`: entity schema was deliberately moved "from documentation to an enforced, data-driven contract" (`schema/entities/*.yaml`) as a *replacement* for SCHEMA.md's frontmatter-shape role for **new writes only** — while `load_workspace_guides`'s SCHEMA.md/RESOLVER.md-reading behavior shipped as a companion, still-freeform mechanism in the same refactor ("that split also shipped ... SCHEMA.md/RESOLVER.md-aware guidance folded into the enrichment prompt (`load_workspace_guides`)"). So the codebase already contains one half-completed migration (schema shape → YAML) sitting alongside the still-freeform half (SCHEMA.md's remaining role, plus all of RESOLVER.md), with no ADR yet recording this as a deliberate philosophy split.
+
+## Part 2: guidance for handling attached prep/related documents
+
+### 6. `src/wakil/skills/transcript/SKILL.md` — current content on related/attached context
+
+Full file read (52 lines). The only line addressing external/attached context is:
+
+&gt; "Attribute claims to speakers. ... Use the user-provided context (attendees, company, purpose) to resolve first names and pronouns to full names." (line 16-17)
+
+And for KB-search related notes (a different mechanism, `related_notes: list[tuple[str, str]]` from `search_workspace`, not attached documents):
+
+&gt; "Link entities — people, companies, concepts, projects, prior meetings — to the existing related notes with [[wikilinks]] where they genuinely match; mention entities without a matching note in plain text and leave their page-creation decision to the entity-resolution step." (lines 32-35)
+
+There is **no guidance distinguishing an attached prep/related document from the transcript itself** — how to weigh it, cite it, or resolve conflicts between it and the transcript. The mechanism that actually produces "attached documents" is `src/wakil/app/context_references.py`: `wakil enrich`'s `--context`/`--context-file` CLI flags (`src/wakil/cli/main.py:377-394`) support `@file:PATH` / `@url:URL` references, expanded via `expand_piece` and appended as a flat `"\n\n--- Attached Context ---\n\n"` block (line 70) into a single `context: str`. That string flows through `CaptureProposal.context` → `EnrichmentProposal.context` and is rendered in `prompts.py` generically as `"User-provided context about this source:"` (lines 60-61, 110-111) — undifferentiated from short user-typed context strings, with no separate labeling for file/URL-sourced attachments and no skill-level guidance on how transcript extraction should treat them differently from the primary transcript text.
+
+### 7. `entity-enrichment/SKILL.md` and `note-revision/SKILL.md`
+
+- **`entity-enrichment/SKILL.md`** (full file read): has a "Send existing knowledge as context, not a rehash" section (lines 101-112) that instructs checking "what the knowledge base already knows about the entity" via `related_notes` before writing — but this is about resolving a mention against an entity's *existing page* via KB search, not about reconciling a note against a specific *attached* companion document supplied for one ingest. No language about attached/companion documents.
+- **`note-revision/SKILL.md`** (full file read): has the closest relevant machinery — "The three-tier dedup heuristic" (lines 87-107, exact/fuzzy/conflicting match classification) and "Resolving conflicting sources" (lines 109-124, source-precedence ordering: user statements &gt; note's existing State &gt; Timeline entries &gt; external sources) for merging facts from multiple sources into an *already-existing* note. This is about merging into an existing KB page over time, not about a single ingest call reconciling a transcript against a specific attached prep document passed alongside it in the same call. No mention of "attached," "prep," or `--context-file`.
+
+**Summary of gap**: no SKILL.md file currently contains guidance specific to "here is a transcript plus a specific attached prep/related document supplied for this one extraction — here's how to use the attachment (weight it as background vs. primary source, cite it, resolve conflicts with the transcript)." The closest analogous judgment (source-precedence, conflict handling) exists only in `note-revision/SKILL.md`, scoped to multi-source merges into existing pages over time, not to a single enrichment call's own attached-context input.</result>
+<usage><subagent_tokens>77071</subagent_tokens><tool_uses>42</tool_uses><duration_ms>158915</duration_ms></usage>
+</task-notification>
