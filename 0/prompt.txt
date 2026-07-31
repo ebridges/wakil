@@ -1,0 +1,1 @@
+so if it uses the mcp-coordinator skill (e.g. via `/mcp-coordinator`) then it will deterministically use the MCP?
