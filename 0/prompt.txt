@@ -1,0 +1,1 @@
+Create and run a manual smoke test of `wakil qmd sync` / `wakil init` on a fresh workspace
