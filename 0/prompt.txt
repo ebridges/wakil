@@ -1,0 +1,5 @@
+Next, let's integrate the skill resolver logic with the ingestion code.
+
+The resolver is real but not yet load-bearing. `src/wakil/skills/resolver.py` implements the full precedence/override/validation logic and is exposed via `wakil skills list|which|validate`. But actual skill execution — `src/wakil/app/ingest_service.py` → `wakil.llm.skill_loader.load_skill()` — still reads only the flat legacy `src/wakil/skills/` directory and has no awareness of overrides at all (its own docstring says extension happens "by forking and editing them, not by runtime discovery," directly contradicting the resolver spec). 
+
+Consequence: right now, a `kb-local` override under `<kb-root>/skills/<name>/` is inspectable (`wakil skills which <name>` will correctly report it as selected) but has no effect on `wakil ingest`/`wakil enrich` behavior until the resolver is wired into `ingest_service.py`.
