@@ -1,0 +1,24 @@
+<task-notification>
+<task-id>a0cecf364e8e0c77e</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/a0cecf364e8e0c77e.output</output-file>
+<status>completed</status>
+<summary>Agent "Council Member C (Ada): Round 2 cross-exam" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Disagree: Member A
+
+Member A's claim that hand-labeling is "a follow-up test, not a prerequisite" treats grader self-consistency as sufficient evidence to proceed with edits. But my own Round 1 skeleton had a latent flaw here: I wrote F = 1 - P(g(f(x,seed1),seed2)=pass) as if g were the ground-truth compliance function. It isn't — g is a fallible proxy. 5/5 identical verdicts on a frozen transcript establishes only that g is a deterministic function of its input, not that g(x) tracks the property the rubric claims to measure. Precision and accuracy are orthogonal properties of an estimator; conflating them is the exact error Member B names.
+
+### Strengthened by: Member B
+
+Member B's rebuttal exposes a real gap in my decomposition, not just Member A's: bucket (a) "100% failure = deterministic content gap, fix via prose edit" smuggles in an unstated assumption that g is valid on that input class. That assumption is empirically untested. A minimal validity check (5-6 hand-labeled scenarios, concentrated on the deterministic-failure bucket where engineering effort — SKILL.md edits — is about to be spent) is cheap insurance against optimizing against a miscalibrated instrument.
+
+### Position Update
+
+I still hold that reruns come first — they're cheap and correctly triage stage (a) vs (b)/(c) sources of variance, which is a distinct and necessary partition. But I concede my Round 1 framing implicitly treated the deterministic bucket as ground-truth once reruns confirmed 100% failure. It doesn't. Revised ordering: rerun-classify all 10 (cheap, mechanical) → before editing SKILL.md for the deterministic subset, run Member B's small-scale grader validity check on that subset only (not all 20) → then edit. Variance subset stays frozen-and-regraded per my original plan.
+
+### Evidence Label
+
+mechanistic / heuristic</result>
+<usage><subagent_tokens>11297</subagent_tokens><tool_uses>0</tool_uses><duration_ms>17444</duration_ms></usage>
+</task-notification>
