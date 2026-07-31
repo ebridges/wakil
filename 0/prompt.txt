@@ -1,0 +1,42 @@
+Here's my responses to your points, take these into consideration and create a plan using ultracode that can be used to build those out.  To speed things up, consider working in parallel across many agents on different worktrees.  Create pull requests for all work.
+
+**You can commit the changes currently in the working tree, I've thrown away changes that can be ignored**
+
+**Be sure to document significant decisions we make here via the ADR process**
+
+---
+
+1. Confirmed: adding `@` linked files to `related_files` will facilitate back linking.  And, by adding guidance to the skill for how to handle them will take care of the other concern.
+
+---
+
+2. Let's move forward with introducing the model call into `prepare_capture` / `apply_capture` for "title" and "abstract" frontmatter fields (including updating the schema for "source" types).  Rationale: I don't want to solely depend on the filename to gather context when searching for relevant notes -- it's a user supplied value and limited in information.  And, I'd like that stored with the source in case I ever need to re-run ingestion.  This will also require backfilling the missing "abstract" property on existing sources; but no need to rerun enrichment at this time.
+
+**Note on Title Quality**
+    Ingested note titles should be:
+    - Prefixed with the date of the ingest: yyyy-mm-dd
+    - Descriptive enough to identify the page from a search result
+    - Short enough to scan in a list (under 60 characters)
+    - NOT sentences ("Meeting with Pedro" not "Meeting with Pedro about the new deal structure")
+    - NOT generic ("Pedro Franceschi" not "Person Page")
+
+
+`_candidate_entity_notes` returns a long list of files that do actually end up in system context.  I'd like to avoid that.
+
+---
+
+3. Let's rely on a library for stopwords rather than maintaining our own.  I think NLTK (Natural Language Toolkit) is a good option?  
+
+A separate point I make however is that it also picks up words from small talk (for example, in that transcript there's a side conversation about what kind of food do we like so that leads to words like "Indian", "Steak", etc. making their way into the list of candidates), and also the "Attached Context" delimiter from the context.
+
+---
+
+4. Let's go ahead and add that specific guidance for transcript skills.  Further, add guidance to the other skills on how they should handle `@` linked files.  Ask for guidance on how to integrate that to other skills.
+
+---
+
+5. Let's move forward with retiring a dependency in wakil on `SCHEMA.md` -- makde the code changes necessary to do that.
+
+I'd like to formalize a strategy for migrating away from dependency within wakil on `RESOLVER.md` as well.  I think we are lacking more general guidance within wakil around conventions like that.  There are a number of other rules that exist already in `~/Projects/kb/.hermes/skills/[_brain-filing-rules.md|_output-rules.md]` that I'd like to migrate into wakil, with the ability for them to be overridden within a local KB.
+
+---
