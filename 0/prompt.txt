@@ -1,0 +1,1 @@
+determine what kind of release the next one should be (major, minor or patch) and create a new release
