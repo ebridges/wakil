@@ -1,0 +1,2 @@
+When I ran it, I got this warning: 
+> warning: people/edward-bridges.md: doesn't match the expected H1 / 'Timeline / Log' shape — update skipped, left unchanged
