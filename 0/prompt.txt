@@ -1,0 +1,3 @@
+ultracode an implementation of @docs/skill-refactor.md and @docs/skill-resolution-specification.md 
+
+This should be done as one (or more) pull requests
