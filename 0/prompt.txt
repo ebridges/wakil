@@ -1,0 +1,1 @@
+can we setup the described hermes configuration local to  ~/Projects/kb-personal ?
