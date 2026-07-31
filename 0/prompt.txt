@@ -1,0 +1,13 @@
+Update on confirmation:
+
+62 of 114 now confirmed fixed (24 from round 1 + 38 new this round), including:
+- All 4 direct/high-confidence duplicate-stub reproductions in cluster A (11/22/63, coping saw, generator shed, moxon vise) plus 5 extrapolated with lower confidence from the same code path
+- Most of cluster B's sparse-source declines — enrich now genuinely writes files where it previously wrote zero, not just a warning
+
+47 still open, each with a fresh feedback entry explaining exactly why the merged fix didn't close it. The pattern worth your attention: several fixes closed the specific mechanism originally reported but left adjacent, structurally-similar paths untouched:
+
+- #36's stub-suppression (PR #51) matches by exact subject/slug — so id=16 (Antifragile) still spawns an unrelated concepts/antifragility.md stub alongside the now-correctly-deduped book, and id=11 (Understanding Wood) now avoids the original duplicate but produces a different stray type:source file instead. The 12 elektrum dated-journal duplicates (ids 96–107) all still reproduce for the same root reason: a journal entry's date/topic-specific slug never matches the project entity's own slug, so the suppression check never fires.
+- ids 20–23 confirmed still-open exactly as the brief predicted — #39's confidence field only reaches the update path, not fresh action=create books. Not a regression, a known scoped gap.
+- id=3 (no issue was filed for it): didn't reproduce with the original trigger content, but the same type:source-outside-sources/clippings/ mechanism fired twice with different synthetic content this round — genuinely still live, just content-dependent.
+
+5 still open (unchanged, no fix exists yet — ids 4, 10, 47, 51, 94), matching the brief.
