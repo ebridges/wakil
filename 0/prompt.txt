@@ -1,0 +1,1 @@
+ensure there's UI feedback on the download to manage the user's expectations that it'll take a while.  if qmd's progress bar can be simply displayed that would be a helpful addition
