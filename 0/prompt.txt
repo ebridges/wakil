@@ -1,0 +1,1 @@
+Wakil is not including the emoji-prefix on all commit messages (e.g.: in ~/Projects/kb I see this commit: `* 2026-07-20 51237c27 - wakil source: add mosaic offer sync ian gutwinski`  provide a bug fix for that
