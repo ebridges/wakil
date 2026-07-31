@@ -1,0 +1,1 @@
+create a single collection by default when running `wakil init` (with a flag to skip).  And, `wakil qmd sync` should propose creating a single collection when none exist.
