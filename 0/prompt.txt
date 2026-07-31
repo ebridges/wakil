@@ -1,0 +1,184 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+
+This is a long, multi-phase session on the `wakil` project (`/Users/ebridges/Projects/wakil`, a local-first Python CLI for a personal Markdown knowledge base) tested against a real KB at `/Users/ebridges/Projects/kb`. In chronological order, the user's explicit requests were:
+
+   a. Help understand how to integrate wakil with "Hermes" (their separate agent orchestrator, Nous Research's Hermes CLI) — asked for guidance/correction on architecture, wanting Hermes to use wakil's skill-override mechanism so changes are clearly diffable via git.
+   b. "Analyze and provide a critical analysis of the enriched outputs -- I'd like to see if there are any further improvements to wakil to bring it into parity with the legacy skills" comparing a legacy meeting-ingestion-skill output vs. wakil's own enrich output for the same source.
+   c. Add `.whisper` audio-transcript format support to `wakil ingest transcript` (previously it just dumped raw zip bytes into the note body).
+   d. Fix frontmatter conventions: *"The 'origin' frontmatter field should be 'transcript' (i.e. an enumerated field), and the URL should be a 'file:' url to the path relative to the root of the KB of the 'whisper' file. Generally, all file paths should be relative to KB-repo root and not absolute."*
+   e. Express (not implement) a plan for porting legacy skill nuance into wakil's enrich-time skills.
+   f. Directly asked: *"The skills/[article|text|transcript]/SKILL.md files seem way too short... By keeping the changes small, do you expect to capture the nuance..."* — pushing back on scope-sizing of a proposed skill-prose fix; wanted honest re-assessment.
+   g. Re-run enrich after the schema-authority changes and re-analyze for parity again (explicit follow-up instruction issued mid-turn).
+   h. Explored (via a forked `/btw` side-conversation) "what if wakil skipped the KB's schema.md entirely and used only its own built-in schema" — then directed: *"let wakil's built-in schema be the sole authority for field shape and validation... shrink schema.md down to a much smaller, prose-only document... let's also discuss integrating into wakil: - the non-schema parts of schema.md - the non-entity resolution that RESOLVER.md handles"*
+   i. In Plan Mode, chose: implement all 4 parts (A: schema resolver w/ kb-local override; B: extraction gets parsed schema; C: deprecate schema.md's YAML-reducible parts into skills; D: fold RESOLVER.md's non-routing content into note-routing) at once, and add a kb-local override path for entity schemas (mirroring the skills resolver) rather than keeping schema global-only.
+   j. Edited the plan directly: Part C should mean *"The KB's schema.md gets ignored [for] the rules which don't get reduced to YAML in those sections should be migrated into the relevant skills in wakil."*
+   k. After implementation, re-run enrich and re-analyze again (repeat of request g, applied to the new state) — user pasted this as a mid-turn system-relayed message.
+   l. On the resulting findings: *"Yes fix #2 [entity-link mismatch]... RE: #1/#3 [sensitivity classification / page-shape] - wakil needs to be more nuanced... let's think through the shape hint of 'meetings'. ask me questions to ensure that I understand the problem that you're describing... Run an agent in the background to fix #2 while we discuss the rest of it."*
+   m. Answered the clarifying questions about mechanism vs. rule; then: *"Thing 1: let's introduce another override mechanism for page-shape. I'm fine with it being a part of the schema definition, or we could also maintain a set of templates within wakil keyed by entity type, and allow the KB to override with its own templates. Help me weigh the tradeoffs of having them coupled vs. decoupled. Thing 2: help to better understand what decision you need from me on this."*
+   n. Provided the per-type single-occurrence/accumulating-subject classification for all 7 ambiguous types, and: *"Thing 1: Let's run with hybrid"* — directing implementation of a hybrid design (page_shape as a schema field naming which template to use; template *bodies* resolved independently, kb-overridable per-shape not per-type).
+   o. Most recently: *"how does wakil know to update a note (e.g. when it's a compiled truth doc) vs. just writing it out (when it's a single occurrence)?"* — a genuine question, answered by investigating the code and finding wakil's automatic pipeline was purely additive (never edited existing files).
+   p. Final explicit directive triggering the current body of work: *"if wakil knows that an entity should be updated, then wakil should do the update as part of the process (e.g. enrich) -- no need to create a separate command for that at this time."*
+
+   No explicit security/sensitive-data constraints were stated by the user beyond the project's own standing `CLAUDE.md` principles (already in effect throughout: "Show reviewable diffs for knowledge-base modifications," "Do not silently rewrite user knowledge," never overwrite existing files without explicit confirm, treat sensitive content carefully). No destructive actions were taken against the real KB — all live verification runs against `~/Projects/kb` declined the final write confirmation (`echo "n" | ...`) except for two earlier, user-visible enrich applies that happened before the entity-update feature existed (writing `sensitive/assessments/...md` and an earlier draft — both reviewed transparently with the user, not files this feature touches).
+
+2. Key Technical Concepts:
+   - wakil's two-step ingest architecture: Step 1 capture (`wakil ingest`, fully deterministic, no model) → Step 2 enrichment (`wakil enrich`, a fixed code-sequenced DAG of model calls).
+   - The enrichment DAG, now 3 nodes: (1) extraction — `_run_extraction`, produces `ExtractionOutput`/`proposed_note`; (2) entity resolution — `_run_entity_resolution`, produces `EntityResolutionOutput` (create/update/skip per entity), followed deterministically by stub-building, link-reconciliation, and now entity-updates; (3) **entity updates** (new this session) — `_run_entity_updates`, produces `EntityRevisionOutput`, merged deterministically into existing files.
+   - Skill resolution pattern (`wakil.skills.resolver`): ordered roots (WAKIL_SKILL_PATH → kb-local → user → builtin), whole-directory/whole-file shadowing, first-match-wins, no partial overrides, no cross-root merging — this exact pattern was mirrored twice more this session (entity schema resolution, page-shape template resolution).
+   - Entity schema system (`src/wakil/schema/entities/*.yaml`, `src/wakil/schema/loader.py`): `EntitySchema` Pydantic model with `type`, `directory`, `category` (identity/document/hybrid — drives `name:`/`title:` frontmatter rule), `page_shape` (NEW — drives narrative body structure, a genuinely separate axis from `category`), `fields: dict[str, FieldSpec]`, `origins` (source-only sub-schemas).
+   - Page-shape system (NEW): two body-shape templates — `compiled-truth-timeline` (accumulating subject: Compiled Truth prose + append-only Timeline/Log) and `single-occurrence` (one dated event: Summary/Key Decisions/Action Items/Discussion Notes, sections optional per type). Templates live in `src/wakil/schema/templates/*.md`, resolved via the same 3-tier precedence pattern (no WAKIL_SCHEMA_PATH-equivalent override tier yet, deliberately deferred).
+   - Real entity-page structure discovery: actual files have **no explicit `## Compiled Truth` heading** (implicit prose after H1); the only reliable structural anchor is `## Timeline / Log`; files also carry a trailing block of auto-generated flat backlink bullets (`- **date** | Referenced in [title](path)`) after the dated `### date — ...` entries.
+   - "Never silently overwrite" / staleness-guard pattern, first established in `schema_migrate_service.apply_migrations` (re-read immediately before write, skip if content changed since planning) — now mirrored in `apply_enrichment` for `entity_updates`.
+   - Rich console markup escaping (`rich.markup.escape`) — needed whenever untrusted/bracket-containing dynamic text (e.g., wikilinks `[[path|display]]`) is interpolated into an f-string passed to `console.print()`, since Rich parses bare `[...]` as style tags.
+   - `FakeClient` test pattern: a scripted-response stand-in for `ModelClient`, queue-based, asserts the queue isn't empty on each `.complete()` call — used across `test_ingest_service.py` and `test_entity_resolution.py`, both needed updating for the new 3rd DAG-node call.
+   - Pydantic contracts pattern (`wakil.llm.schemas`): every model call has a matching `BaseModel` contract; `model_json_schema()` is injected into the system prompt so what the model sees and what gets validated never drift; `complete_with_contract()` does validate + one retry + visible failure (`ModelContractError`).
+   - `uv run pytest -q`, `uv run ruff check`/`uv run ruff format` as the standard verification loop throughout.
+   - A **known, pre-existing baseline of 19 test failures** (in `tests/unit/test_skills_resolver.py`, `tests/integration/test_skills_cli.py`) caused by a concurrent agent's unrelated in-flight work on `src/wakil/skills/models.py` (a `description` field made required without updating fixtures) — explicitly NOT to be touched/fixed, only used as a baseline to confirm no *new* regressions.
+
+3. Files and Code Sections:
+
+   - **`src/wakil/app/ingest_service.py`** (most heavily modified file this session):
+     - Whisper parsing: `parse_whisper_transcript()`, `_read_whisper_metadata()`, `_whisper_recorded_at()`, `_strip_filler_words()`, `_FILLER_WORD_RE`, `_WHISPER_EPOCH`.
+     - `_relative_origin(config, file)` — KB-root-relative path helper.
+     - `_LEADING_DATE_RE` — strips leading dates from filenames before humanizing into titles.
+     - `_candidate_entity_notes()` (from earlier in session, unaffected this phase).
+     - `_reconcile_entity_links()`, `_WIKILINK_RE`, `_deslug()`, `_normalize_link_path()` — added by background agent + my `.md`-suffix fix; corrects extraction's own wikilinks to match entity-resolution's authoritative target, exact-match-only, warns rather than silently rewriting.
+     - **NEW this phase**: `EntityUpdate` dataclass:
+       ```python
+       @dataclass
+       class EntityUpdate:
+           target_note_path: str
+           old_content: str
+           new_content: str
+       ```
+     - `EnrichmentProposal.entity_updates: list[EntityUpdate] = field(default_factory=list)` added.
+     - `EnrichmentResult.stale_updates_skipped: list[str] = field(default_factory=list)` added.
+     - `_H1_RE`, `_TIMELINE_HEADING_RE` regexes; `_insert_timeline_entry(timeline_section, entry)`; `_merge_entity_note(old_content, revision, today) -> str | None` (the core, highest-risk merge logic — returns None if H1/Timeline-heading anchors aren't found, preserves H1 verbatim, replaces only the top section, prepends timeline entries, merges frontmatter delta, bumps `updated` if already present).
+     - `_run_entity_updates(config, client, text, proposal)` — DAG node 3: filters to `action=="update"` AND `schema.page_shape == "compiled-truth-timeline"` AND target exists on disk; batches into one `build_revision_prompt` call using `load_skill("note-revision", config.root_path)` as system prompt; applies merge per `has_update=True` revision.
+     - Wired into `_run_entity_resolution()`: `_reconcile_entity_links(config, proposal); _run_entity_updates(config, client, text, proposal)`.
+     - `validate_proposal()` extended: validates each `entity_update.new_content`'s frontmatter against schema (hard-stop on failure), same as creates.
+     - `apply_enrichment()` extended: fixed `validate_proposal(proposal)` → `validate_proposal(proposal, config.root_path)`; added a staleness-guarded write loop for `entity_updates` (re-read, compare to `old_content`, skip+record in `stale_updates_skipped` if changed, else write and append to `files_written`); `EnrichmentResult(...)` construction updated with `stale_updates_skipped=stale_updates_skipped`.
+     - Imports updated: `from wakil.llm.prompts import build_extraction_prompt, build_resolution_prompt, build_revision_prompt`; `from wakil.llm.schemas import (..., EntityRevision, EntityRevisionOutput, ...)`.
+
+   - **`src/wakil/llm/schemas.py`**:
+     ```python
+     class EntityRevision(BaseModel):
+         target_note_path: str = Field(description="Must match one of the update targets given.")
+         has_update: bool = Field(description="False when the mention is too light to change the page — no compiled_truth/timeline_entry/frontmatter_updates needed.")
+         compiled_truth: str | None = Field(default=None, description="For has_update=True: the full re-synthesized top section — the union of what was already there plus what's new, never just the new source's content. Do NOT include the '# Title' heading line itself (kept as-is) or the 'Timeline / Log' heading; only the content between them.")
+         timeline_entry: str | None = Field(default=None, description="For has_update=True: one new dated entry to prepend to the Timeline, e.g. '### 2026-07-16 — what happened\\n- detail'. Existing entries are never touched.")
+         frontmatter_updates: dict | None = Field(default=None, description="Only the frontmatter fields that should change.")
+
+     class EntityRevisionOutput(BaseModel):
+         revisions: list[EntityRevision] = Field(default_factory=list)
+     ```
+     Important note: `EntityResolution.proposed_frontmatter` (DAG node 2's field) remains vestigial/unused — DAG node 3 computes its own independent `frontmatter_updates` with full target-note context instead of reusing that field.
+
+   - **`src/wakil/llm/prompts.py`**:
+     - `build_extraction_prompt()` gained `entity_types`/`page_shapes` params.
+     - `describe_entity_types_full()` — renders every type's directory/category/`page_shape`/full field list.
+     - `describe_page_shapes(page_shapes: dict[str,str])` — renders each distinct shape's template body once.
+     - **NEW**: `build_revision_prompt(text, extraction_summary, targets: list[tuple[str,str]], context=None)` — batches all update targets, inlines each target's FULL current content (per note-revision's "read in full before writing" rule).
+
+   - **`src/wakil/schema/loader.py`**:
+     - `EntitySchema.page_shape: str` field added (required).
+     - Schema resolver additions from Part A: `SchemaRoot`, `SchemaResolutionContext`, `resolve_schema_roots()`, `default_schema_context()`, `resolve_entity_schema()`.
+     - **NEW this phase**: `DEFAULT_TEMPLATE_DIR`, `_template_roots(kb_root)`, `resolve_page_shape_template(shape, kb_root=None) -> tuple[str, SchemaRoot]`.
+
+   - **`src/wakil/schema/entities/*.yaml`** (all 13 files) — each got a `page_shape:` line inserted after `category:`. Final mapping: `compiled-truth-timeline` = person, company, project, concept, journal, assessment, index; `single-occurrence` = meeting, reflection, idea, organization, meta, source.
+
+   - **`src/wakil/schema/templates/compiled-truth-timeline.md`** and **`single-occurrence.md`** (NEW files) — built-in default body-shape templates with skeleton examples and discipline notes.
+
+   - **`src/wakil/skills/note-conformance/SKILL.md`** — "Page shape by category" rewritten to "Page shape by `page_shape`, not by category," explaining the axis correction (category ≠ shape) and citing organization-vs-project as the counter-example; still has "Citations" section from Part C.
+
+   - **`src/wakil/skills/transcript/SKILL.md`**, **`article/SKILL.md`**, **`text/SKILL.md`** — citation-convention bullets from Part C retained; the meeting-specific page-shape bullet in `transcript/SKILL.md` replaced with a generic pointer to the type's own `page_shape` (since it's now delivered structurally via the prompt, not needed as skill prose).
+
+   - **`src/wakil/skills/note-routing/SKILL.md`** — Part D additions retained ("Default judgment patterns for hard filing calls," "Sensitive content," "Naming defaults").
+
+   - **`src/wakil/ui/console.py`**:
+     - Added `import difflib`, `from rich.markup import escape`.
+     - Fixed the warning-corruption bug: `console.print(f"[yellow]warning:[/yellow] {escape(warning)}")`.
+     - `print_enrichment_result()` extended to print `result.stale_updates_skipped` (escaped).
+     - **NEW**: `_print_entity_update(update: EntityUpdate)` — unified diff via `difflib`, rendered as `Syntax(diff_text, "diff", ...)` in a yellow-bordered `Panel` titled `f"UPDATE {update.target_note_path}"`, 2000-char truncation.
+     - `print_enrichment_proposal()` extended with an "Updates to existing pages (N):" section calling `_print_entity_update` per update, placed between stub-entities and proposed-note sections.
+     - `print_schema_list`/`print_schema_which` (from Part A) retained.
+
+   - **`src/wakil/cli/main.py`** — `wakil schema list`/`wakil schema which <type>` commands (Part A); `.whisper` help text; `validate_proposal(proposal, kb_root=config.root_path)` call site fix.
+
+   - **`src/wakil/schema/validate.py`** — `schema_dir` param renamed to `kb_root` throughout (`known_types`, `validate_frontmatter`, `schema_for`).
+
+   - **`docs/ingestion-refactor-spec.md`** — struck through the stale "Workspace-runtime plugin/extension loading" deferred-item bullet, replaced with a note that it's now superseded.
+
+   - **`tests/unit/test_ingest_service.py`** (heavily modified):
+     - `REVISION_JSON = {"revisions": []}` added as FakeClient's 3rd default payload.
+     - `FakeClient.__init__` default: `[MODEL_JSON, RESOLUTION_JSON, REVISION_JSON]`.
+     - `test_enrichment_analyzes_and_links`: assertion updated `len(client.calls) == 2` → `== 3`, added revision-call assertions (`"note-revision" in revision_system`, `"Works on claims automation" in revision_prompt`).
+     - All `reconcile_*` tests updated to append `REVISION_JSON`/`{"revisions": []}` as a 3rd scripted response.
+     - `test_extraction_retry_then_success`: 4th response added, call count 3→4.
+     - `test_enrichment_unsafe_note_path_falls_back_to_drafts`: 3rd response appended.
+     - **NEW test constant**: `REAL_SHAPED_PERSON` — a realistic entity-page fixture matching actual production shape (no explicit `## Compiled Truth` heading, has `## Timeline / Log`, has a trailing auto-backlink bullet).
+     - **NEW tests** (9 total, task #13): `test_merge_entity_note_replaces_top_section_preserves_h1_and_prepends_timeline`, `test_merge_entity_note_only_changes_specified_frontmatter_fields`, `test_merge_entity_note_returns_none_for_unexpected_shape`, `_write_person()` helper, `test_entity_update_applies_when_model_says_has_update`, `test_entity_update_skipped_when_model_says_has_update_false`, `test_entity_update_skipped_for_single_occurrence_shape_type`, `test_entity_update_warns_when_target_missing_on_disk`, `test_apply_enrichment_skips_stale_entity_update_without_clobbering`, `test_validate_proposal_rejects_entity_update_with_invalid_frontmatter`.
+     - Import block updated: added `EnrichmentProposal`, `EntityUpdate`, `_merge_entity_note` from `wakil.app.ingest_service`; added `from wakil.llm.schemas import EntityRevision`.
+
+   - **`tests/unit/test_entity_resolution.py`** — `_enrich()` helper signature extended: `def _enrich(workspace, kb_path, entities, extraction=None, revisions=None)`, now always appends a 3rd response (`revisions or {"revisions": []}`).
+
+   - **`tests/unit/test_schema_loader.py`** — extensively updated for Part A (resolver tests) and the `page_shape` field addition (7 ad hoc yaml fixtures needed `page_shape:` added); new tests `test_shipped_page_shapes_resolve`, `test_page_shape_template_rejects_unknown_shape`, `test_kb_local_page_shape_template_overrides_builtin_without_touching_fields`.
+
+   - **`tests/unit/test_console.py`** (NEW file) — `test_warning_containing_wikilinks_is_not_mangled_by_markup` (uses `capsys`, sets `console.width = 200` to avoid line-wrap splitting assertions).
+
+   - **`/Users/ebridges/.claude/plans/i-m-trying-to-arrive-whimsical-backus.md`** — Plan-mode artifact, most recently holds the "Shift field-shape authority to wakil's built-in schema" plan (Parts A-D). Not touched during the entity-update feature work (that was done in normal/auto mode, not Plan Mode).
+
+4. Errors and fixes:
+
+   - **`declare -A` / associative-array bash failures** when bulk-inserting `page_shape:` into yaml files — fixed by avoiding associative arrays entirely, using a plain `insert_shape()` shell function called once per file.
+   - **`mv`/`>` noclobber prompts** interrupting the yaml-editing script (zsh `noclobber`) — fixed with `mv -f` and `>|` to force.
+   - **5 test failures in `test_schema_loader.py`** after adding kb-local override resolution — tests were passing a raw directory as `schema_dir` positionally, which now means `kb_root` (a workspace root, not a raw schema dir) — fixed by rewriting tests to use explicit `SchemaResolutionContext`/`_isolated_context()` helper, mirroring `test_skills_resolver.py`'s style.
+   - **`test_shipped_schemas_load_and_cover_expected_types`-adjacent caching test became semantically confusing** (`load_entity_schemas(DEFAULT_SCHEMA_DIR)` no longer means what it used to) — simplified to just `load_entity_schemas() is load_entity_schemas()`.
+   - **`page_shape` required-field breakage**: after adding it as a required Pydantic field, 5 tests in `test_schema_loader.py` broke with "Field required" errors that MASKED the tests' actual intended validation errors (Pydantic's missing-required-field check runs before custom `model_validator`s) — fixed by adding `page_shape: <value>\n` to every ad hoc yaml test fixture.
+   - **Rich lint false positive**: `wakil skills lint note-conformance` flagged `single-occurrence`/`compiled-truth-timeline` (backtick-wrapped kebab-case) as "looks like a catalog skill name but is not in the live builtin catalog" — confirmed as a REAL failing test (`test_skill_lint.py::test_real_builtin_skill_has_no_lint_findings[note-conformance]`), not just a cosmetic nit — fixed by writing shape names with `.md` suffix (`single-occurrence.md`) which both dodges the lint heuristic (dotted strings don't match `SKILL_NAME_RE`) and is more precise (names the actual template file).
+   - **Cascading `FakeClient` "ran out of scripted responses" failures** (11 tests) after wiring `_run_entity_updates` into the DAG — every test whose resolution included an `action=="update"` targeting an existing fixture file (most did, via shared `RESOLUTION_JSON`'s Jane Doe entry against the real `people/jane-doe.md` fixture) now triggered an unscripted 3rd model call — fixed via: (a) `REVISION_JSON`/`{"revisions": []}` defaults, (b) updating `len(client.calls)` assertions, (c) appending the 3rd response to explicit `FakeClient([...])` constructions.
+   - **`FileExistsError` on `meetings.mkdir()`** in a new test — the shared fixture kb already ships a `meetings/2026/` directory — fixed with `mkdir(exist_ok=True)`.
+   - **Rich markup corruption of correction warnings** (`[] -> []` instead of the real wikilink text) — discovered live, not by unit tests, since existing tests only checked `proposal.warnings` list content, never actual console rendering. Reproduced directly via a standalone Rich script. Root cause: `console.print(f"...{warning}")` with unescaped `[[...]]`. Fixed via `rich.markup.escape()`. New regression test added (`tests/unit/test_console.py`) specifically because no prior test exercised the render path.
+   - **False "correction" of already-correct links due to `.md` suffix mismatch** — discovered live (9 spurious corrections logged, all `[[people/eleni-karahalios|Eleni Karahalios]] -> [[people/eleni-karahalios.md|Eleni Karahalios]]`), since this KB genuinely mixes both wikilink conventions and `target_note_path` always includes `.md` while extraction sometimes omits it. Fixed with `_normalize_link_path()` used only in the equality check, not in the replacement text construction. Regression test added.
+   - Pre-existing, NOT fixed (explicitly out of scope per the agent's own investigation and my confirmation): 19 `test_skills_resolver.py`/`test_skills_cli.py` failures (concurrent agent's unrelated work on `skills/models.py`); a handful of git-commit-signing-related test errors traced by the background agent to a local sandbox environment issue (1Password GPG signing agent unreachable), unrelated to any code change.
+
+5. Problem Solving:
+   - Solved: whisper-format ingestion, origin/url KB-relative-path convention, entity-schema kb-local override (mirroring skills resolver), extraction-time schema-driven field completeness (fixing the `GUIDE_MAX_CHARS` truncation root cause structurally rather than by raising the constant), entity-link consistency between extraction and entity-resolution (with two follow-on bugs found and fixed during verification), page-shape-by-type as a formal, kb-overridable, structurally-delivered mechanism (correcting the earlier flawed category-based heuristic), and — most recently — wiring an actual "update existing note" capability into `wakil enrich`'s automatic DAG, scoped conservatively to `compiled-truth-timeline` types only, with a full preview/diff/confirm/staleness-guard safety envelope matching the project's existing conventions (never silently overwrite, review reviewable diffs before writing).
+   - Ongoing/ambient, not actively being worked: the broader Rich-markup-escaping pattern risk elsewhere in `console.py` (flagged, not fixed, out of scope); whether `EntityResolution.proposed_frontmatter` (now vestigial) should eventually be removed.
+   - Live verification of the entity-update feature against the real KB (`echo "n" | uv run wakil -w ~/Projects/kb enrich 1 --force`) completed cleanly but did not trigger any `entity_updates` in that particular run — investigated and concluded this is *correct* behavior (Eleni Karahalios's and Ian Gutwinski's real pages already contain manually-synthesized content about this exact 2026-07-16 call from earlier legacy/manual enrichment, so the model's `has_update=False` judgment across all three resolved-update entities is the right call, not a bug), corroborated by the synthetic unit test (`test_entity_update_applies_when_model_says_has_update`) which proves the apply path works correctly when the model does say `has_update=True`.
+
+6. All user messages (non-tool-result, verbatim intent):
+   - Initial Hermes/wakil architecture questions (multiple turns, not fully re-quoted here — see Phase 1 in analysis).
+   - "how does wakil know to update a note (e.g. when it's a compiled truth doc) vs. just writing it out (when it's a single occurrence)?"
+   - "if wakil knows that an entity should be updated, then wakil should do the update as part of the process (e.g. enrich) -- no need to create a separate command for that at this time."
+   - (Earlier, directly relevant to standing scope constraints still in effect): "Yes fix #2 RE: #1/#3 - wakil needs to be more nuanced on how it determines something is 'sensitive' / 'assessment'. let's think through the shape hint of 'meetings'. ask me questions to ensure that I understand the problem that you're describing. It's correct that a 'meeting' is a single occurrence type, and that a 'timeline' and truth compilation do not make sense; conversely, they do make sense in the context of an assessment. All that said, I'm just not clear about the problem you're raising. Run an agent in the background to fix #2 while we discuss the rest of it."
+   - "Thing 1: let's introduce another override mechanism for page-shape. I'm fine with it being a part of the schema definition, or we could also maintain a set of templates within wakil keyed by entity type, and allow the KB to override with its own templates. Help me weigh the tradeoffs of having them coupled vs. decoupled. Thing 2: help to better understand what decision you need from me on this."
+   - "Thing 2: - journal: accumulating-subject - reflection: single-occurrence - idea: single-ocurrence - organization: single-occurrence - meta: single-occurrence - index: accumulating-subject (I think, open to your take on this) - source: single-occurrence. Thing 1: Let's run with hybrid"
+   - (System-relayed mid-turn instruction, but user-originated per the harness's own description of how such messages are delivered): "when you've finished building the entity schema resolver and related fixes have been verified via the full test suite, re-run the enrich (`uv run wakil -w ~/Projects/kb enrich --force 1`) and re-analyze and provide a critical analysis of the enriched outputs -- I'd like to see if there are any further improvements to wakil to bring it into parity with the legacy skills."
+   - "Let's run with hybrid" / earlier "Let's run with hybrid" context for Thing 1 (see above, same message).
+   - Earlier Plan-Mode decisions (AskUserQuestion answers): "All three (Recommended)" and "Add kb-local override now."
+   - Direct plan-file edit changing Part C's framing to "Deprecate schema.md" / "The KB's schema.md gets ignored the rules which don't get reduced to YAML in those sections should be migrated into the relevant skills in wakil."
+   - "Let's run with hybrid" (Thing 1 final directive, already captured above).
+   - Various earlier requests already summarized in point 1 (whisper support, origin/url fix, critical-analysis requests, the "/btw" schema-authority framing, "how does wakil know to update...").
+
+7. Pending Tasks:
+   - None explicitly outstanding from the user at the moment of interruption — the most recent explicit directive ("wakil should do the update as part of the process... no need to create a separate command") had just been fully implemented, tested, and live-verified when the summary request arrived. No further task was requested yet.
+
+8. Current Work:
+   Immediately before this summary request, I had just finished implementing and verifying the "entity updates as part of `wakil enrich`" feature (DAG node 3), per task list items #7 through #13 (all tracked via `TaskCreate`/`TaskUpdate`, all now marked `completed`). The very last actions were:
+   - Ran `echo "n" | uv run wakil -w ~/Projects/kb enrich 1 --force` redirected to a scratchpad file (`/private/tmp/claude-501/.../scratchpad/enrich_output.txt`) because the terminal `tail -100` view had potentially cut off the "Updates to existing pages" section.
+   - Grepped the full output for `"Updates to existing\|UPDATE people\|UPDATE companies\|warning:\|expected H1\|entity resolution says update"` — found NO matches, meaning zero `entity_updates` were proposed in that run despite Eleni Karahalios, Ian Gutwinski, and Mosaic all resolving to `action: "update"` against real, existing files.
+   - Investigated and concluded (based on having read `people/eleni-karahalios.md` and `people/ian-gutwinski.md` in full earlier in the session, and observing both already contain manually-synthesized "Backchannel reference call, 2026-07-16" content) that the model correctly judged `has_update=False` for all three — a legitimate, conservative outcome consistent with note-revision's dedup discipline, not a bug.
+   - Confirmed the run completed cleanly end-to-end (`tail -15` of the output showed a normal proposed-note preview panel and `Aborted; nothing was written.` at the confirm prompt — nothing was applied to the real KB).
+   - Cleaned up the scratchpad file via `rm -f`.
+   - Called `TaskUpdate` marking task #13 ("Tests + live verification (dry-run only, do not apply to real KB)") as `completed`.
+   - **No text summary had yet been delivered to the user** describing the completed feature, its test coverage (296 passed / 19 known pre-existing failures), the two bugs found and fixed during this verification pass (Rich markup escaping; `.md`-suffix false-positive corrections), or the live-verification finding (zero updates fired, and why that's expected/correct) — this final wrap-up message was the very next planned action before the conversation was interrupted for this summary request.
+
+9. Optional Next Step:
+   The direct next step, strictly continuing the just-completed task, is to deliver the final wrap-up summary to the user describing the completed "entity updates as part of `wakil enrich`" feature — covering: what was built (DAG node 3, scoped to `compiled-truth-timeline` types only, full preview/diff/confirm/staleness-guard safety), the test coverage added (9 new tests against realistic fixtures plus the cascading FakeClient fixes across ~15 existing tests), the two additional real bugs found and fixed purely through live verification (Rich markup corruption of correction warnings; `.md`-suffix false-positive link "corrections"), and the honest live-verification result (the real run against `~/Projects/kb` produced zero entity updates because the model correctly recognized the target pages already reflect this source's content — not a bug, and corroborated by the synthetic test that proves the apply path works when the model does say `has_update=True`). This directly continues from my own in-progress work (Task #13, just marked completed) and does not introduce any new tangential work — per the task instructions, no other next step should be taken without the user's explicit go-ahead, since the "no separate command" feature request has now been fully delivered and the user has not yet had a chance to review or respond.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/93aecd7b-3db1-4708-aaf6-81eeb2653a37.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
