@@ -1,0 +1,4 @@
+This is too confident:
+> validation error usually means the model response was truncated
+
+that should be reframed as "may mean" instead of "usually" -- unless you have evidence that it is typically the most common reason for the error.
