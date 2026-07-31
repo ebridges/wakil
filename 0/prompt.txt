@@ -1,0 +1,1 @@
+when I run `uv run wakil search 'mosaic valuation'` the "snippet" column in the results matches the "title" column
