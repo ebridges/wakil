@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bos2ryz7w</task-id>
+<tool-use-id>toolu_014VYrNcd3Qx2duNAV932nm9</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/0d040421-da1c-44ba-aeb0-8cd05f206644/tasks/bos2ryz7w.output</output-file>
+<status>killed</status>
+<summary>Background command "Verify the edit-flow fix parses and the full suite still passes" was stopped</summary>
+</task-notification>
