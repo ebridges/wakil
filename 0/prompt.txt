@@ -1,0 +1,213 @@
+<task-notification>
+<task-id>ae56fa9dfae761b5c</task-id>
+<tool-use-id>toolu_012R2xGG7fdowsK55ECtLfr7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3e0a3930-d35f-4ba1-9f24-61e06cf3fde2/tasks/ae56fa9dfae761b5c.output</output-file>
+<status>completed</status>
+<summary>Agent "Design the skill-corpus migration plan" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># Migration Plan: Hermes Skills → wakil's `builtin` Skill Catalog
+
+I read `docs/skill-refactor.md` in full, `docs/skill-resolution-specification.md` §4/§8 (and skimmed the rest for context), and then went into the wakil source to ground the plan in what's actually already built, rather than in what the docs merely describe. That grounding surfaced several corrections that materially change the plan — I'm putting those first because they affect almost every other section.
+
+## 0. Grounding corrections (read this before the rest)
+
+**wakil already implements most of the `ingest-source` workflow as code, for three source shapes.** `wakil ingest {transcript,text,article} [--branch/--commit/--pr]` (`src/wakil/cli/main.py:401-442`) captures a raw source; `wakil enrich &lt;source_id&gt; [--branch/--commit/--pr]` (`main.py:289-376`, `src/wakil/app/ingest_service.py`) runs the second stage — model-driven synthesis (`prepare_enrichment`), entity resolution against existing notes (`_run_entity_resolution`), schema-routed stub-page construction (`_build_stub_entities`, keyed off `schema.directory`), and a hard invariant gate (`validate_proposal`: dedup paths, schema-validate every proposed file, hard-stop on unknown entity types) before anything is written. This is precisely the two-stage raw→enrich pattern `quickcapture-ingest` modeled loosely in prose, now real and code-enforced. **Consequence:** for the three CLI-native shapes, `content-synthesis` / `entity-resolution` / `entity-enrichment` / `note-routing` / `note-conformance` should mostly document *how to drive `wakil ingest` → `wakil enrich`* and how to triage its output, not re-derive synthesis/resolution judgment from scratch. The prose value concentrates on (a) source types the CLI can't ingest natively yet — PDF, YouTube, voice memo, archive-mining, Kindle/Readwise/social-post — which need normalizing down to text/article/transcript + a rich `--context` string before the CLI takes over, and (b) work that never touches the CLI at all (note-revision on existing notes, cross-note concept-synthesis, ad hoc entity work during a manual edit).
+
+**`kb-commit`'s message convention must not be the source corpus's type→emoji taxonomy.** wakil already has a fixed convention baked into code: `wakil &lt;kind&gt;: &lt;description&gt;`, `kind ∈ {ingest, note, link, memory, dream, source, chore}` (`COMMIT_PREFIXES` / `commit_message()` in `src/wakil/app/git_service.py:22,37-40`). There is no general-purpose `wakil commit` command — committing only happens as a `--branch`/`--commit` flag on `ingest`/`enrich`/`schema migrate`. So `kb-commit` (the new catalog skill, which governs an agent committing changes inside a *KB* repo) needs to (1) document this existing kind taxonomy instead of inventing an emoji scheme, and (2) exist for the gap the CLI doesn't cover — commits arising from manual edits, note-revision, or `wakil schema migrate` run without `--commit`. Note this is a different repo and different convention from this very dev repo's own `.claude/skills/commit/SKILL.md` (Conventional Commits + gitmoji) — that skill governs commits to wakil's *own source code*, not to a wakil-managed KB. Don't let the two bleed together.
+
+**`note-conformance` should defer to `wakil schema migrate` for frontmatter repair.** `schema_migrate_service.py` + the `schema_app.command("migrate")` CLI (`main.py:552-624`) already implements exactly the "preview-plan → confirm-per-type → apply → report" pattern the source `maintain` skill hand-rolled (`--dry-run` / interactive `y/N/d=diffs` / `--commit`). `note-conformance`'s job shrinks to: when to reach for `wakil schema migrate` vs. hand-editing, how to read its output, and — critically — what it does *not* cover (it's frontmatter-only / "cheap-tier"; page structure, section shape, exact-phrasing preservation, and title quality are still prose judgment, sourced from `_output-rules.md` + `conventions/quality.md`).
+
+**`RESOLVER.md`/`SCHEMA.md` are workspace-provided, not shipped by wakil** (`SPECIAL_FILES` in `src/wakil/config/settings.py:20`; a `SCHEMA.md` fixture exists only under `tests/fixtures/kb/`). wakil ships `src/wakil/schema/entities/*.yaml` + `schema/validate.py` as code governing *entity* frontmatter shape and, via each schema's `directory` field, canonical routing for entity types only. Non-entity content (raw source notes, synthesized notes, journal, meeting records) has no `schema.directory`-backed routing — a KB's own `RESOLVER.md` remains the sole authority there, and it's a file wakil never controls. `note-routing`/`note-conformance` need to state this split explicitly: entity types → defer to code; everything else → read the KB's actual `RESOLVER.md`/`SCHEMA.md` if present, degrade to asking the user (or a documented default, e.g. `inbox/`) if absent. I confirmed the literal self-contradiction skill-refactor.md cites (issue #3) by reading the real file at `/Users/ebridges/Projects/kb/RESOLVER.md:47-56`: its own "Correct" and "Incorrect" lists both contain `[[companies/distributed-spectrum|Distributed Spectrum]]` verbatim. wakil's own code models links as wikilinks (`grep` hits in `storage/schema.py`, `llm/prompts.py`, `schema/validate.py`'s `ref` kind) — so the reconciled canonical answer for wherever `note-conformance` documents link syntax should be the wikilink form, `[[path|label]]`, not the markdown-link alternative — but confirm the exact accepted syntax against `storage/schema.py`/`prompts.py` during authoring rather than asserting it from docs alone.
+
+**Entity notability judgment already exists twice, independently, and agrees.** `src/wakil/skills/entity-resolve/SKILL.md` (the internal DAG skill, out of scope to *touch*, but worth reading as ground truth) already states the create/skip notability bar almost verbatim to `_brain-filing-rules.md`'s: "clears the notability bar: it is likely to accumulate history." The new catalog's `entity-resolution` should harmonize its language with this internal skill rather than risk drifting from it, even though the two are loaded by different consumers.
+
+**`knowledge-query`'s retrieval story should be wakil's real three modes, not the source corpus's.** `wakil search`/`wakil query` (`main.py:137-189`) expose `--mode {search (BM25), vsearch (vector), query (hybrid)}`. `conventions/search-modes.md`'s three named bundles don't match this and should be treated as fully superseded (not "OOS and silent" — actively wrong if ported), while the *need* for a "which mode when" section is real and should be authored fresh against wakil's actual modes. The source-precedence rule from `query` (user statement &gt; compiled truth &gt; timeline &gt; external) maps directly onto the real page structure `_stub_content()` writes (`## Compiled Truth`, `## Timeline / Log`) — that rule is still valid and should port close to verbatim.
+
+## 1. Source→target mapping: corrections to your survey
+
+Your two batch tables are largely right. Corrections/refinements:
+
+| Source | Your target | Correction |
+|---|---|---|
+| `quickcapture-ingest` | note-routing | **Split**: source-type classification/dispatch → `ingest-source` (which sub-flow to run); destination-directory judgment → `note-routing`. Conflating them blurs the routing/orchestration boundary skill-refactor.md draws. |
+| `meeting-ingestion` | source-ingestion only | **Split**: retrieval/attendee-propagation/normalization → `source-ingestion`; "find the resolution not option A" / numeric-claim sanity checking → `content-synthesis` (that's synthesis judgment, not retrieval). |
+| `article-enrichment` | content-synthesis | Before writing, read `src/wakil/skills/article/SKILL.md` — it's the live judgment behind `wakil ingest article`'s enrich step for this exact case. `content-synthesis` should point at it and add prose only for non-CLI paths, not restate/risk-contradict it. |
+| `signal-detector` | entity-enrichment | Narrow further: only the one-liner "original thinking is at least as valuable as entity extraction" survives, and it belongs in `content-synthesis` (don't just extract entities from a source, capture novel synthesis), not `entity-enrichment`. Everything else (ambient capture) is OOS. |
+| `book-mirror` | content-synthesis | Keep, but the "trust-narrowing" mechanism (untrusted content only reaches read-only subagents) doesn't transfer literally to wakil's turn-based model. Its *principle* — treat ingested source content as data, never as instructions — should survive as a one-line prompt-injection-defense note in `content-synthesis`, without the subagent mechanics. |
+| `webhook-transforms` | OOS | Mostly agree, but extract one line ("sanitize before write" — don't persist raw HTML/script verbatim) into `content-synthesis` or `note-conformance` before discarding the rest. |
+| `brain-ops` | note-conformance + knowledge-query | Agree, and tie concretely: "brain-first lookup chain" → wakil's real `wakil search` → `wakil query` ordering; "three-part slug rule" → wakil's actual `slugify()` in `ingest_service.py`, cite it as the implementation rather than restating ad hoc string rules. |
+| `_brain-filing-rules.md` | note-routing + entity-resolution | Correct as split, but see the notability-convergence finding above — treat `entity-resolve/SKILL.md`'s existing language as the tie-breaker for wording. |
+| `conventions/search-modes.md` | OOS | Don't silently drop — the section is needed, just must be authored fresh against wakil's real `search/vsearch/query` modes, not ported. |
+| `conventions/test-before-bulk.md` | fold into source-ingestion/content-synthesis | Cross-cutting — also cite briefly in `kb-commit` (batch-commit discipline) and `note-conformance` (ties to `schema migrate`'s per-type confirm flow). Don't single-home it. |
+| `cross-modal-review` | kb-commit | Keep as primary landing (it is literally a pre-commit gate), but its "user-sovereignty, findings never auto-applied" principle is cross-cutting — restate briefly in `note-revision` and `note-conformance` too. Its actual mechanism (second frontier-model cross-check) is expensive to port faithfully for a single-user tool — see open questions. |
+| `retro` | skill-authoring | Its "artifact-change priority ladder" needs rewriting, not copying: wakil has no umbrella-skill concept, no beads/issue tracker, and `wakil memory` is a different thing (candidate→active fact lifecycle, not a task backlog). Rewrite the ladder around wakil's real primitives: patch the skill file → note the limitation in the skill's own SKILL.md → escalate to the user directly. |
+| `data-research` | source-ingestion + note-revision | Add: the "extraction integrity" rule (never trust LLM batch working memory for figures, re-read saved raw files) is general enough to also cite in `content-synthesis`, where hallucinated figures actually get published. |
+| `media/youtube-content` | source-ingestion | Confirm as a **section within** `source-ingestion`'s SKILL.md, not a separate directory — skill-refactor.md's named examples (`youtube-ingestion`, `article-ingestion`, etc.) are explicitly deferred sub-skills ("may later sit beneath this skill"), and they are not among the 12. Don't create them yet. |
+
+Everything else in both tables I'd leave as classified. The OOS lists in both batches and the "confirmed fully out-of-scope" list are all correct as far as I can tell from the descriptions given.
+
+## 2. Content outline per target skill
+
+Legend: **[C]** = has real code to defer to (cite file/function); **[T]**hin/**[M]**edium/**[L]**arge = rough size.
+
+**1. `ingest-source`** [M] — Orchestration only, no independent judgment.
+- Overview: when to use this vs. calling a stage skill directly.
+- The two-command backbone **[C]**: `wakil ingest {transcript,text,article}` → `wakil enrich &lt;id&gt;`, with `--branch/--commit/--pr` semantics.
+- Dispatch table: source type → which `source-ingestion` sub-path applies, and whether it maps directly to one of the three native `wakil ingest` shapes or needs pre-normalization first.
+- Failure/resume semantics: capture succeeds but enrich fails → resumable by `source_id`, don't re-run capture (from quickcapture-ingest's two-stage design).
+- What each stage hands off to the next (mirrors skill-refactor.md's stage table almost verbatim — this section can be close to a direct port of the doc itself).
+- Sources: `ingest/SKILL.md`, `quickcapture-ingest` (dispatch half).
+
+**2. `source-ingestion`** [L] — Highest source-file fan-in; still thin *per source type* since each subsection just needs to answer "how do I get this into transcript/text/article + `--context` shape."
+- Iron Law of exact phrasing / back-linking (cross-cutting, states once here, referenced elsewhere).
+- Per-source-type subsections (only where handling genuinely differs, per skill-refactor.md's own guidance): meeting transcripts (attendee propagation, prep-doc reconciliation), articles/web pages, PDFs (extraction, dedupe quoted/forwarded email, never pass binary onward), voice notes (decision tree for classification), YouTube (transcript retrieval), media/misc (routing table, likely stays a compact "not yet automatic" note rather than full prose per type).
+- Extraction integrity rule: re-read saved raw files, never trust working memory for figures/amounts.
+- Test-3-5-before-bulk discipline for any batch source ingestion.
+- Explicitly OOS/deferred: archive-crawler's bulk-mining (flag, don't build — see open questions).
+- Sources: `meeting-ingestion`, `pdf-ingest`, `voice-note-ingest`, `media-ingest`, `idea-ingest` (retrieval half), `productivity/ocr-and-documents`, `media/youtube-content`, `data-research` (integrity rule), archive-crawler (deferred stub only).
+- Needs `references/` for the per-type routing tables (keeps SKILL.md body scannable).
+
+**3. `content-synthesis`** [M] — Genuinely thin for the CLI-native path (defer to `src/wakil/skills/article|text|transcript/SKILL.md` + `ingest_service.prepare_enrichment`); real prose weight is for synthesis *outside* that path.
+- What `wakil enrich` already does — pointer, not restatement.
+- Verbatim-quote requirement; "why it matters" must tie to existing content, never generic.
+- Prompt-injection defense principle (from book-mirror, mechanism dropped, principle kept).
+- Cross-note synthesis pattern (concept-synthesis's 4-phase pipeline: dedup → tier → synthesize, run on cadence not per-signal) — this is the part of content-synthesis's mandate that has zero CLI backing today.
+- Chapter-by-chapter / long-document strategy (book-mirror, strategic-reading): triage by relevance, quote over paraphrase, short/med/long-term breakdown.
+- Extraction-integrity rule (shared with source-ingestion, restated briefly).
+- Sources: `article-enrichment`, `meeting-ingestion` (synthesis half), `book-mirror`, `concept-synthesis`, `strategic-reading`, `signal-detector` (one line), `webhook-transforms` (one line), `data-research` (integrity).
+
+**4. `entity-resolution`** [T] — Should be the thinnest skill in the catalog. **[C]** Almost everything is `entity-resolve/SKILL.md` + `schema/validate.py` + `_build_stub_entities`/`validate_proposal`.
+- What `wakil enrich`'s resolution step already does — pointer.
+- Notability bar, worded consistently with `entity-resolve/SKILL.md`.
+- Holder≠subject epistemics (founder describing own company → holder is founder) — the one piece of genuinely new judgment not already in the internal skill.
+- Match-by-identity-not-string-equality (already in `entity-resolve/SKILL.md`; restate briefly, don't duplicate at length).
+- When this skill applies outside `wakil enrich` (manual resolution during note-revision).
+- Sources: `_brain-filing-rules.md` (notability/holder≠subject), `enrich` (Hermes; matching heuristics), read `entity-resolve/SKILL.md` for consistency, not as a portable source.
+
+**5. `entity-enrichment`** [M]
+- Distinction from entity-resolution (verbatim from skill-refactor.md — it's already well-stated there).
+- Tiered effort scaling by entity importance; "texture over facts"; send existing knowledge as delta-context — note this mirrors what `prepare_enrichment` already does (`related_pairs`, `guides`) for the CLI path.
+- Avoid superficial/excessive linking.
+- Mandatory author-page creation for idea/article sources (from idea-ingest).
+- Sources: `enrich` (Hermes, primary), `idea-ingest` (author-page rule), `conventions/model-routing.md` (tiering concept only, rewritten fresh, no vendor-tier config).
+
+**6. `note-routing`** [M]
+- RESOLVER.md/SCHEMA.md split explained (workspace-provided, not wakil-shipped — see grounding section).
+- Entity types: routing is code (`schema.directory`) — point at it, don't restate the directory list.
+- Non-entity content: primary-subject-not-format; sui-generis exception; notability gate (shared language with entity-resolution); concept-vs-project hard call.
+- Decision-tree template for "where does a new file go" (repo-architecture).
+- Explicit statement that phantom directories (`originals/`, `personal/`, `deals/`, `media/x/`) are not to be assumed — only directories present in the KB's actual `RESOLVER.md` or backed by `schema.directory` are valid targets.
+- Sources: `_brain-filing-rules.md`, `repo-architecture`, RESOLVER.md's Concept-vs-Project section (from the actual kb source, sanitized).
+
+**7. `note-conformance`** [T/M] — Deliberately thin; **[C]** defers to `schema/entities/*.yaml`, `schema/validate.py`, and `wakil schema migrate`.
+- When to run `wakil schema migrate --dry-run` vs. hand-edit; what it does and does not cover.
+- Category split (identity vs. document vs. hybrid → `name` vs. `title`) — point at `validate.py`'s category rule, the exact bug skill-refactor.md's issue #4 describes.
+- One canonical citation/link format, reconciled from `_output-rules.md` + `conventions/quality.md`, resolved against wakil's real wikilink handling (verify against `storage/schema.py`/`prompts.py` during authoring).
+- Three-part slug rule, deferring to `slugify()`.
+- Output-quality bar: no slop, deterministic links only, exact-phrasing preservation, title quality.
+- Sources: `_output-rules.md`, `conventions/quality.md` (both explicitly the "most authoritative, least self-contradictory" per skill-refactor.md issue #7 — use these two and no others for citation format), `citation-fixer`, `note-taking/obsidian`, `maintain` (frontmatter-repair half), `brain-ops` (slug rule).
+
+**8. `knowledge-query`** [M]
+- QMD as implementation detail — wraps `wakil search`/`wakil query`, three real modes (search/vsearch/query), when to use which.
+- Source precedence: user statement &gt; compiled truth &gt; timeline &gt; external — ports close to verbatim, matches `_stub_content()`'s actual page structure.
+- Recency/salience axis: on for current-state questions, off for canonical-truth questions; explicit temporal bounds override the default.
+- Token-budget discipline; distinguishing retrieved fact from inference; disclosing incomplete/conflicting evidence.
+- Sources: `query` (Hermes, primary), `brain-ops`/`conventions/brain-first.md` (lookup order), `conventions/salience-and-recency.md`.
+
+**9. `knowledge-research`** [M]
+- KB-first, external-second; explicit boundary vs. `knowledge-query` (query answers from what's there; research investigates further).
+- "Dense, untruncated context or it's just a search" (perplexity-research).
+- 5-way verdict taxonomy for claim verification (academic-verify), folded in as an internal mode rather than implying a separate skill.
+- arXiv-specific citation care (version suffixes, withdrawal notices) as a worked-example subsection.
+- Sources: `perplexity-research`, `academic-verify`, `research/arxiv`.
+
+**10. `note-revision`** [M]
+- Additive-update vs. replacement distinction; State=re-synthesize-as-union vs. Timeline=append-only, citing the real "Scorealytics Regression" clobbering-bug lesson from `conventions/quality.md` as the cautionary example.
+- Contradiction/superseded-claim handling.
+- 3-tier dedup heuristic (data-research).
+- User-sovereignty restated briefly (cross-modal-review's principle — findings inform, never auto-apply).
+- Sources: `conventions/quality.md` (primary), `data-research` (dedup), `cross-modal-review` (principle only).
+
+**11. `skill-authoring`** [L] — The most consequential to get right, since it must supersede two contradicting sources.
+- Reconciled single standard replacing `skill-creator` + `skillify` — MECE-scan-full-filesystem requirement, "prefer extending umbrella over narrow new skill," a checklist for structure (adapted from the 4-section/11-item standards, not copied).
+- How to override a built-in skill without modifying it: copy into `&lt;kb-root&gt;/skills/&lt;name&gt;/` or `~/.config/wakil/skills/&lt;name&gt;/`, per §6/§9.1 of skill-resolution-specification.md — point at `wakil skills list/which/validate` as the inspection commands, not invented tooling.
+- Frontmatter contract: `name` (must match dir), `skill_api: 1`, optional `version` — no invented "trigger" field; `description` is the discovery/trigger mechanism (per the internal skills' actual `description:` phrasing).
+- Genericization checklist for promoting/porting a skill (skillpack-harvest) — worth calling out that this migration itself is an instance of the pattern it documents.
+- Revision priority ladder, rewritten around wakil's real primitives (see correction above).
+- Dangling-reference discipline: only cross-reference skills that exist in the 12-skill catalog.
+- Sources: `skill-creator`, `skillify` (reconciled, not both ported), `functional-area-resolver` (dispatcher pattern), `_AGENT_README.md`, `skillpack-harvest`, `retro` (ladder), `software-development/hermes-agent-skill-authoring` (skim only, secondary).
+- Needs `templates/` (a blank SKILL.md scaffold) and possibly `examples/` (one worked override).
+
+**12. `kb-commit`** [M] — Strip the kanban preamble entirely; ground message format in code.
+- Message convention: `wakil &lt;kind&gt;: &lt;description&gt;`, `kind ∈ {ingest, note, link, memory, dream, source, chore}` — point at `git_service.COMMIT_PREFIXES`, not an emoji taxonomy.
+- When this skill applies: after manual edits, after `wakil schema migrate` without `--commit`, after any change the CLI's own `--commit` flag didn't already handle.
+- Inspect-every-diff-before-grouping discipline; `wakil git summary`/`wakil git history` as the inspection commands.
+- Confirm-before-destructive / commit-only-after-explicit-approval (shared with maintain, cross-modal-review).
+- Exclude transient/generated/sensitive files.
+- Sources: `knowledge-base/kb-commit` (stripped of kanban preamble, mem0 step, beads refs), `maintain` (confirm-before-destructive half), `cross-modal-review` (gate pattern, optional — see open questions).
+
+## 3. File layout
+
+Confirmed target: `src/wakil/skills/builtin/&lt;name&gt;/SKILL.md` — `src/wakil/skills/builtin/` doesn't exist yet (`builtin_skill_root` in `resolver.py:274` already points there), so this is a clean create, twelve new directories.
+
+Subdirectory recommendations (per §4, optional beyond `SKILL.md`):
+
+| Skill | `references/` | `templates/` | `examples/` |
+|---|---|---|---|
+| `source-ingestion` | yes — per-source-type routing tables | — | — |
+| `note-routing` | maybe — concept-vs-project worked examples | — | — |
+| `note-conformance` | — | — | maybe — one before/after citation-format fix |
+| `skill-authoring` | — | yes — blank SKILL.md scaffold | maybe — one worked override |
+| all other 8 | — | — | — |
+
+Everything else should be single-file. Given how thin several skills need to be (entity-resolution, note-conformance especially), resist adding subdirectories unless a section genuinely doesn't belong in flowing prose — extra structure here just recreates the "competing standards, dangling refs" rot pattern this migration exists to fix. `schemas/` and `scripts/` subdirectories aren't needed by any of the 12 — schema enforcement is already `src/wakil/schema/`, not skill-local.
+
+## 4. Execution phasing
+
+Dependency graph, not arbitrary batching — several skills need to *name* other skills correctly, so authoring order matters for avoiding dangling `related_skills` (issue #8):
+
+**Phase 0 — foundational reads (no output, informs everything else):** `conventions/quality.md`, `_output-rules.md`, `RESOLVER.md`/`schema.md` (source), `entity-resolve/SKILL.md`, `article|text|transcript/SKILL.md`, `git_service.py`, `schema_migrate_service.py`, `ingest_service.py`. These are the files every downstream skill must not contradict.
+
+**Phase 1 — repository governance (no dependencies on other new skills):** `note-routing`, `note-conformance`. These are referenced by nearly everything else (routing/schema decisions show up in ingestion, entity work, and revision), so they should exist and be stable before anything names them.
+
+**Phase 2 — knowledge transformation, foundational-first:** `knowledge-query` before `knowledge-research` (research explicitly builds on and cites query, per skill-refactor.md's own "typical research workflow" diagram) → `entity-resolution` before `entity-enrichment` (same dependency, stated explicitly in the source doc) → `note-revision` (depends on note-conformance/note-routing being final for its "update in place" guidance, and conceptually follows knowledge-query/research per the doc's diagram) → `content-synthesis` → `source-ingestion` (source-ingestion's per-type sections should be written last within this phase since they're the biggest fan-in and benefit from content-synthesis's boundary being settled — what does source-ingestion normalize to vs. what does content-synthesis interpret).
+
+**Phase 3 — workflow orchestration:** `ingest-source` last among the transformation-layer skills, since it must literally name the six skills in its pipeline diagram — writing it before they exist (or before their names/boundaries are final) is exactly how the dangling-reference problem recurs.
+
+**Phase 4 — system operation:** `skill-authoring` and `kb-commit` can run in parallel with each other and largely independent of phases 1-3 (they're about the *system*, not KB content) — but `skill-authoring` should do a final pass after phase 3 to write its "how the 12 skills relate" example content against the real, finished set, and `kb-commit` benefits from `note-conformance` being final (it references schema-migrate triage).
+
+**Phase 5 — cross-skill consistency pass (mandatory, not optional):** one pass across all twelve for dangling `related_skills`, terminology drift (e.g. "entity page" vs. "entity note," "source note" vs. "raw source"), and verifying every code reference (`wakil enrich`, `schema migrate`, `slugify()`, `COMMIT_PREFIXES`, etc.) is accurate against current source, not just plausible.
+
+## 5. Execution mechanism
+
+Recommend a **single Workflow, but not a single flat fan-out** — structure it to match the phasing above, because the dependency chain is real (not cosmetic): several skills materially need to read finished sibling skills before they can correctly reference them, and running all 12 as independent parallel agents from a shared brief risks each one independently inventing slightly different phrasing for the same shared concepts (notability gate, State/Timeline distinction, citation format) — recreating issue #7 (citation drift) and the general "un-cross-referenced standards" problem inside the *new* catalog, not just failing to fix it in the old one.
+
+Concretely:
+- One agent (or a short serial sequence) for Phase 0 + Phase 1, since these are foundational and small in count (2 skills) but referenced everywhere — get them right and stable first.
+- Parallel per-skill authoring agents *within* Phase 2, but each handed the finished Phase 0/1 output plus a shared "glossary" excerpt (terminology + the exact wording of cross-cutting principles — notability gate, Iron Law of exact phrasing, State-vs-Timeline, source precedence) pinned in every agent's brief, not left to each agent's independent judgment. This is the direct mitigation for risk (c) in your framing (cross-skill inconsistency).
+- `ingest-source` (Phase 3) and system-operation skills (Phase 4) as their own pass(es), each seeing the finished output of what they reference.
+- A dedicated Phase 5 consistency/dangling-reference review agent whose only job is cross-checking the twelve finished files against each other and against the actual wakil source tree (grep for `related_skills`, grep for invented CLI surface, grep for phantom directories) — this is the direct mitigation for risk (b) (re-introducing the cataloged issues) and should probably run with a checklist literally derived from skill-refactor.md's "Existing skill issues" section, item by item, as a pass/fail gate before considering the migration done.
+
+On risk (a) — losing hard-won nuance: this argues for reading full source files (not summaries) during each phase's authoring step, and for the per-skill outline above being treated as a floor, not a ceiling — several source files (conventions/quality.md especially, called out as "the corpus's core judgment") deserve a dedicated close read rather than delegation-by-table-row.
+
+One PR is reasonable given all 12 files are interdependent and reviewing them piecemeal would hide the exact cross-referencing bugs Phase 5 exists to catch — reviewing "does skill X's related_skills list match what actually exists" is much easier with the whole catalog in one diff.
+
+## 6. Open questions for the user
+
+1. **`archive-crawler`'s bulk-mining capability** — in scope for v1 `source-ingestion`, or deferred? It's the heaviest, most infrastructure-coupled source skill (mbox/pst parsing, manifest-tracked triage) and skill-refactor.md's own guidance ("introduce specialized skills only where source handling differs enough to justify them") argues for deferring it.
+2. **The `.claude/skills/` consumption-wrapper question** — resolve now or defer? wakil's resolver is fully specified and `builtin/` is the target, but there's no mechanism yet (built or specified) by which an interactive coding agent's `.claude/skills/` actually points at a wakil-resolved skill path, the way the source repo wrapped `.hermes/skills/`. Worth deciding whether this migration's scope includes designing that wrapper, or whether it's explicitly a follow-on and the 12 skills are authored now against the assumption they'll eventually be reached that way.
+3. **Multi-model/eval-gate overhead** — `skillify`'s 3-provider cross-modal eval bar and `cross-modal-review`'s second-model quality gate both assume infrastructure (multiple frontier-model API access, an eval harness) that may not be worth building for a single-user tool. This is one question, not two — both source skills lean on the same "second opinion from a different model" primitive. Worth deciding once whether any version of this survives into `skill-authoring`/`kb-commit`, or whether it's dropped entirely as over-engineering for the target scale.
+4. **Confirm the agent-facing-audience assumption** — stated as a design assumption in your brief; confirming it now (voice: procedural instructions to an agent following the skill, not end-user product docs, modeled on `.claude/skills/commit/SKILL.md`'s style) avoids a costly rewrite if wrong.
+5. **`media-ingest`'s format-routing table breadth** — is full coverage (video/audio/PDF/book/screenshot/repo) needed for v1, or should `source-ingestion` initially cover only the formats you actually ingest regularly, with the rest stubbed as "not yet automated, normalize manually"?
+
+### Critical Files for Implementation
+
+- /Users/ebridges/Projects/wakil/src/wakil/app/ingest_service.py
+- /Users/ebridges/Projects/wakil/src/wakil/app/git_service.py
+- /Users/ebridges/Projects/wakil/src/wakil/schema/validate.py
+- /Users/ebridges/Projects/wakil/src/wakil/skills/resolver.py
+- /Users/ebridges/Projects/wakil/src/wakil/skills/entity-resolve/SKILL.md
+- /Users/ebridges/Projects/kb/RESOLVER.md
+- /Users/ebridges/Projects/kb/.hermes/skills/conventions/quality.md</result>
+<usage><subagent_tokens>78592</subagent_tokens><tool_uses>30</tool_uses><duration_ms>387997</duration_ms></usage>
+</task-notification>
