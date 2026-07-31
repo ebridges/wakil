@@ -1,0 +1,1 @@
+The skills/[article|text|transcript]/SKILL.md files seem way too short and lacking specificity.  Especially when compared to .hermes/skills/meeting-ingestion/SKILL.md which covers more broadly many edge cases.  By keeping the changes small, do you expect to capture the nuance that is captured in the legacy meeting-ingestion skill?
