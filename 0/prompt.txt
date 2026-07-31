@@ -1,0 +1,1 @@
+yeah, drop the package.  That said, is there a different package that has common_words (besides NLTK)?  I'd like to avoid having an unmaintained list of words as a random file in the wakil repo.
