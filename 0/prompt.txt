@@ -1,0 +1,3 @@
+>  that data loss would have landed without anyone seeing the diff first.
+
+Actually, the intention of landing changes like this via PRs allows for review of the ingest before it actually gets landed.  In other words, there is a HITL it's just landing as a discrete step all its own.
