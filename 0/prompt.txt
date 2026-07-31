@@ -1,0 +1,3 @@
+re: the eval test -- how does it compare when run on `main` vs. the pull requests?
+
+skip `wordfreq` and let's go with just using common_words.txt.  store it as a zip file and stream it when needed.
