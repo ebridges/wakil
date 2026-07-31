@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>babij06we</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/babij06we.output</output-file>
+<status>completed</status>
+<summary>Background command "Re-run the full eval suite on main to completion" completed (exit code 0)</summary>
+</task-notification>
