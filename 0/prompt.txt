@@ -1,0 +1,11 @@
+Conduct research on how best to approach "compiling truth" in a constrained space alongside a limitless timeline. 
+
+Here're references on how this has been addressed elsewhere:
+- https://medium.com/@kevaljagani1/multi-layered-approach-for-context-summarization-in-long-running-ai-agents-2a7826fc3a5f
+- https://agenticskillset.org/en/topics/incremental-summarization/
+- https://arxiv.org/html/2407.15021v1
+- https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents
+
+Analyze those and compare & contrast to the approach we're adopting.  Are there any learnings in those approaches that can be applied here?
+
+If there are features that are worth integrating with, produce a plan based on that for us to migrate to a more stable approach to managing the "Compiled Truth" and the "Timeline log" sections of the KB entities.
