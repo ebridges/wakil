@@ -1,0 +1,1 @@
+have a general-purpose agent test it now against https://github.com/ebridges/wakil/pull/29
