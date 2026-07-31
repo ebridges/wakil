@@ -1,0 +1,1 @@
+at what point is the qmd embedding model downloaded, and what triggers the embedding and subsequent updates?
