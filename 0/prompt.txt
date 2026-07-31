@@ -1,0 +1,3 @@
+draft a plan for a mechanism that will periodically "compress" entities so that they don't contribute to API ModelTruncationErrors as an upstream tactic to further prevent overloading the context when enriching entities.
+
+Some general guidance: older entries are less interesting than more recent entries. "Compiled Truth" should be built on important facts, it should be derived from the timeline.  timelines are very important and should remain intact, though more detail in older entries is less interesting -- the important stuff should be concisely integrated into the "Compiled Truth".  The timeline should not be included in context -- just the "Compiled Truth", since the most important information has already found its way into the Compiled Truth.
