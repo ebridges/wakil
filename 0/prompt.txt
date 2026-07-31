@@ -1,0 +1,12 @@
+I ran the `wakil` command with the following arguments for the knowledge base at @~/Projects/kb/ 
+
+The resulting `source/transcript` is in @sources/transcripts/2026-07-23-scorealytics-planning-meeting.md
+
+Wakil simply copied the raw JSON as the transcript.  I would have expected that it would have simplified it by creating an explicity diarized input.  Let's discuss the rationale for that.
+
+```
+       wakil -w kb ingest transcript sources/transcripts/2026-07-23-scorealytics-planning-meeting.json \
+         --context "Lawrence Krubner (CTO, Scorealytics) and Edward Bridges — planning meeting on scoping a 1-week AI mentoring/consulting engagement, follow-up to the 2026-07-20 CTO Summer Lunch conversation." \
+         --context-file meetings/2026/2026-07-23-scorealytics-lawrence-krubner-mentoring-prep.md \
+         --yes
+```
