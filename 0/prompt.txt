@@ -1,0 +1,1 @@
+When using a Skill + non-blocking reminder hook (my preferred approach), will that be essentially for the LLM to decide whether or not there's something valuable to add to DEVELOPMENT.md/TROUBLESHOOTING.md?  Or, will it always put something in those files?  I prefer these files to be thoughtful, high-signal documents, so good judgement is essential.
