@@ -1,0 +1,1 @@
+I think it makes more sense to add reflections under a category of "produced knowledge", so update the whitepaper to reflect that, rather than adopting the worked example's category of "wiki/personal/reflections/"
