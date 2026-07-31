@@ -1,0 +1,14 @@
+<quote>
+"Lossy compression" → "additive-only"
+> So the accepted scope drops compression entirely: compile now only unions everything already in the Timeline into Compiled Truth.
+</quote>
+
+This reads as: "compilation is adding more to, and not periodically distilling 'Compiled Truth'".  This seems like it would simply result in compiled truth becoming a union of the timeline.  How is that helpful?  Something needs to be making a judgement call on discarding information and maintaining relevant facts.
+
+Here're references on how this has been addressed elsewhere:
+- https://medium.com/@kevaljagani1/multi-layered-approach-for-context-summarization-in-long-running-ai-agents-2a7826fc3a5f
+- https://agenticskillset.org/en/topics/incremental-summarization/
+- https://arxiv.org/html/2407.15021v1
+- https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents
+
+Conduct research on how best to approach "compiling truth" in a constrained space alongside a limitless timeline. Produce a plan for us to migrate to a more stable approach to managing the "Compiled Truth" and the "Timeline log" sections of the KB entities.
