@@ -1,0 +1,9 @@
+>  I checked what confidence actually is in the code (schemas.py:100): it has no description at all in the Pydantic field, and no mention in entity-resolve/SKILL.md either — the model has never been told what this number is supposed to mean, and it's currently used for exactly one thing in the whole codebase: display in the CLI preview table (console.py:260). It isn't gated on, thresholded, or read anywhere else.  Given that, my read is it's implicitly answering "how sure am I this mention resolves to this specific existing page" — identity-match certainty.
+
+Let's formalize this if we're adding another factor,
+
+> Mosaic scores high there because "Mosaic" is an unambiguous, distinctly-named company with exactly one matching page — trivial to resolve correctly — even though it was barely discussed (just "given Edward's Mosaic timeline"). 
+
+Not sure if this was apparent to the skill when identifying entities or not, but Mosaic is the company that I have an offer from that is the underlying reason for why I have only two weeks to work for Lawrence. I marked it as "low relevance" simply because the company that is causing the time constraint is not important to the discussion with Lawrence -- only the time constraint is important to him.
+
+Let's go with an ordinal scale to discretely categorize the relevance, rather than use a continous scale. only things of "relevant" or "very relevant" should be included.  And, the proposal should surface a visible note ("N entities left untouched as peripheral: Mosaic") so it's a reviewable decision rather than a silent drop.
