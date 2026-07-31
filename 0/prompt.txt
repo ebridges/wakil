@@ -1,0 +1,1 @@
+explain the differences between the skills in @src/wakil/skills/ and @src/wakil/skills/builtin/
