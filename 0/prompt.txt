@@ -1,0 +1,3 @@
+analyze and provide a critical analysis of the enriched outputs -- I'd like to see if there are any further improvements to wakil to bring it into parity with the legacy skills.
+(a) legacy:  ~/Projects/kb/meetings/2026/2026-07-16-mosaic-eleni-karahalios-backchannel.md
+(b) wakil: ~/Projects/kb/drafts/mosaic-backchannel-reference-call-with-eleni-karahalios-rivi.md
