@@ -1,0 +1,1 @@
+When running `wakil enrich` I again have run into a max_token limit because wakil has put too much in the request than the budget has allowed. can the request be organized in a better way to make the most of each request?
