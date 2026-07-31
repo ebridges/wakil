@@ -1,0 +1,7 @@
+Let's try another end-to-end comparison with the legacy ingest.
+
+Here's an ingest of a whisper file, plus an enriched version of the transcript all done with the legacy skills.  Rerun the ingest with Wakil and compare the outputs of the sources/transcript and the ingested meeting, to see that the output is on-par with what the legacy skills accomplished.
+
+- Whisper file: ~/Projects/kb/sources/audio/2026-07-16-hovnanian-kyle-carnes-offer-sync.whisper
+- Captured transcript: ~/Projects/kb/sources/transcripts/2026-07-16-hovnanian-kyle-carnes-offer-sync.md
+- Enriched ingest: ~/Projects/kb/meetings/2026/2026-07-16-hovnanian-kyle-carnes-offer-sync.md
