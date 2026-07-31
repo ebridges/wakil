@@ -1,0 +1,30 @@
+<task-notification>
+<task-id>adbefce03f6e61289</task-id>
+<tool-use-id>toolu_0146rDEaivLTPdTSDUEBdtf4</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/93aecd7b-3db1-4708-aaf6-81eeb2653a37/tasks/adbefce03f6e61289.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix entity-link mismatch bug in wakil enrich" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Summary
+
+**Bug fixed:** `wakil enrich` ran extraction and entity resolution as two independent model calls that could disagree on which existing page an entity name refers to (the "Mosaic" case: entity resolution correctly targets `companies/mosaic-private-markets.md`, but extraction's own prose wikilink pointed at the wrong `companies/mosaic-app.md`). Nothing reconciled the two afterward.
+
+**Fix — `/Users/ebridges/Projects/wakil/src/wakil/app/ingest_service.py`:**
+- Added `_WIKILINK_RE` (matches `[[path]]` / `[[path|display]]`, the convention documented in `note-conformance/SKILL.md`'s "Links" section) and a `_deslug()` helper for wikilinks without a display part.
+- Added `_reconcile_entity_links(config, proposal)`: builds an authoritative `name.lower() -&gt; path` map from `proposal.entity_resolutions` (`update` → `target_note_path`; `create` → the same `f"{schema.directory}/{slugify(name)}.md"` path `_build_stub_entities` computes, only if that path actually made it into `proposal.stub_entities` — skipped creates are left alone; `skip` → no target). It then does a plain regex rewrite of `proposal.proposed_note.content`, correcting only exact, case-insensitive name matches whose current link path disagrees with the authoritative one, keeping display text verbatim. Any correction appends a message to `proposal.warnings` (no silent rewrite).
+- Wired in at the end of `_run_entity_resolution()`, right after `proposal.stub_entities = _build_stub_entities(...)`.
+- No new model call; no changes to `prompts.py` or skill `.md` files.
+
+**Warnings visibility:** checked `src/wakil/ui/console.py::print_enrichment_proposal` — it already prints every entry in `proposal.warnings` unconditionally at the end of the preview (lines 241-242), so no gap existed there and no change was needed.
+
+**Tests — `/Users/ebridges/Projects/wakil/tests/unit/test_ingest_service.py`:** added three cases following the existing `FakeClient`/`workspace`/`transcript` fixture pattern:
+- `test_reconcile_corrects_note_link_to_match_entity_resolution` — reproduces the Mosaic bug; asserts the wrong link is rewritten to entity resolution's path and a "Corrected 1 entity link..." warning is recorded.
+- `test_reconcile_leaves_already_matching_link_untouched` — link already correct; content unchanged, no warning.
+- `test_reconcile_does_not_touch_unresolved_display_text` — display text with no matching resolved entity name; left untouched, no warning.
+
+**Verification:**
+- `uv run ruff check src/wakil/app/ingest_service.py tests/unit/test_ingest_service.py` — all checks passed.
+- `uv run pytest tests/unit/test_ingest_service.py -q` — 31 passed.
+- `uv run pytest -q` — 269 passed, 20 failed, 12 errors. All failures/errors are in files I did not touch: `tests/unit/test_skills_resolver.py`, `tests/integration/test_skills_cli.py`, `tests/integration/test_schema_migrate_cli.py`, `tests/integration/test_git_cli.py`, `tests/unit/test_git_service.py`. I confirmed the skills-related ones are the known pre-existing set caused by the concurrent `skills/models.py` change. I additionally investigated the git-related errors (not mentioned in the task brief) and confirmed they're a sandbox environment issue unrelated to any code change: this machine's global git config has `commit.gpgsign=true` with a 1Password signing agent unreachable from the sandbox (reproduced directly with a throwaway `git init &amp;&amp; git commit` outside the repo, independent of any wakil code — `fatal: failed to write commit object` / `1Password: agent returned an error`). No new failures were introduced by this change.</result>
+<usage><subagent_tokens>85563</subagent_tokens><tool_uses>33</tool_uses><duration_ms>362956</duration_ms></usage>
+</task-notification>
