@@ -1,0 +1,128 @@
+<task-notification>
+<task-id>a8073fc4671c1fe78</task-id>
+<tool-use-id>toolu_01BjWfe1rSv6uucUFyck1fgc</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/18af7b8b-933c-495c-9094-ebfc88ed6d1e/tasks/a8073fc4671c1fe78.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore markdown heading parsing and web fetch utilities" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Report: reusable pieces for `@file:` / `@url:` reference expansion
+
+### 1. `src/wakil/knowledge/markdown.py` — full purpose
+
+This module is only about **markdown file discovery + frontmatter/title extraction for the index**, not structural parsing. Full contents (71 lines):
+
+```python
+SKIPPED_DIRS = {".git", ".wakil", ".obsidian", "node_modules", ".venv"}
+_H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+
+@dataclass
+class MarkdownFile:
+    path: Path
+    title: str
+    content_hash: str
+    metadata: dict = field(default_factory=dict)
+
+def discover_markdown_files(root: Path) -&gt; list[Path]: ...
+def read_markdown_file(root: Path, relative_path: Path) -&gt; MarkdownFile: ...
+def _extract_title(metadata: dict, body: str, relative_path: Path) -&gt; str: ...
+```
+
+- `discover_markdown_files` walks a root, skipping `.git`/`.wakil`/`.obsidian`/`node_modules`/`.venv`/dotdirs, returns relative `*.md` paths.
+- `read_markdown_file` reads a file's bytes, hashes it, decodes UTF-8 (`errors="replace"`), splits frontmatter via `frontmatter.loads`, and computes a `title` (frontmatter `title`/`name` → first `# H1` → filename stem). Falls back to whole-text-as-body on malformed frontmatter.
+- `_H1_RE` only matches **H1** (`^#\s`), used solely for title inference — it does not walk the full heading tree.
+
+**There is no heading-tree/section parser here.** No function returns "text under heading X until the next heading of the same-or-higher level." This module does not build a heading hierarchy at all — it just grabs metadata for the index (title, content hash). Confirmed via `tests/unit/test_markdown.py`, which only tests discovery/title/hash behavior.
+
+**Closest existing precedent (not reusable as-is):** `src/wakil/app/ingest_service.py:1274-1308`, inside `transcript_frontmatter_template()`:
+```python
+_HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
+...
+headings = list(_HEADING_RE.finditer(text))
+for keyword in ("transcript", "source"):
+    for i, heading in enumerate(headings):
+        if keyword not in heading.group(1).lower():
+            continue
+        section_end = headings[i + 1].start() if i + 1 &lt; len(headings) else len(text)
+        block = _YAML_BLOCK_RE.search(text, heading.end(), section_end)
+```
+This finds a heading by keyword and slices to `headings[i+1].start()` — i.e., **any** next heading of **any level**, not "same-or-higher level" specifically. It's private, inline, single-purpose (finding a YAML template block), and not exported/reusable. `src/wakil/skills/lint.py:57` (`_TOC_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")`) similarly only detects heading lines for a TOC-presence check, not section extraction. **You will need to write the "slice under heading X, stop at next same-or-higher-level heading" logic from scratch** — nothing in the repo does level-aware section slicing.
+
+### 2. Article/web content extraction (`wakil ingest article &lt;url&gt;`)
+
+Code path: `src/wakil/cli/main.py:520` (`ingest_article` CLI command) → `_run_ingest` → `src/wakil/app/ingest_service.py:222` (`fetch_article(url)`) → `src/wakil/integrations/web.py`.
+
+Full file `src/wakil/integrations/web.py` (64 lines):
+
+```python
+USER_AGENT = "wakil/0.1 (+https://github.com/ebridges/wakil) article ingest"
+MAX_BYTES = 5_000_000
+
+class FetchError(RuntimeError): ...
+
+@dataclass
+class Article:
+    url: str
+    title: str
+    text: str
+
+def fetch_article(url: str) -&gt; Article:
+    """Fetch a URL and extract readable article text."""
+    response = httpx.get(url, headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=60)
+    ...
+    return extract_article(url, response.text)
+
+def extract_article(url: str, html: str) -&gt; Article:
+    """Extract title and readable text from raw HTML."""
+    document = Document(html)          # readability-lxml
+    title = (document.short_title() or "").strip()
+    content_html = document.summary(html_partial=True)
+    text = _html_to_text(content_html)
+    if not text.strip():
+        text = _html_to_text(html)     # fallback: whole page
+    return Article(url=url, title=title or url, text=text.strip())
+
+def _html_to_text(html: str) -&gt; str:
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    lines = [line.strip() for line in soup.get_text("\n").splitlines()]
+    ...  # collapse blank-line runs
+```
+
+- Uses `httpx.get` + `readability.Document` (readability-lxml) for readable-content extraction + `BeautifulSoup` for HTML→text conversion, matching CLAUDE.md's documented stack.
+- **`fetch_article(url: str) -&gt; Article`** is directly reusable for `@url:` expansion — it already does fetch + extract + returns `Article(url, title, text)`. `text` is **plain text**, not markdown (blank-line-collapsed, tag-stripped `soup.get_text`), so if the new feature wants markdown-flavored output you'd need a light wrapper, but the fetch/extract/error-handling (`FetchError`, 5MB cap, 60s timeout, `User-Agent`) is all ready to call as-is.
+- Errors raise `FetchError` (bad HTTP status, oversized response, `httpx.HTTPError`) — reuse this exception type for consistent CLI-level error reporting.
+- Tests: `tests/unit/test_web.py` (`test_extract_article_pulls_title_and_body`, `test_fetch_article_extracts`, etc.) show the expected mocking pattern (monkeypatching `httpx.get`).
+
+### 3. Binary file detection / MIME-type guessing
+
+**None exists.** Grep for `mimetypes`, `is_binary`, `binary` across `src/wakil` found nothing related — the only "binary" hits are an unrelated docstring comment (`ingest_service.py:390`, "origin may be a binary/external file") and `qmd.py`'s `binary = shutil.which("qmd")` (an executable-path variable, unrelated). File reads throughout the codebase (`ingest_service.py:209`, `markdown.py:44`) just do `path.read_text(encoding="utf-8", errors="replace")` or `read_bytes()` with no binary-detection guard. **You'll need to add this from scratch** (e.g., via `mimetypes.guess_type` or a null-byte heuristic) for the `@file:` feature to safely skip/handle non-text files.
+
+### 4. Existing `@`-reference/mention parser
+
+**Confirmed: none exists.** Grep for `re.compile` near "@"/mention/reference across `src/wakil` turned up no `@file:`/`@url:`/`@[[`-style parser. The only related regex is `_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")` in `src/wakil/app/ingest_service.py:656`, which parses Obsidian-style `[[wikilinks]]` for entity-resolution/linking during ingest — a different feature (note-to-note linking during ingest enrichment), not a general-purpose context-reference expander for prompts/CLI input. All other "mention"/"reference" hits are just prose in docstrings/prompt text (`llm/prompts.py`, `llm/schemas.py`, `skills/lint.py`), not code. **This feature has zero prior implementation in the codebase — safe to build fresh.**
+
+### 5. Frontmatter body reading (`schema/loader.py` and elsewhere)
+
+`src/wakil/schema/loader.py` is unrelated to markdown frontmatter — it's entirely about loading **YAML entity-schema definitions** (`schema/entities/*.yaml`) and page-shape templates, with no `python-frontmatter` usage at all.
+
+There is **no shared, exported utility function** whose sole job is "read a markdown file's body separate from its frontmatter." The `python-frontmatter` library's `frontmatter.loads(text)` is called independently, inline, in three separate places, each with slightly different error handling:
+- `src/wakil/knowledge/markdown.py:49` — `read_markdown_file()`, wraps in try/except, falls back to raw text as body on parse failure.
+- `src/wakil/skills/resolver.py:155` — parsing `SKILL.md` frontmatter.
+- `src/wakil/skills/lint.py:96` — same, for lint checks.
+- `src/wakil/schema/validate.py` operates on an already-parsed `frontmatter` dict (doesn't call `frontmatter.loads` itself).
+
+The closest thing to a "reusable" pattern is `read_markdown_file()` in `markdown.py`, but it returns a `MarkdownFile` dataclass (path/title/hash/metadata) — it discards `post.content` (the body) rather than exposing it, so it isn't directly usable for "give me this file's body text." **For the new `@file:` feature, plan to either (a) add a small new body-only-read helper (e.g., reusing `frontmatter.loads(...).content` directly, following the same try/except-fallback pattern as `markdown.py:48-54`) rather than duplicating raw-file-read logic, or (b) extend `read_markdown_file`/add a sibling function that also returns the body.** There's no existing single-purpose "read body, strip frontmatter" function to call today.
+
+### Summary of what's reusable vs. what must be built new
+
+| Need | Reusable now | Location |
+|---|---|---|
+| Fetch + extract readable text from a URL | Yes | `wakil.integrations.web.fetch_article(url) -&gt; Article` |
+| Frontmatter parsing (with fallback-on-error pattern) | Pattern reusable, not a shared function | `wakil.knowledge.markdown.read_markdown_file` (lines 48-54) |
+| Heading-tree/section extraction (by name+level, same-or-higher-level boundary) | No | must build new |
+| Binary-file / MIME detection | No | must build new |
+| `@file:`/`@url:` regex reference parser | No (confirmed no prior art) | must build new |
+| Body-only file read (frontmatter stripped) | No standalone utility | must build new (reuse the `frontmatter.loads` try/except pattern) |</result>
+<usage><subagent_tokens>38357</subagent_tokens><tool_uses>22</tool_uses><duration_ms>79529</duration_ms></usage>
+</task-notification>
