@@ -1,0 +1,1 @@
+the @src/wakil/skills/builtin/kb-commit/ skill has been updated, confirm these changes against what has been done in this context
