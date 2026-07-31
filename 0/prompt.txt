@@ -1,0 +1,9 @@
+<task-notification>
+<task-id>adbefce03f6e61289</task-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/93aecd7b-3db1-4708-aaf6-81eeb2653a37/tasks/adbefce03f6e61289.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix entity-link mismatch bug in wakil enrich" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>This monitor was a leftover from an earlier wait pattern I abandoned in favor of running pytest synchronously (which already completed and was reported in my previous message). No action needed — the actual test verification is done and its results are already in my final report above.</result>
+<usage><subagent_tokens>85513</subagent_tokens><tool_uses>33</tool_uses><duration_ms>567726</duration_ms></usage>
+</task-notification>
