@@ -1,0 +1,1 @@
+Analyze @../kb/RESOLVER.md and create a whitepaper using that as a worked example of how one might resolve storage of different categories of entities that a KB may use. Provide critical feedback and examine areas that it may be missing.  Of particular interest is resolution of more ambiguous categories such as "ideas", "concepts" etc.
