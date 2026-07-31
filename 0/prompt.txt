@@ -1,0 +1,5 @@
+<task-notification>
+<task-id>b23mhn02j</task-id>
+<summary>Monitor event: "wait for wakil ingest transcript capture to finish writing output"</summary>
+<event>[Monitor timed out — re-arm if needed.]</event>
+</task-notification>
