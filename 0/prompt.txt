@@ -1,0 +1,37 @@
+<task-notification>
+<task-id>a1a252380fd2dc5e3</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/a1a252380fd2dc5e3.output</output-file>
+<status>completed</status>
+<summary>Agent "Refactor entities_compile in main.py" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Applied the development-docs skill's bar to this session: nothing clears it. The extraction was a pre-designed refactor (not a debugging discovery), and the `typer.Exit` fix was a specified part of the task rather than an ad-hoc gotcha found by digging through unclear code — it's a one-off correctness detail of this particular extraction, not a pattern that generalizes to other future work. No entry added to `docs/DEVELOPMENT.md` or `docs/TROUBLESHOOTING.md`. The commit `e05eb90` stands as-is.
+
+## Summary
+
+**Diff:** `src/wakil/cli/main.py`, +97/-71 lines.
+
+- Extracted the interactive over-size Compiled Truth menu (a/e/f/c) from `entities_compile` into a new module-level helper `_resolve_oversized_compiled_truth(update, text, size, *, run_full_resynthesis) -&gt; EntityUpdate` (lines 803-891), placed immediately before `entities_compile`.
+- The two closures `_apply_and_commit` and `_run_full_resynthesis` stayed inside `entities_compile` unchanged, since they close over `slug`/`commit`/`yes`/`config`/`client`.
+- Correctness fix baked in: in the helper, the `f` branch now does `run_full_resynthesis()` followed by `raise typer.Exit(code=0)` instead of a bare `return` — a bare return there would only exit the helper and let `entities_compile`'s own preview/confirm/apply tail re-apply a stale, pre-loop `update` over a file that full resynthesis already wrote/committed. The `c` branch keeps its original `raise typer.Exit(code=0)` semantics, unchanged.
+- Moved the helper's own needed local imports (`click`, `_COMPILED_TRUTH_TARGET_CHARS`, `_TIMELINE_HEADING_RE`, `rebuild_entity_update_with_compiled_truth`) into the helper; trimmed those out of `entities_compile`'s own import block since they're no longer used there directly.
+- Added `from wakil.app.ingest_service import EntityUpdate` under the existing `TYPE_CHECKING` block at module top, needed for the helper's forward-ref type annotations.
+- Restructured the call site in `entities_compile` from `size = len(text) if text is not None else None; if size is not None and size &gt; TARGET:` to a nested `if text is not None: size = len(text); if size &gt; TARGET:` — required for `ty` to narrow `text` from `str | None` to `str` before passing it to the helper (which is typed `text: str`).
+
+**Final line count:** `entities_compile` is now 117 lines (lines 894-1010, including its `@entities_app.command("compile")` decorator), down from 182 — within the reviewed 115-120 expectation, not the originally-overstated "&lt;100".
+
+**Tests run:**
+- `uv run pytest tests/integration/test_ingest_cli.py -k entities_compile -v` — 12 passed (includes `test_entities_compile_over_target_menu_full_resynthesis`, which exercises the exact `f`-branch fix).
+- `uv run pytest tests/unit/test_ingest_service.py -k compile -v` — 5 passed.
+- `uv run pytest tests/integration/test_ingest_cli.py -v` — full file, 38 passed.
+- `uv run pytest -q` (whole suite) — 621 passed, 62 deselected.
+
+**Lint/type check:**
+- `uv run --with ty ty check src/wakil/cli/main.py` — all checks passed (after the `EntityUpdate` TYPE_CHECKING import and text-narrowing fixes above).
+- `uv run ruff check src/wakil/cli/main.py` — all checks passed.
+- `uv run ruff format --check` flags one pre-existing unrelated formatting issue at line 235 (confirmed present on `main` before this change via `git stash`); left untouched to keep this a minimal, scoped refactor.
+
+Commit: `e05eb90` — `♻️ refactor(cli): extract oversized-compiled-truth menu loop from entities_compile` (not pushed, per instructions).</result>
+<usage><subagent_tokens>58984</subagent_tokens><tool_uses>35</tool_uses><duration_ms>288746</duration_ms></usage>
+<worktree><worktreePath>/Users/ebridges/Projects/wakil/.claude/worktrees/agent-a1a252380fd2dc5e3</worktreePath><worktreeBranch>worktree-agent-a1a252380fd2dc5e3</worktreeBranch></worktree>
+</task-notification>
