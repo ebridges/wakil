@@ -1,0 +1,5 @@
+help me create a context file for an agent that reviews pull requests on this repo.  It should have broad context on:
+- staff level software engineer perspective on AI systems and product engineering
+- general coding best practices for Python3
+- the overall mission of this project and what it's trying to accomplish
+- keen awareness of development practices and decisions made on this project, as well as deep expertise on troubleshooting it
