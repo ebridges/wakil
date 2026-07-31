@@ -1,0 +1,1 @@
+how can other processes be sure they're using it? or can it be safely assumed it's generally availalbe?
