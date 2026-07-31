@@ -1,0 +1,5 @@
+I'm trying to arrive at the right way to use the `wakil` product.  This product has self-contained skills and a mechanism for overriding those skills by the user working with it.  Ideally I would want to be running tasks within a kb using the Hermes agent that has been customized with the functionality in Wakil.  That said, I would prefer to not simply copy every skill into hermes because it updates skills as it learns (indeed, I'd like Hermes to leverage the mechanism for overriding Wakil skills, so that it's clear what it has changed). 
+
+That said, I'm not sure if I'm understanding how Hermes and Agents generally integrate with tools like Wakil.  So, given that, I'm looking for significant guidance (and possible correction) on what I'm doing.  Ask me questions to help me gain clarity on what I'm trying to do.
+
+(Note -- there's another agent currently working on refactoring skills, so those files may change while you work).
