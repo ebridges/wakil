@@ -1,0 +1,1 @@
+> Hermes additionally registers mcp_wakil_read_resource as a callable tool — so the agent can fetch the skill's content on its own. But nothing auto-injects it into context; the agent has to decide to call that tool, which isn't guaranteed without a nudge.
