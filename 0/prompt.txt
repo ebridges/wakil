@@ -1,0 +1,1 @@
+decide how to fix the 19 pre-existing test failures caused by the new required `description` field on skills.
