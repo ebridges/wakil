@@ -1,0 +1,28 @@
+<task-notification>
+<task-id>a4b4dceefcf5d80db</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/a4b4dceefcf5d80db.output</output-file>
+<status>completed</status>
+<summary>Agent "Refactor _build_stub_entities in ingest_service.py" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I checked `docs/DEVELOPMENT.md` and `docs/TROUBLESHOOTING.md` — the `uvx ty check` pattern (ty not on PATH locally) is already documented at `docs/TROUBLESHOOTING.md:314`. Nothing else from this session (a clean, uneventful refactor with no bugs or surprises) clears the bar for a new entry, so I made no doc changes.
+
+## Summary
+
+**Diff**: `src/wakil/app/ingest_service.py`, +71/-40. Extracted two helpers from `_build_stub_entities`:
+
+- `_suppress_duplicate_of_proposed_note(resolution, schema, proposal, taken, proposed_note_slug) -&gt; bool` — the `resolution_slug == proposed_note_slug` branch (the `_correct_proposed_note_type` call + `taken` fixup + warning). Returns `True` when suppressed.
+- `_build_stub_or_skip(resolution, schema, proposal, taken, today, config) -&gt; ProposedFile | None` — path-exists check, path-taken check, and the `_populate_type_frontmatter`/`ProposedFile` construction. Includes `config: WorkspaceConfig` as required, since `(config.root_path / path).exists()` isn't derivable from the other params.
+
+The 33-line docstring, the top-level `for` loop, and `kept_resolutions`/`taken` bookkeeping stayed in `_build_stub_entities`. Neither helper touches `kept_resolutions`; the caller appends unconditionally after each call, since every path through both extracted regions keeps the resolution (verified line-by-line against the original code before implementing, then confirmed by the test run).
+
+**Tests**: `uv run pytest tests/unit/test_ingest_service.py -v` — 143 passed, 0 failed.
+
+**Lint/type checks**: `uv run ruff check src/wakil/app/ingest_service.py` — all checks passed. `ty` isn't on PATH in this environment (known, already documented); `uvx ty check src/wakil/app/ingest_service.py` — all checks passed.
+
+**Final line count**: `_build_stub_entities` is now 83 lines (was 117), spanning lines 1194–1276.
+
+**Commit**: `8d2c77b` — `♻️ refactor(ingest): extract duplicate/stub-build branches from _build_stub_entities` (not pushed, per instructions).</result>
+<usage><subagent_tokens>55486</subagent_tokens><tool_uses>19</tool_uses><duration_ms>206146</duration_ms></usage>
+<worktree><worktreePath>/Users/ebridges/Projects/wakil/.claude/worktrees/agent-a4b4dceefcf5d80db</worktreePath><worktreeBranch>worktree-agent-a4b4dceefcf5d80db</worktreeBranch></worktree>
+</task-notification>
