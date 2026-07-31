@@ -1,0 +1,20 @@
+This is very interesting.  Let's dig into it by using the given enrich example as a case study.
+
+That transcript being enriched was a discussion between myself and Lawrence Krubner to find some agreement on what their current issues are, what issues could be addressed in the timeframe that I had available, and some brainstorming on ideas that could be done on relevant issues within the time constraint.
+
+Here are the ten entities that were discovered.  For each, I came up with a basic characterization and their degree of relevance to this meeting.
+
+Lawrence Krubner - participant: very relevant                   
+Edward Bridges - participant: very relevant                     
+Brian Corr - affected party, discussed: very relevant                         
+Jake McGuire - affected party, not discussed: relevant
+Prabhuddha Bhan - affected party, not discussed: relevant
+Murtaza Mister - affected party, not discussed, short tenure: less relevant
+Scorealytics - contracting firm: relevant
+Mosaic - firm where i have an offer, not discussed: low relevance
+Scorealytics AI Mentoring Program - project under consideration: very relevant
+Scorealytics News Accuracy Framework - general business context: less relevant
+
+Would it be scalable for us to arrive at a relevance factor for each entity, and then only include those above some relevance threshold?
+
+Is this a matter of revisiting how the "confidence" score is arrived at? Or, would this be a separate factor for relevance?
