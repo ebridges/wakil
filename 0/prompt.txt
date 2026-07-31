@@ -1,0 +1,3 @@
+The "origin" frontmatter field should be "transcript" (i.e. an enumerated field), and the URL should be a "file:" url to the path relative to the root of the KB of the "whisper" file.  Generally, all file paths should be relative to KB-repo root and not absolute.
+
+The deeper stutter-repair/title-synthesis polish should be added to the enrich-time skill.  Express a plan for that.
