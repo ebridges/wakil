@@ -1,0 +1,1 @@
+can there be two different mcp server configurations: one for  ~/Projects/kb-personal  and another for  ~/Projects/kb ?
