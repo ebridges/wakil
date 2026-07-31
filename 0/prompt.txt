@@ -1,0 +1,37 @@
+<task-notification>
+<task-id>a5edc4cd9d2e4ce66</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/a5edc4cd9d2e4ce66.output</output-file>
+<status>completed</status>
+<summary>Agent "Refactor prepare_enrichment in ingest_service.py" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>The commit is finalized (SHA `6a82ee2`) in the worktree at `/Users/ebridges/Projects/wakil/.claude/worktrees/agent-a5edc4cd9d2e4ce66` on branch `worktree-agent-a5edc4cd9d2e4ce66`. Not pushed anywhere, as instructed.
+
+## Summary
+
+**File:** `/Users/ebridges/Projects/wakil/.claude/worktrees/agent-a5edc4cd9d2e4ce66/src/wakil/app/ingest_service.py`
+
+Extracted two helpers from `prepare_enrichment` (verbatim moves, no behavior change):
+
+1. **`_gather_related_notes(session, config, source, workspace_id, title, search_context, text, context_referenced_paths) -&gt; list[SearchHit]`** — the three related-notes blocks (user `@file:` references, `search_workspace`/QMD relevance, `_candidate_entity_notes` title lookup) plus their shared `seen_paths` dedup. `session` is an explicit parameter, confirmed necessary since this code runs inside `prepare_enrichment`'s `with open_session(...)` block, which closes at line 665/666 in the original — before the base `EnrichmentProposal` is constructed at line 667.
+
+2. **`_populate_proposal_from_models(config, client, source, text, title, related_notes, proposal) -&gt; None`** — everything from the extraction-model call through the final `_warn_if_nothing_produced` call, mutating `proposal` in place (matches the file's existing `_run_extraction`/`_run_entity_resolution` convention).
+
+**Both required fixes applied:**
+- `guides = load_workspace_guides(config)` now lives *inside* `_populate_proposal_from_models` (computed there from `config`), consistent with the task's specified parameter list (no `guides` param) — not duplicated as both an external local and a parameter.
+- `_warn_if_nothing_produced(source.id, proposal)` — uses the ORM row's primary key (`source.id`) since the helper only carries `source`, not a bare `int`.
+
+**Result:** `prepare_enrichment` is now 56 lines (down from ~153): source fetch + force check, context/metadata resolution, call to `_gather_related_notes`, base `EnrichmentProposal` construction, call to `_populate_proposal_from_models`, return.
+
+**Verification:**
+- `tests/unit/test_ingest_service.py` + `tests/unit/test_entity_resolution.py`: 152 passed
+- Full suite `uv run pytest -q -m "not eval"`: 621 passed, 62 deselected, no regressions
+- `uv run ruff check src/wakil/app/ingest_service.py`: all checks passed
+- `uvx ty check src/wakil/app/ingest_service.py`: all checks passed
+
+Applied the `development-docs` skill per the pre-commit hook: this was a mechanical, spec-followed refactor with no debugging surprises or new generalizable pattern, so no entry was added to `docs/DEVELOPMENT.md` or `docs/TROUBLESHOOTING.md` (correctly clears the "default: no entry" bar).
+
+Commit: `6a82ee2` — `♻️ refactor(ingest): split prepare_enrichment into related-notes/model-population helpers`</result>
+<usage><subagent_tokens>74917</subagent_tokens><tool_uses>20</tool_uses><duration_ms>235399</duration_ms></usage>
+<worktree><worktreePath>/Users/ebridges/Projects/wakil/.claude/worktrees/agent-a5edc4cd9d2e4ce66</worktreePath><worktreeBranch>worktree-agent-a5edc4cd9d2e4ce66</worktreeBranch></worktree>
+</task-notification>
