@@ -1,0 +1,1 @@
+PR #21 bundles in a large `common_words.txt` data file which I think has redundancies with NLTK's database.  What is the purpose of that?
