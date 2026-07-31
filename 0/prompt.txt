@@ -1,0 +1,26 @@
+when trying to run this in @~/Projects/kb-personal I get this error:
+
+> uv run wakil mcp serve
+zsh: correct 'wakil' to '.wakil' [nyae]? n
+╭────────────────────────────────────────────────────────────────────────────── Traceback (most recent call last) ──────────────────────────────────────────────────────────────────────────────╮
+│ /Users/ebridges/Projects/wakil/src/wakil/cli/main.py:1572 in mcp_serve                                                                                                                        │
+│                                                                                                                                                                                               │
+│   1569 │   workspace for the life of the process — same resolution as every other                                                                                                             │
+│   1570 │   command's `-w/--workspace`.                                                                                                                                                        │
+│   1571 │   """                                                                                                                                                                                │
+│ ❱ 1572 │   from wakil.mcp.server import run_stdio                                                                                                                                             │
+│   1573 │                                                                                                                                                                                      │
+│   1574 │   root = _resolve_workspace(ctx)                                                                                                                                                     │
+│   1575 │   config = WorkspaceConfig.load(root)                                                                                                                                                │
+│                                                                                                                                                                                               │
+│ /Users/ebridges/Projects/wakil/src/wakil/mcp/server.py:20 in <module>                                                                                                                         │
+│                                                                                                                                                                                               │
+│    17                                                                                                                                                                                         │
+│    18 from pathlib import Path                                                                                                                                                                │
+│    19                                                                                                                                                                                         │
+│ ❱  20 from mcp.server.fastmcp import FastMCP                                                                                                                                                  │
+│    21                                                                                                                                                                                         │
+│    22 from wakil.app.graph_service import Direction                                                                                                                                           │
+│    23 from wakil.config.settings import WorkspaceConfig                                                                                                                                       │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ModuleNotFoundError: No module named 'mcp.server.fastmcp'
