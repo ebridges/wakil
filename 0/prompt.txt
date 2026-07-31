@@ -1,0 +1,5 @@
+<bash-stdout>docs/]8;;file:///Users/ebridges/Projects/wakil/docs/entity-metadata.md\entity-metadata.md]8;;\
+docs/]8;;file:///Users/ebridges/Projects/wakil/docs/entity-model.md\entity-model.md]8;;\
+docs/]8;;file:///Users/ebridges/Projects/wakil/docs/entity-resolution.md\entity-resolution.md]8;;\
+docs/]8;;file:///Users/ebridges/Projects/wakil/docs/ingestion-model.md\ingestion-model.md]8;;\
+docs/]8;;file:///Users/ebridges/Projects/wakil/docs/memory-model.md\memory-model.md]8;;\</bash-stdout><bash-stderr></bash-stderr>
