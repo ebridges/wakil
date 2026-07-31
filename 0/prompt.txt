@@ -1,0 +1,15 @@
+<task-notification>
+<task-id>wx23myfh5</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/wx23myfh5.output</output-file>
+<status>failed</status>
+<summary>Dynamic workflow "Find functions &gt;100 lines, propose refactors per file, independently verify each, dedupe, report" failed: Error: undefined is not an object (evaluating 'FILES.map')
+    at &lt;anonymous&gt; (workflow.js:37:53)
+    at workflow.js:87:1275
+    at runInContext (native)
+    at uTd (/$bunfs/root/src/entrypoints/cli.js:13992:4922)
+    at processTicksAndRejections (native)</summary>
+<recovery>To resume after editing the script, call: Workflow({scriptPath: '/Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/workflows/scripts/refactor-long-functions-wf_2f5acd13-dd8.js', resumeFromRunId: 'wf_ca584c91-df2', args: "{\"files\": [\n  {\"path\": \"src/wakil/cli/main.py\", \"functions\": [\n    {\"name\": \"entities_compile\", \"start_line\": 803, \"end_line\": 984, \"length\": 182},\n    {\"name\": \"enrich\", \"start_line\": 529, \"end_line\": 637, \"length\": 109}\n  ]},\n  {\"path\": \"src/wakil/app/ingest_service.py\", \"functions\": [\n    {\"name\": \"prepare_enrichment\", \"start_line\": 580, \"end_line\": 732, \"length\": 153},\n    {\"name\": \"_build_stub_entities\", \"start_line\": 1129, \"end_line\": 1245, \"length\": 117},\n    {\"name\": \"apply_enrichment\", \"start_line\": 2132, \"end_line\": 2242, \"length\": 111},\n    {\"name\": \"validate_proposal\", \"start_line\": 2027, \"end_line\": 2129, \"length\": 103}\n  ]},\n  {\"path\": \"src/wakil/app/graph_service.py\", \"functions\": [\n    {\"name\": \"traverse\", \"start_line\": 62, \"end_line\": 211, \"length\": 150}\n  ]},\n  {\"path\": \"src/wakil/mcp/server.py\", \"functions\": [\n    {\"name\": \"build_server\", \"start_line\": 36, \"end_line\": 159, \"length\": 124}\n  ]}\n]}"})
+Agent transcripts: /Users/ebridges/.claude/projects/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/subagents/workflows/wf_ca584c91-df2</recovery>
+<usage><agent_count>0</agent_count><agents_done>0</agents_done><agents_error>0</agents_error><agents_skipped>0</agents_skipped><agents_empty_result>0</agents_empty_result><subagent_tokens>0</subagent_tokens><tool_uses>0</tool_uses><duration_ms>102</duration_ms></usage>
+</task-notification>
