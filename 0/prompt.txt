@@ -1,0 +1,24 @@
+<task-notification>
+<task-id>afac6a1d1fa0d0506</task-id>
+<tool-use-id>toolu_01XUmXHcWgJ7eYoqSs9DVJ7e</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/a9870ca9-6eef-49d9-bd88-0c44d4f77b21/tasks/afac6a1d1fa0d0506.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore existing knowledge-capture conventions" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Findings: Existing conventions for capturing engineering findings/decisions in wakil
+
+**docs/ directory** — exists, but holds design/spec documents, not decision logs or changelogs. Eight files (`entity-metadata.md`, `entity-model.md`, `entity-resolution.md`, `ingestion-model.md`, `ingestion-refactor-spec.md`, `memory-model.md`, `skill-refactor.md`, `skill-resolution-specification.md`). Most use a YAML-ish frontmatter with `title / status: draft / audience: wakil design` and read as long-form prescriptive specs ("critical reads" of legacy docs, refactor plans), not append-only or dated decision records. None have a "why we chose X over Y, discovered on date" log format.
+
+**No NOTES.md, DECISIONS.md, or CHANGELOG.md** anywhere in the repo (root or docs/). There **is** a `TODO.md` at root — a live, phase-organized backlog (mirrors `PROMPT.md` build phases) that occasionally embeds brief rationale inline for deferred items (e.g. explaining why the full agentic eval harness was deferred), but it's forward-looking task tracking, not a retrospective findings log.
+
+**CLAUDE.md** (root) is a project-guidance doc, not a knowledge-capture mechanism. Its "Working Agreement for Agents" (item 8) states: *"Update docs when behavior changes."* — the only explicit documentation directive. No section on ADRs or memory/knowledge capture; philosophy strongly favors simplicity/minimalism ("Do not over-engineer," "Do not add speculative abstractions," avoid "opaque memory systems").
+
+**Git commits** use gitmoji + Conventional Commits (`✨ feat(...)`, `🐛 fix(...)`, `📝 docs(...)`, `♻️ refactor(...)`) with terse scoped subjects; rationale, when present, lives in `TODO.md` entries or docs, not commit bodies. There's a `commit` skill (`.claude/skills/commit/SKILL.md`) codifying this style.
+
+**No ADR usage** — `grep -ri "adr"` across the repo returns nothing.
+
+**`.claude/` directory** — only `settings.local.json` (permissions) and one skill (`commit`); nothing for cross-session knowledge capture.
+
+**Gap:** any recommendation should respect the "keep it simple, boring, no speculative infra" philosophy — a lightweight decisions log fits; a formal ADR tool/process would likely be seen as over-engineering.</result>
+<usage><subagent_tokens>26363</subagent_tokens><tool_uses>8</tool_uses><duration_ms>84208</duration_ms></usage>
+</task-notification>
