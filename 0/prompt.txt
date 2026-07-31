@@ -1,0 +1,3 @@
+- draft a plan for adding relationship/graph-traversal to wakil query.
+- "maintain" - would it add significant value to call to the wakil database to confirm whether something is an orphan, etc.
+- review @../hold.hermes/skills/conventions/quality.md and look for idiosyncratic and useful guidelines that can be migrated
