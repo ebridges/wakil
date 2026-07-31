@@ -1,0 +1,1 @@
+Update that launch configuration to prompt for arguments when the command requires them
