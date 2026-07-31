@@ -1,0 +1,43 @@
+<task-notification>
+<task-id>abc318604c5953578</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/abc318604c5953578.output</output-file>
+<status>completed</status>
+<summary>Agent "Review PR #111 validate_proposal refactor" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## PR #111 Review: Refactor: split `validate_proposal` into per-collection validators
+
+**Verdict: Approve.** This is a clean, behavior-preserving mechanical extraction. I did a line-by-line diff of `src/wakil/app/ingest_service.py` between `main` and the PR branch (not just the unified diff), checked out the branch, and ran the suite myself rather than trusting the PR description.
+
+### Verification performed
+
+- **Checked out `pr-111`, ran `uv run ruff check .`** → `All checks passed!`
+- **Ran `uv run pytest -q -m "not eval"`** → `621 passed, 62 deselected` (matches the "clean"/"passed" claims in the PR description; I didn't just relay them)
+- **Reconstructed the full pre- and post-refactor function bodies** (not just the diff hunks) to confirm behavioral equivalence directly, since a diff alone can hide reordering across a big rewrite.
+
+### Specific checks requested
+
+1. **Both parse-failure paths preserved, unchanged, with distinct messages** — confirmed by direct comparison:
+   - `_validate_proposed_files` (src/wakil/app/ingest_service.py:2048-2059): on a parse exception, `metadata = {}`, falls through to `_entity_type_of` returning `None`, producing `"proposed file has no \`type:\` frontmatter"`. Identical to original.
+   - `_validate_entity_updates` (src/wakil/app/ingest_service.py:2085-2091): on a parse exception, appends `"merged content is not valid frontmatter"` directly and `continue`s — it does *not* fall through to the type-check. This is a genuinely different code path from the first loop, and it's preserved exactly as before. The PR's claim that these two diverge on purpose and were kept separate is accurate; unifying them (as I was checking whether the PR mistakenly did) would have collapsed a real UX distinction.
+   - The shared `_entity_type_of` helper (src/wakil/app/ingest_service.py:2027-2029) is a faithful extraction of the `metadata.get("type") if isinstance(...) else None` / `not isinstance(...) or not entity_type` logic used identically in both original loops — verified the truth table matches (including the empty-string case) for all inputs.
+
+2. **Three-way concatenation ordering** — `validate_proposal` (src/wakil/app/ingest_service.py:2156-2160) does `[*_validate_proposed_files(...), *_validate_entity_updates(...), *_validate_unroutable_creates(...)]`. Each sub-validator starts its own `issues: list[ProposalIssue] = []` and iterates a disjoint input (`proposed_files`, `proposal.entity_updates`, `proposal.entity_resolutions` respectively) with no shared mutable state between them (the `seen_paths` dedup set is correctly scoped inside `_validate_proposed_files` only, matching the original). So the concatenation is order-equivalent to the original single accumulating loop — no cross-pass dependency was introduced or broken.
+
+3. **Proportionality (CLAUDE.md anti-over-engineering)** — this earns its complexity. `validate_proposal` is the ADR 0008 "enforce invariants" gate, and per ADR 0019 it's explicitly "a hard stop regardless of tempo, not a judgment call" — i.e. one of the few places in this codebase where correctness really matters and where a future contributor is likely to need to touch one collection's rule without wading through all three. The split is a straightforward extract-function refactor (no new abstraction, no config knob, no model call, no new class) — it doesn't reach for anything on the "avoid" list. `schemas`/`kb_root` are computed once in the top-level function and threaded down as plain parameters rather than being re-fetched per helper, so there's no duplicated I/O either.
+
+### Minor observations (non-blocking)
+
+- `_entity_type_of(metadata: object) -&gt; str | None` (src/wakil/app/ingest_service.py:2027) uses `object` rather than `Any` for the untyped input and narrows via `isinstance` — this is the *correct* pattern the reviewer instructions ask me to watch for (a real annotation, not an `Any` shortcut), worth noting positively rather than flagging.
+- There's now some docstring duplication: the top-level `validate_proposal` docstring's opening paragraph re-describes the "every proposed new file must carry valid frontmatter" and "no two proposed files may share a path" invariants that also live in `_validate_proposed_files`'s own docstring. Not a defect, but if `_validate_proposed_files`'s behavior changes in a future PR, both docstrings need updating in sync — worth a one-line "see `_validate_*` for details" pointer at some point, not worth blocking this PR over.
+- I didn't find an existing unit test that specifically exercises the `_validate_entity_updates` parse-*exception* branch (as opposed to the schema-mismatch branch covered by `test_validate_proposal_rejects_entity_update_with_invalid_frontmatter` at tests/unit/test_ingest_service.py:2361). That's a pre-existing coverage gap, not something this refactor introduced or worsened — flagging only as an FYI, not a request for this PR.
+
+### Docs/ADR cross-check
+
+- **ADR 0008** (`docs/adr/0008-ingestion-decomposition-reject-multi-agent-mechanism.md`) and **ADR 0019** (`docs/adr/0019-fast-capture-review-tempo.md`): both read in full. `validate_proposal` remains fully deterministic Python control flow post-refactor — no dispatcher/router reintroduced, no model call added. Consistent with both.
+- **README.md:194-199**: the user-facing description of `validate_proposal()`'s contract ("checks every proposed file's frontmatter against the entity schemas; a proposed `type:` with no schema is a hard stop") matches the unchanged top-level docstring and unchanged behavior — no README update needed, and none was made.
+- **docs/TROUBLESHOOTING.md:264-266**: there's a documented gotcha specifically about `validate_proposal`'s create-scanning loop sharing a mutable `proposal.entity_resolutions` list with `_build_stub_entities`. I checked this refactor doesn't touch that relationship — `_validate_unroutable_creates` receives `proposal.entity_resolutions` as the same list reference, iterated the same way, so this known-bitten class of bug is not reintroduced.
+
+No correctness, safety, or ADR-conflict issues found. This is a proportionate, well-scoped refactor of a load-bearing invariant gate.</result>
+<usage><subagent_tokens>41343</subagent_tokens><tool_uses>21</tool_uses><duration_ms>251613</duration_ms></usage>
+</task-notification>
