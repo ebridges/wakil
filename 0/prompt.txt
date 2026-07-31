@@ -1,0 +1,1 @@
+update the skill to use the exact registered names, tighten the skill's description, and add a one-line rule to the context file in @~/Projects/kb/AGENTS.md
