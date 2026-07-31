@@ -1,0 +1,42 @@
+<task-notification>
+<task-id>a731d623341de555c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/0d040421-da1c-44ba-aeb0-8cd05f206644/tasks/a731d623341de555c.output</output-file>
+<status>completed</status>
+<summary>Agent "Adversarial review of PR #32" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Re-review complete.
+
+## Re-review of PR #32 after the coordinator's fixes
+
+I refetched the branch fresh (`git fetch origin feat/entity-revision-caching-and-relevance`, now at `6ffd82e`), grepped the diff independently for the previously-missing symbols, read the recursion/split logic in full, ran ruff and the full test suite myself, and confirmed the PR on GitHub now points at the commit that actually contains this code (`headRefOid: 6ffd82e`).
+
+**Finding #1 — confirmed fixed, verified directly, not taken on trust.**
+`grep -rn "_revise_candidates|_split_candidates_by_content_length|_apply_entity_revisions|_MAX_BISECTION_DEPTH|\.truncated" src/ tests/` now returns real hits in `src/wakil/app/ingest_service.py:1094-1241` and `src/wakil/llm/schemas.py:24-32`. I read `_revise_candidates`, `_split_candidates_by_content_length`, and `_apply_entity_revisions` in full and checked the specific things I was originally asked to check:
+- Base case / no-split guard: `_run_entity_updates` never calls `_revise_candidates` with an empty list (`if not candidates: return` first), and `_revise_candidates` only splits when `len(candidates) &gt; 1` — a singleton candidate that truncates fails cleanly rather than looping.
+- Depth accounting: `depth &lt; _MAX_BISECTION_DEPTH` gates the split, both recursive calls pass `depth + 1`, and with the default `_MAX_BISECTION_DEPTH = 3` the max fan-out is exactly 8 leaves (3 splits deep) — matches the ADR's own claim and the comment at `ingest_service.py:1093-1094`. Verified this isn't off-by-one by tracing `test_entity_updates_stop_bisecting_at_depth_ceiling` (monkeypatches depth to 1, asserts exactly 8 client calls and 2 separate single-entity failure warnings) — I traced the call count by hand and it matches.
+- `truncated` threading: both `ModelContractError` raise sites in `schemas.py` (truncation path and validation-failure path) now set `truncated=True`/`False` correctly, and `_revise_candidates`'s `except` branch checks `exc.truncated` before ever splitting — `test_entity_updates_validation_failure_does_not_trigger_split` exercises the negative case explicitly.
+- `_split_candidates_by_content_length` edge cases: hand-traced the greedy longest-first balance against the all-identical-length case (not present as an explicit test, but I verified by hand it alternates and stays balanced, no infinite loop or empty half) and the two-candidate case (tested, one-each). The docstring's claim is "the single largest note is placed first" — accurate to what the algorithm guarantees; it does not always keep the largest isolated forever under pathological many-small-items inputs, but the docstring doesn't overclaim that either, so this isn't a bug, just a nuance worth being aware of if `wakil enrich` ever sees a 10+ entity batch with wildly varying note sizes.
+
+Ran it myself: `uv run ruff check .` → clean. `uv run pytest tests/unit tests/integration -q` → **479 passed**, matching the PR description exactly. `uv run pytest -q -m "not eval"` → 479 passed, 55 deselected. The 6 new bisection-specific tests (`-k "split or bisect or truncat"`) pass. Finding #2 (the 473-vs-479 discrepancy) is resolved for the reason given — I was measuring the pre-stash-pop commit; the current commit matches the claimed number exactly.
+
+I also confirmed the accompanying `TROUBLESHOOTING.md` entry (`3b06eaf`) is an accurate, non-self-serving account of the incident, consistent with what I independently found by grepping the pre-fix branch, and the dict-typing fix (`6ffd82e`) is correct and minimal.
+
+**Finding #3 (unconditional `system` cache-marking) — pushback lands, with one small correction.** The strongest part of the pushback is retroactively true now that Step B exists: bisected sub-calls within one revision genuinely share an identical `system`, so "future batched sub-calls" is a real, currently-exercised reuse path, not a hypothetical one anymore — that was the main gap in my original objection. On the "costs nothing when unused" framing specifically: it's not quite accurate mechanically — if `system` clears Anthropic's minimum cacheable-block size and a call is never repeated within the ephemeral TTL, that call pays the ~25% cache-write premium with no offsetting read discount, so it isn't literally free. But for a single-user local CLI this is a small, bounded cost, and I don't have evidence it's material enough to justify blocking on. I'm dropping this as a requirement — it's fine as a boring default, the "always cache system" framing just isn't literally cost-free in the one-shot case.
+
+**Finding #6 (Relevance column shown on all rows) — pushback lands.** The existing Confidence column already does exactly this (shows `-` for non-applicable rows), so this is consistent with established table convention rather than a new inconsistency, and adding conditional-cell logic to avoid a confusion I never actually observed in a real run would be exactly the kind of speculative complexity CLAUDE.md says to avoid. Conceding this one fully.
+
+**Finding #5 (relevance live-eval gap)** — already agreed as non-blocking by both of us; still open in the ADR, honestly owned there, not new.
+
+### Updated verdict: Approve.
+
+With Step B now actually in the diff, correctly gated, unit-tested against the depth ceiling and the truncated/non-truncated branch, and verified independently (not just re-read), and with the caching/relevance changesets unchanged from my first pass (already solid), I'd approve this PR as it now stands at `6ffd82e`. The one thing I'd still flag for the ADR's own bookkeeping, not as a blocker: ADR 0015 itself still says "Step B... not yet implemented" in its Context/Decision text (`docs/adr/0015-...md:12,169`) — worth a small follow-up doc commit updating that ADR to reflect that Step B has now landed, since the ADR is the thing future readers (and future agents) will trust over a PR description.
+
+**Files most relevant to this re-review:**
+- `/Users/ebridges/Projects/wakil/src/wakil/app/ingest_service.py` (`_revise_candidates`, `_split_candidates_by_content_length`, `_apply_entity_revisions`, lines ~1088-1241)
+- `/Users/ebridges/Projects/wakil/src/wakil/llm/schemas.py` (`ModelContractError`, `complete_with_contract`, lines 21-33, 190-213)
+- `/Users/ebridges/Projects/wakil/tests/unit/test_ingest_service.py` (lines 1081-1267, the split/bisect/depth-ceiling/validation-vs-truncation tests)
+- `/Users/ebridges/Projects/wakil/docs/TROUBLESHOOTING.md` (new entry recording this exact incident)
+- `/Users/ebridges/Projects/wakil/docs/adr/0015-relevance-gated-entities-and-truncation-driven-batching.md` (still textually says Step B is unimplemented — worth a follow-up sync, not a blocker)</result>
+<usage><subagent_tokens>109331</subagent_tokens><tool_uses>17</tool_uses><duration_ms>289440</duration_ms></usage>
+</task-notification>
