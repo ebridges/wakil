@@ -1,0 +1,1 @@
+Now, analyze the @docs/skill-refactor.md spec, and create a plan for creating a corpus of skills based on @../kb/.hermes/skills/
