@@ -1,0 +1,36 @@
+<task-notification>
+<task-id>a62cc34a3c2e8862b</task-id>
+<tool-use-id>toolu_01DdcoiYxNq8s2LRFwKdzxxN</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3bf34b02-9b03-4e75-9b11-2ff5adca5354/tasks/a62cc34a3c2e8862b.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix ty findings in remaining small test files" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Summary
+
+Fixed all 35 `ty` findings across the 9 assigned files. Both verification commands (`uvx ty check &lt;file&gt;` and `uv run pytest &lt;file&gt; -q`) pass clean for every file — `ty` reports "All checks passed!" for each, and the full combined pytest run shows **138 passed**, no failures, no skips.
+
+### Mechanical pattern (Optional-narrowing via `assert ... is not None`)
+Applied exactly as directed, immediately after fetch/before first use, no other restructuring:
+- `tests/unit/test_context_references.py` — 4 `assert resolved is not None` inserts (covering the 9 `resolved.*` attribute findings — some functions had multiple flagged attribute accesses fed by one fetch).
+- `tests/unit/test_index_mentions.py` — 7 asserts: 1 for `ws` in `_reindex` (`Workspace | None`), 6 for `ws` before each `_mentions(session, ws)` call (`int | None` from `session.scalar(select(Workspace.id))`).
+- `tests/unit/test_migrations.py` — 4 asserts covering all 6 findings (one `assert memory is not None` before a block that has both a read and the `invalid-assignment` on `memory.event_date = ...`).
+- `tests/unit/test_query_service.py` — 2 asserts (`run.notes_used_json is not None` for the `in`-operator finding; `run is not None` for the `.status` finding).
+- `tests/unit/test_workspace_service.py` — 1 assert covering both `workspace.name`/`workspace.root_path` findings.
+- `tests/integration/test_memory_cli.py` — restructured the one-liner `session.get(Memory, 1).state` into `memory = session.get(...); assert memory is not None; assert memory.state == ...` (unavoidable minimal change since you can't narrow an inline expression's attribute in one statement — same pattern as the CLAUDE.md-referenced established example).
+- `tests/unit/test_schema_loader.py` — same pattern, one level removed: `source.fields["origin"].values` is `list[str] | None` (enum-only field per `FieldSchema` in `src/wakil/schema/loader.py`). Bound it to `origin_field`, asserted `origin_field.values is not None`, before the `set()` call.
+
+### Non-mechanical findings — investigated individually
+
+1. **`test_llm_client.py:34`** — `resolve_client()` returns `ModelClient | None`; genuinely the same Optional pattern, just via a factory return. Fixed with `client = resolve_client(); assert client is not None; assert client.model == ...`.
+
+2. **`test_llm_client.py:66,82`** — Confirmed by reading the test: `client._client = SimpleNamespace(...)` is a deliberate fake double standing in for the real `anthropic.Anthropic` SDK object. Not a narrowing bug. Fixed with a scoped ignore comment.
+
+3. **`test_llm_schemas.py:144,241`** — Ran `uvx ty check` directly: both are `EntityResolution(..., relevance="urgent")` and `CandidateMemoryModel(..., stance="urgent")` inside `with pytest.raises(ValidationError)` blocks — i.e., the test *intentionally* passes an invalid `Literal` value to prove Pydantic rejects it at runtime. Not a real bug; fixed with scoped ignore comments, values left as-is (changing them would defeat the test).
+
+4. **`test_llm_schemas.py:251`** — Read `EntityCompileOutput` in `src/wakil/llm/schemas.py`: `compiled_truth: str` is required by design. The test `test_entity_compile_output_rejects_missing_compiled_truth` **deliberately** omits it inside `pytest.raises(ValidationError)` to verify Pydantic's required-field enforcement — this is not a stale test; adding the argument would break the test's own intent. Fixed with a scoped ignore comment instead of the initially-guessed fix.
+
+**Important suppression-syntax finding** (verified empirically, since it affects fix #2–4 above): `ty` does **not** honor mypy-style `# type: ignore[code]` — bracketed codes are silently ignored and the diagnostic still fires (confirmed both with a wrong code and with ty's own correct rule name in that bracket form). The only forms that work are bare `# type: ignore` or `# ty: ignore[rule-name]`. I used `# ty: ignore[&lt;rule&gt;]` throughout. Note: two **pre-existing** instances elsewhere in the repo (`tests/unit/test_graph_service.py:222` and `src/wakil/cli/main.py:239`) use the non-working `# type: ignore[arg-type]` form — those files are outside my assigned scope so I left them untouched, but flagging this for whoever owns those files/the CI-gate rollout, since they'll still show as ty failures.
+
+No files outside the 9 assigned were modified (verified via `git status` / `git diff --stat`).</result>
+<usage><subagent_tokens>94876</subagent_tokens><tool_uses>58</tool_uses><duration_ms>384317</duration_ms></usage>
+</task-notification>
