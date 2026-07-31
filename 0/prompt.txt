@@ -1,0 +1,1 @@
+update the ADR with these results, and then summarize for me the best approach through this
