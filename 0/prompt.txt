@@ -1,0 +1,1 @@
+push the changes on the current branch and create a PR, then switch back to main
