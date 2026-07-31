@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bl4axx0qz</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/0d040421-da1c-44ba-aeb0-8cd05f206644/tasks/bl4axx0qz.output</output-file>
+<status>killed</status>
+<summary>Background command "Fresh run of lint and full test suite after all fixes" was stopped</summary>
+</task-notification>
