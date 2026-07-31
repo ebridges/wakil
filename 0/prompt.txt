@@ -1,0 +1,284 @@
+When trying to enrich an ingested transcript I get an entity validation error.  Unfortunately the error does not give any direction on (a) what happened, or (b) what I should do about it.
+
+Help in troubleshooting this so that I can fix, and also improve the experience to provide better information when there's an entity enrichment failure.
+
+$ uv run wakil enrich 2
+On branch wakil/ingest/2026-07-20-mosaic-offer-sync-ian-gutwinski
+╭────────────────────────────────────────────────────────────────────────────────────── Enrichment preview ──────────────────────────────────────────────────────────────────────────────────────╮
+│ Mosaic — offer review sync with Ian Gutwinski                                                                                                                                                  │
+│ source #2                                                                                                                                                                                      │
+│ Context: Meeting with @people/ian-gutwinski at @companies/mosaic-private-markets to review offer; see prep documents at @meetings/2026/2026-07-20-mosaic-contract-negotiation-prep.md and      │
+│ @meetings/2026/2026-07-20-mosaic-ian-gutwinski-catchup-prep.md                                                                                                                                 │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────────────────────────────────── Summary ────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Edward Bridges met Ian Gutwinski (Mosaic Private Markets) to review the VP of Engineering offer. Edward confirmed he is accepting in principle — the offer is 'conventional' with 'no flags' — │
+│ and reaffirmed an August 10th start date. Before signing he raised two asks: a severance provision (6 months salary + COBRA on termination without cause, in exchange for a standard release)  │
+│ and confirmation that unvested equity accelerates on a change of control. Ian committed to take the severance to the board and to draft acceleration language with counsel, and to send the    │
+│ 2022 options plan, current 409A strike price, and fully diluted share count. They set a celebration dinner for Tuesday July 28th at 6pm.                                                       │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Key points:
+  • Edward is accepting the offer in principle ('I'm in'); found it conventional with no red flags.
+  • Start date confirmed for August 10th.
+  • Two open asks before signing: severance provision and equity acceleration on change of control.
+  • Ian will take the six-month severance ask to the board; flags precedent and timing concerns.
+  • Ian's standing position is to accelerate options on acquisition; language to be drafted with lawyers.
+  • Ian to send the 2022 options plan, current 409A strike price, and fully diluted share count.
+  • Celebration dinner set for Tuesday July 28th at 6pm.
+  • Ian invited Edward to dial into next week's session on expanding the platform for AI.
+Related notes:
+  meetings/2026/2026-07-20-mosaic-ian-gutwinski-catchup-prep.md Mosaic — Ian Gutwinski catch-up, prep (employment agreement review)
+  meetings/2026/2026-07-15-mosaic-ian-gutwinski-offer-call-prep.md Mosaic — offer walkthrough with Ian Gutwinski, prep
+  meetings/2026/2026-07-20-mosaic-contract-negotiation-prep.md Mosaic — contract negotiation call with Ian Gutwinski, prep
+  meetings/2026/2026-07-15-mosaic-ian-gutwinski-offer-sync.md Mosaic — VP of Engineering offer call with Ian Gutwinski
+  meetings/2026/2026-07-17-mosaic-diligence-ian-gutwinski.md Mosaic — diligence follow-up call with Ian Gutwinski
+  companies/alloy.md Alloy
+  companies/allspice.md Allspice
+  companies/alltrails.md AllTrails
+  companies/apollo-intelligence.md Apollo Intelligence
+  companies/as-software.md AS Software
+  companies/candid-health.md Candid Health
+  companies/diligence-squared.md Diligence Squared
+  companies/goody.md Goody
+  companies/hovnanian-homes.md K. Hovnanian Homes
+  companies/justworks.md Justworks
+  companies/mosaic-app.md Mosaic App
+  companies/mosaic-private-markets.md Mosaic
+  companies/new-york-times.md New York Times
+  companies/rivian.md Rivian
+  companies/ro.md Ro
+  companies/square.md Square
+  companies/squarespace.md Squarespace
+  companies/way.md Way
+  concepts/2020-11-19-alistair-marshall.md 2020 11 19 Alistair Marshall
+  concepts/2021-01-29-alistair-marshall.md 2021 01 29 Alistair Marshall
+  concepts/2021-02-09-alistair-marshall.md 2021 02 09 Alistair Marshall
+  concepts/2021-03-18-alistair-marshall.md 2021 03 18 Alistair Marshall
+  concepts/6-things-every-mentor-should-do.md 6 Things Every Mentor Should Do
+  concepts/ai-native-software-engineering.md AI-Native Software Engineering
+  concepts/career-development-schematic.md Career Development Schematic
+  concepts/career-direction.md Career Direction
+  concepts/catastrophic-care.md Catastrophic Care
+  concepts/eisenhower-matrix.md Eisenhower Matrix
+  concepts/empowered-product-teams.md Empowered Product Teams
+  concepts/empowered-workshop-reading.md Empowered Workshop Reading
+  concepts/empowered-workshop.md Empowered Workshop
+  concepts/engineering-challenges.md Engineering Challenges
+  concepts/engineering-delivery.md Engineering Delivery
+  concepts/good-strategy-bad-strategy.md Good Strategy Bad Strategy
+  concepts/how-google-sold-its-engineers-on-management.md How Google Sold Its Engineers On Management
+  concepts/how-to-be-a-positive-leader.md How To Be A Positive Leader
+  concepts/how-to-break-a-monolith-into-micro-services.md How To Break A Monolith Into Micro Services
+  concepts/how-to-raise-money.md How To Raise Money
+  concepts/lead-and-disrupt.md Lead and Disrupt: How To Solve The Innovator’s Dilemma
+  concepts/measure-what-matters.md Measure What Matters
+  concepts/planning-how-to-train-a-building-code-model.md Planning How To Train A Building Code Model
+  concepts/precision-and-recall.md Precision And Recall
+  concepts/situational-awareness-around-ai.md Situational Awareness Around Ai
+  concepts/software-is-changing-again.md Software Is Changing Again
+  concepts/software-security-audit-proposal.md Software Security Audit Proposal
+  concepts/vp-vs-director.md Vp Vs Director
+  concepts/why-software-is-eating-the-world.md Why Software Is Eating The World
+  ideas/ai-powered-photo-curation-for-content-creators.md Ai Powered Photo Curation For Content Creators
+  organization/employer-history/greenlite/engineering-career-ladder.md Engineering Career Ladder
+  organization/employer-history/greenlite/level-4-senior-software-engineer-1.md Level 4 Senior Software Engineer 1
+  organization/employer-history/greenlite/level-5-senior-software-engineer-2.md Level 5 Senior Software Engineer 2
+  organization/employer-history/greenlite/m6-engineering-director.md M6 Engineering Director
+  organization/employer-history/greenlite/m7-sr-engineering-director.md M7 Sr Engineering Director
+  organization/employer-history/squarespace/migration-of-analytics-from-a-standalone-app-into-the-squarespace-app.md Migration Of Analytics From A Standalone App Into The Squarespace App
+  organization/employer-history/squarespace/performance-issues-with-time0-cohorts.md Performance Issues With Time0 Cohorts
+  organization/employer-history/squarespace/squarespace-app-js-architecture.md Squarespace App Js Architecture
+  organization/practice/motivations/how-and-why-did-you-become-a-people-manager.md How And Why Did You Become A People Manager
+  organization/practice/motivations/what-do-i-want-in-a-job.md What Do I Want In A Job
+  organization/practice/motivations/what-motivates-you-as-a-manager.md What Motivates You As A Manager
+  organization/practice/motivations/what-motivates-you-as-a-person-and-in-your-career.md What Motivates You As A Person And In Your Career
+  organization/practice/people-management/deciding-on-how-to-hire-people.md Deciding On How To Hire People
+  organization/practice/people-management/how-did-i-mentor-my-team.md How Did I Mentor My Team
+  organization/practice/people-management/how-do-i-think-about-growing-a-team.md How Do I Think About Growing A Team
+  organization/star-stories/describe-a-conflict-among-people-on-your-team.md Describe A Conflict Among People On Your Team
+  organization/star-stories/describe-a-conflict-on-the-team-and-how-i-resolved-it.md Describe A Conflict On The Team And How I Resolved It
+  organization/star-stories/describe-a-few-of-your-peers-and-your-relationship-to-them.md Describe A Few Of Your Peers And Your Relationship To Them
+  organization/star-stories/describe-a-quick-high-stakes-decision-without-all-the-info-that-i-needed.md Describe A Quick High Stakes Decision Without All The Info That I Needed
+  organization/star-stories/describe-a-time-that-you-course-corrected-a-team-or-org-that-became-unhealthy.md Describe A Time That You Course Corrected A Team Or Org That Became Unhealthy
+  organization/star-stories/describe-a-time-when-i-identified-a-drop-in-teams-performance.md Describe A Time When I Identified A Drop In Teams Performance
+  organization/star-stories/describe-a-time-when-i-identified-a-skill-gap.md Describe A Time When I Identified A Skill Gap
+  organization/star-stories/describe-a-time-when-i-improved-developer-experience.md Describe A Time When I Improved Developer Experience
+  organization/star-stories/describe-a-time-when-i-needed-to-define-the-scope-of-an-ambitious-project-and-assigned-work-accordingly.md Describe A Time When I Needed To Define The Scope Of An
+Ambitious Project And Assigned Work Accordingly
+  organization/star-stories/describe-a-time-when-you-had-to-dismiss-someone.md Describe A Time When You Had To Dismiss Someone
+  organization/star-stories/describe-a-time-when-you-needed-to-grow-a-team.md Describe A Time When You Needed To Grow A Team
+  organization/star-stories/describe-some-of-the-products-i-built-and-how-they-worked.md Describe Some Of The Products I Built And How They Worked
+  organization/star-stories/describe-the-frameworks-that-you-created-to-resolve-conflicts-quickly.md Describe The Frameworks That You Created To Resolve Conflicts Quickly
+  organization/star-stories/disagreeing-with-your-boss-or-leadership.md Disagreeing With Your Boss Or Leadership
+  organization/star-stories/share-a-time-when-i-dealt-with-a-difference-of-opinion.md Share A Time When I Dealt With A Difference Of Opinion
+  organization/star-stories/share-a-time-when-you-needed-to-reprioritize-a-teams-work-as-a-result-of-a-shift-in-priorities.md Share A Time When You Needed To Reprioritize A Teams Work As A
+Result Of A Shift In Priorities
+  organization/star-stories/squarespace-cms-integration-starl-hovnanian.md Squarespace CMS integration STARL for Hovnanian
+  organization/star-stories/story-of-a-time-where-team-worked-great-together.md Story Of A Time Where Team Worked Great Together
+  organization/star-stories/taking-action-without-all-needed-information.md Taking Action Without All Needed Information
+  organization/star-stories/time-when-i-had-to-deliver-bad-news-to-a-stakeholder.md Time When I Had To Deliver Bad News To A Stakeholder
+  people/allen-thomas-varghese.md Allen Thomas Varghese
+  people/allie-cialeo.md Allie Cialeo
+  people/allon-rauer.md Allon Rauer
+  people/arnaud-mondoulet.md Arnaud Mondoulet
+  people/benjamin-allen.md Benjamin Allen
+  people/bobby-mareddy-reference.md Bobby Mareddy reference
+  people/brian-corr.md Brian Corr
+  people/brian-williams.md Brian Williams
+  people/carlos-reyes.md Carlos Reyes
+  people/carrie-barker.md Carrie Barker
+  people/chris-blais.md Chris Blais
+  people/chris-cunningham-sell-call.md Chris Cunningham (Sell Call)
+  people/chris-griffin.md Chris Griffin
+  people/chris-running.md Chris Running
+  people/christofer-sjogren.md Christofer Sjögren
+  people/christopher-bailey.md Christopher Bailey
+  people/christopher-barbour.md Christopher Barbour
+  people/christopher-bowns.md Christopher Bowns
+  people/christopher-ribetti.md Christopher Ribetti
+  people/claudio-ortiz.md Claudio Ortiz
+  people/edward-bridges.md Edward Bridges
+  people/fiorella-bariani.md Fiorella Bariani
+  people/gustavo-gianotti.md Gustavo Gianotti
+  people/ian-gutwinski.md Ian Gutwinski
+  people/jacob-haflett.md Jacob Haflett
+  people/james-ayoub.md James Ayoub
+  people/james-gallagher.md James Gallagher
+  people/jemma-colletta.md Jemma Colletta
+  people/jon-zallas.md Jon Zallas
+  people/julian-ballen.md Julian Ballen
+  people/julian-boilen.md Julian Boilen
+  people/luciano-perez.md Luciano Perez
+  people/luis-viant.md Luis Viant
+  people/manju-suresh.md Manju Suresh
+  people/marco-juliani.md Marco Juliani
+  people/margaret-turzanska.md Margaret Turzanska
+  people/michael-berl.md Michael Berl
+  people/michael-blake.md Michael Blake
+  people/michael-chang.md Michael Chang
+  people/michael-damman.md Michael Damman
+  people/michael-dietrich.md Michael Dietrich
+  people/michael-lee.md Michael Lee
+  people/michael-lvov.md Michael Lvov
+  people/michael-pieper.md Michael Pieper
+  people/michael-rouse.md Michael Rouse
+  people/michael-suh.md Michael Suh
+  people/mikelle-masciantonio.md Mikelle Masciantonio
+  people/nicole-michaelis.md Nicole Michaelis
+  people/ryan-hrabak.md Ryan Hrabak
+  people/ryan-mutch.md Ryan Mutch
+  people/ryan-petroff.md Ryan Petroff
+  people/ryan-shannon.md Ryan Shannon
+  people/sophia-gallucci.md Sophia Gallucci
+  people/soufiane-hayou.md Soufiane Hayou
+  people/tammy-smalley.md Tammy Smalley
+  people/victor-vives.md Víctor Vives
+  people/william-a-young.md William A. Young
+  people/xianglong-li.md Xianglong Li
+  projects/aetion/2022-10-11-icd10-code-formatting-issue.md 2022 10 11 Icd10 Code Formatting Issue
+  projects/aetion/2022-11-17-aws-capacity-issues-on-databricks.md 2022 11 17 Aws Capacity Issues On Databricks
+  projects/aetion/aetion-introductory-training-series.md Aetion Introductory Training Series
+  projects/aetion/career-ladder.md Career Ladder
+  projects/aetion/company-all-hands.md Company All Hands
+  projects/aetion/drug-computation-measure.md Drug Computation Measure
+  projects/aetion/issue-retrospectives.md Issue Retrospectives
+  projects/aetion/measures-overview.md Measures Overview
+  projects/aetion/measures.md Measures
+  projects/aetion/production-issues.md Production Issues
+  projects/aetion/projects-system-refactoring.md Projects System Refactoring
+  projects/aetion/software-testing-notes.md Software Testing Notes
+  projects/aetion/technology-all-hands.md Technology All Hands
+  projects/greenlite/soc2-compliance-meetings.md Soc2 Compliance Meetings
+  projects/greenlite/soc2-compliance.md Soc2 Compliance
+  projects/greenlite/wins.md Wins
+  projects/mosaic/onboarding.md Mosaic Onboarding
+  projects/squarespace/2020-10-27-product-all-hands.md 2020 10 27 Product All Hands
+  projects/squarespace/2020-11-19-product-all-hands.md 2020 11 19 Product All Hands
+  projects/squarespace/commerce-x-squarespace-app-conflict.md Commerce X Squarespace App Conflict
+  projects/squarespace/squarespace-analytics-apps.md Squarespace Analytics Apps
+  projects/squarespace/squarespace-app-org.md Squarespace App Org
+                                                                                        Candidate memories
+┏━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┓
+┃ # ┃ Type     ┃ Content                                                                                                                                                                  ┃ Conf ┃
+┡━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━┩
+│ 0 │ decision │ Edward Bridges told Ian Gutwinski he is accepting the Mosaic VP of Engineering offer in principle — 'I'm in' — describing the offer letter as conventional with 'no      │ 0.95 │
+│   │          │ flags', pending resolution of two asks before signing.                                                                                                                   │      │
+│ 1 │ event    │ Edward Bridges confirmed to Ian Gutwinski that the August 10th, 2026 start date for the Mosaic VP of Engineering role still works.                                       │ 0.95 │
+│ 2 │ event    │ Edward Bridges and Ian Gutwinski scheduled a celebration dinner (just the two of them) for Tuesday July 28th, 2026 at 6pm; Ian to pick and preview a                     │ 0.90 │
+│   │          │ gluten-free-friendly venue.                                                                                                                                              │      │
+│ 3 │ question │ Edward Bridges asked Ian Gutwinski to add a severance provision to the Mosaic offer — six months of salary and COBRA in case of termination without cause, in exchange   │ 0.90 │
+│   │          │ for a standard release — citing being the single breadwinner and the long job search at his level. Ian said he 'totally hear it' but must take it to the board and think │      │
+│   │          │ through precedent ramifications since 'it's not something that we've all done before'; still unresolved.                                                                 │      │
+│ 4 │ decision │ On equity acceleration, Ian Gutwinski said his position 'has always been' that options would be accelerated on an acquisition and that 'the way I would always do it     │ 0.85 │
+│   │          │ would be to accelerate'; he committed to have the lawyers draft the language. Edward Bridges said he would be fine with either a single trigger (acquisition) or a       │      │
+│   │          │ double trigger (acquisition plus separation).                                                                                                                            │      │
+│ 5 │ fact     │ Edward Bridges requested from Ian Gutwinski the full 2022 options plan, the current 409A strike price, and the fully diluted share count; Ian agreed to send them. Ian   │ 0.90 │
+│   │          │ noted options are issued at the next board meeting at the current 409A (Mosaic runs 409As roughly every 12 months at their size).                                        │      │
+│ 6 │ fact     │ Ian Gutwinski invited Edward Bridges to dial into a Mosaic engineering session the following week on expanding the platform for more AI capabilities, so Edward could    │ 0.85 │
+│   │          │ build context as a 'fly on the wall' before his start date.                                                                                                              │      │
+│ 7 │ fact     │ Ian Gutwinski characterized Mosaic's two engineering leaders as contrasting: Claudio Ortiz runs a tight ship with 'zero tolerance for error' (slower to ship), and       │ 0.85 │
+│   │          │ Michael Rouse favors 'move fast and break things.' Ian said there is no interpersonal conflict but a genuine tension between the two approaches, and that process (e.g.  │      │
+│   │          │ sprint planning) shows stress as the company scales — a key reason the VP of Engineering role matters.                                                                   │      │
+│ 8 │ fact     │ Ian Gutwinski said Chris has already provisioned Edward Bridges a powerful laptop capable of running many agents ahead of his start.                                     │ 0.80 │
+│ 9 │ event    │ Ian Gutwinski reported attending the World Cup final with three people from Apollo, Mosaic's second-largest customer, saying it was expensive but likely high-ROI        │ 0.75 │
+│   │          │ because he wants a case study and named reference from them; Mosaic is not currently allowed to use Apollo's logo.                                                       │      │
+└───┴──────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────┘
+Candidate relationships:
+  [3] --elaborates--> [0]
+  [4] --elaborates--> [0]
+  [5] --related_to--> [4]
+  [7] --supports--> [6]
+  [2] --related_to--> [0]
+                                    Entity resolution
+┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┓
+┃ Entity                 ┃ Type    ┃ Action ┃ Target                              ┃ Conf ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━┩
+│ Edward Bridges         │ person  │ update │ people/edward-bridges.md            │ 1.00 │
+│ Ian Gutwinski          │ person  │ update │ people/ian-gutwinski.md             │ 1.00 │
+│ Mosaic Private Markets │ company │ update │ companies/mosaic-private-markets.md │ 1.00 │
+│ Mosaic Onboarding      │ project │ update │ projects/mosaic/onboarding.md       │ 0.90 │
+│ Claudio Ortiz          │ person  │ update │ people/claudio-ortiz.md             │ 0.90 │
+│ Michael Rouse          │ person  │ update │ people/michael-rouse.md             │ 0.90 │
+│ Carrie Barker          │ person  │ update │ people/carrie-barker.md             │ 0.80 │
+│ Apollo                 │ company │ skip   │ -                                   │ 0.50 │
+│ Argonaut               │ company │ skip   │ -                                   │ 0.50 │
+│ Simron                 │ person  │ skip   │ -                                   │ 0.40 │
+│ Ryan                   │ person  │ skip   │ -                                   │ 0.30 │
+│ Chris                  │ person  │ skip   │ -                                   │ 0.30 │
+└────────────────────────┴─────────┴────────┴─────────────────────────────────────┴──────┘
+Proposed note:
+╭─────────────────────────────────────────────────────────────── NEW meetings/2026/2026-07-20-mosaic-offer-sync-ian-gutwinski.md ────────────────────────────────────────────────────────────────╮
+│ ---                                                                                                                                                                                            │
+│ type: meeting                                                                                                                                                                                  │
+│ title: Mosaic — offer review sync with Ian Gutwinski                                                                                                                                           │
+│ date: 2026-07-20                                                                                                                                                                               │
+│ source: transcript                                                                                                                                                                             │
+│ status: synthesized                                                                                                                                                                            │
+│ attendees:                                                                                                                                                                                     │
+│   - "[[people/edward-bridges]]"                                                                                                                                                                │
+│   - "[[people/ian-gutwinski]]"                                                                                                                                                                 │
+│ company: mosaic-private-markets                                                                                                                                                                │
+│ project: mosaic/onboarding                                                                                                                                                                     │
+│ decisions:                                                                                                                                                                                     │
+│   - Edward accepting the VP of Engineering offer in principle; August 10th start confirmed                                                                                                     │
+│   - Celebration dinner set for Tuesday July 28th at 6pm                                                                                                                                        │
+│ action-items:                                                                                                                                                                                  │
+│   - "Ian: take six-month salary + COBRA severance (termination without cause) to the board"                                                                                                    │
+│   - "Ian: draft equity acceleration on change of control with counsel"                                                                                                                         │
+│   - "Ian: send 2022 options plan, current 409A strike price, and fully diluted share count"                                                                                                    │
+│   - "Ian: share timing of next week's AI-platform session for Edward to dial in"                                                                                                               │
+│ transcript: sources/transcripts/2026-07-20-mosaic-offer-sync-ian-gutwinski.md                                                                                                                  │
+│ tags: [mosaic, offer, negotiation, vp-engineering]                                                                                                                                             │
+│ created: 2026-07-20                                                                                                                                                                            │
+│ updated: 2026-07-20                                                                                                                                                                            │
+│ ---                                                                                                                                                                                            │
+│                                                                                                                                                                                                │
+│ # Mosaic — offer review sync with Ian Gutwinski                                                                                                                                                │
+│                                                                                                                                                                                                │
+│ ## Summary                                                                                                                                                                                     │
+│                                                                                                                                                                                                │
+│ Edward Bridges met [[people/ian-gutwinski|Ian Gutwinski]] to review the [[companies/mosaic-private-markets|Mosaic]] VP of Engineering offer. Edward confirmed he is accepting in principle — t │
+│ …                                                                                                                                                                                              │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+warning: Entity updates failed; existing notes left unchanged: EntityRevisionOutput: model output failed validation twice: 1 validation error for EntityRevisionOutput
+  Invalid JSON: EOF while parsing a string at line 1 column 3863 [type=json_invalid, input_value='{"revisions": [{"target_...tandard release; and (2', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid

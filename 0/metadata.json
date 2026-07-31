@@ -1,0 +1,22 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "cf45efb08887",
+  "session_id": "8dac3fcf-75a5-4c9b-b5af-a2a494952727",
+  "strategy": "import",
+  "created_at": "2026-07-20T20:39:15.19Z",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "checkpoint_transcript_start": 5,
+  "transcript_lines_at_start": 5,
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 66,
+    "cache_creation_tokens": 57591,
+    "cache_read_tokens": 2302982,
+    "output_tokens": 17771,
+    "api_call_count": 33
+  },
+  "kind": "imported"
+}
