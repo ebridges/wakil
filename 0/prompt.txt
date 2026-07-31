@@ -1,0 +1,1 @@
+create a launch configuration for each of the CLI commands in @src/wakil/cli/main.py
