@@ -1,0 +1,5 @@
+Yes fix #2
+
+RE: #1/#3 - wakil needs to be more nuanced on how it determines something is "sensitive" / "assessment".  let's think through the shape hint of "meetings".  ask me questions to ensure that I understand the problem that you're describing.  It's correct that a "meeting" is a single occurrence type, and that a "timeline" and truth compilation do not make sense; conversely, they do make sense in the context of an assessment.  All that said, I'm just not clear about the problem you're raising.
+
+Run an agent in the background to fix #2 while we discuss the rest of it.
