@@ -1,0 +1,9 @@
+Provide a critical assessment of the way that entity documents are structured in @../kb/ (e.g. under "companies" or "people") 
+
+Superficially, it's broken into three main areas: Frontmatter, "Compiled truth", "Timeline".
+
+The compiled truth has a set of bullet points followed by "open threads" .  The timeline has a set of timestamped entires and a list of backlinks merged into one section.
+
+Help me to understand how to model this kind of information in wakil: how should it be used? what should be in the markdown document? what should be stored in a database?
+
+the "codebase-memory-mcp" can provide a window into how GBrain creates and uses this data.
