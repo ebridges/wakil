@@ -1,0 +1,1 @@
+package and install a new version of wakil so that it can be available generally
