@@ -1,0 +1,16 @@
+help me improve the existing ingest process to ingest from a "whisper" file.
+
+I tried the following command, but it simply placed the contents of the whisper file (a zip file) directly into the body of the source.
+
+```
+uv run wakil -w ~/Projects/kb ingest transcript --context 'Phone call transcript in "whisper" format (a zip file, with transcript in `metadata.json`).  Meeting is with Eleni Karahalios from Riviera Partners to get backchannel feedback on the opportunity at Mosaic and on Ian Gutwinski; I was connected with her via Chett Garcia, as she had actually reached out to me in October 2025 for the same role' ~/Projects/kb/sources/audio/2026-07-16-mosaic-eleni-karahalios.whisper
+```
+
+As a comparsion, when I run the @../kb/.hermes/skills/meeting-ingestion skill via Claude, it created this source: @../kb/sources/transcripts/2026-07-16-mosaic-eleni-karahalios-backchannel.md 
+
+I'd be interested to hear from you what differences you see.  Here are the differences I see for comparison:
+- Frontmatter title is derived from context
+- H1 heading is the same as the filename
+- light cleanup
+
+Add functionality to the skill to handle different formats of source transcripts (starting with "whisper") so that we create a better transcript than the legacy skill.
