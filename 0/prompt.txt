@@ -1,0 +1,41 @@
+<task-notification>
+<task-id>a03b66d8a9333f890</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/e2ec427b-968e-4472-adee-3cdae9bf86ac/tasks/a03b66d8a9333f890.output</output-file>
+<status>completed</status>
+<summary>Agent "Review PR #115 prepare_enrichment refactor" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## PR #115 Review: Refactor: split `prepare_enrichment` into related-notes/model-population helpers
+
+**Verdict: Approve.** This is a clean, proportionate, behavior-preserving refactor. Both flagged concerns from the earlier draft are correctly fixed in the current diff, and I independently verified the PR description's test/lint claims.
+
+### Verification performed
+- Checked out the PR branch (`gh pr checkout`-equivalent via worktree) and ran the tools myself rather than trusting the description:
+  - `uv run ruff check .` → `All checks passed!`
+  - `uv run pytest -q -m "not eval"` → `621 passed, 62 deselected` — matches the PR's claim exactly.
+- Read `docs/adr/0009-prioritize-context-referenced-notes-in-related-search.md` in full, since `_gather_related_notes` is a direct lift of that ADR's implementation (guaranteed `@file:`-referenced notes ahead of and exempt from `RELATED_NOTE_LIMIT`, then relevance search, then entity-name lookup, deduped via `seen_paths`). The extracted function preserves this ordering/dedup logic verbatim — no drift from the ADR's decision.
+- Confirmed no test references the new private helpers directly; all 621 passing tests exercise `prepare_enrichment` as a black box (`tests/unit/test_ingest_service.py`, `tests/unit/test_entity_resolution.py`), which is the right level given this is a pure internal decomposition — no new tests were needed or added, and none should have been.
+
+### The two specifically-requested checks
+
+1. **`guides = load_workspace_guides(config)` — single location, correctly fixed.** In the current diff it lives only inside `_populate_proposal_from_models` (`src/wakil/app/ingest_service.py:660`). `prepare_enrichment` itself no longer defines a local `guides` at all — confirmed by reading the full post-refactor `prepare_enrichment` body (lines 720–775), which has no `guides` reference. The earlier contradiction is gone.
+
+2. **`_warn_if_nothing_produced` source-id argument — correctly fixed.** `src/wakil/app/ingest_service.py:717` now calls `_warn_if_nothing_produced(source.id, proposal)`, matching the helper's `source_id: int` signature. The old bug (passing the ORM `source` row where an `int` was expected) is resolved.
+
+### `session` parameter necessity — confirmed genuine
+
+`_gather_related_notes(session: Session, ...)` is called at `ingest_service.py:755-764`, indented inside the `with open_session(config) as session:` block that opens at line 729 — the call happens before the block exits, so the session is still open for its `session.scalar(...)` (user-referenced note lookup) and `search_workspace(..., session=session, ...)` calls. This is correctly scoped; it isn't a case of passing a session that's already been closed.
+
+I also checked whether `_populate_proposal_from_models` (called *after* the `with` block closes) safely uses attributes off the now-detached `source` object (`source.source_type`, `source.raw_text_path`, `source.origin`, `source.id`). `Source` (`src/wakil/storage/schema.py`) has no relationship attributes — it's plain scalar columns only — so `session.get(Source, source_id)` eagerly loads every column in the initial fetch; there's no lazy-load-after-detach risk. This exact pattern (accessing `source.*` outside the `with` block) already existed pre-refactor, so this isn't new risk introduced by the split, just confirmed still-safe.
+
+### Proportionality (CLAUDE.md / Prime Directive)
+
+This earns its complexity. It's a private, same-module, same-file decomposition of a 153-line function that mixed a DB-session-scoped data-gathering phase with two sequential model-call phases — no new public API, no new config knob, no new abstraction layer, no new dependency. The two new helpers (`_gather_related_notes`, `_populate_proposal_from_models`) follow the file's existing `_run_extraction`/`_run_entity_resolution` naming and mutate-in-place convention rather than inventing a new shape. This is exactly the kind of refactor that improves local maintainability without drifting toward "avoid" list items (no new runtime, no hidden behavior, no dispatch/orchestration reopening ADR 0008).
+
+### Minor, non-blocking observations
+- `_gather_related_notes` takes 8 positional parameters, several of the same type (`title: str`, `search_context: str | None`, `text: str`), all correctly ordered at the one call site today, but a future accidental positional swap of `title`/`text` wouldn't be caught by ruff or a type checker since both are `str`. Not a bug now — just worth keeping in mind if this function grows further; keyword-only args (`*,`) would remove the risk cheaply if it does.
+- `_populate_proposal_from_models`'s docstring says it "mirrors this file's `_run_extraction`/`_run_entity_resolution` mutate-in-place convention" — `_run_entity_resolution` does mutate `proposal` in place, but `_run_extraction` returns an `ExtractionOutput` and the *caller* (this new function) does the mutating. Cosmetic docstring imprecision only, not worth blocking on.
+
+Files reviewed: `/Users/ebridges/Projects/wakil/src/wakil/app/ingest_service.py`, `/Users/ebridges/Projects/wakil/docs/adr/0009-prioritize-context-referenced-notes-in-related-search.md`, `/Users/ebridges/Projects/wakil/src/wakil/storage/schema.py`, `/Users/ebridges/Projects/wakil/src/wakil/app/workspace_service.py`.</result>
+<usage><subagent_tokens>48949</subagent_tokens><tool_uses>17</tool_uses><duration_ms>186445</duration_ms></usage>
+</task-notification>
