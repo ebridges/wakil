@@ -1,0 +1,1 @@
+I like this and would like you to validate wheter the truncation will go away by modifing the `thinking` parameter.  To ensure you have an accurate base case, maybe switch back to a commit before the work was done with relevance filtering?  if anything, the relevance filtering will only improve the situation and it's important work regardless.
