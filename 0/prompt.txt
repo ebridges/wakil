@@ -1,0 +1,1 @@
+how will hermes know to use which wakil subcommand and when?
