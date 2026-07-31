@@ -1,0 +1,10 @@
+workflow
+
+▸ GRAPH SPEC
+GOAL: find every function over 100 lines and propose a refactor for each
+
+FAN OUT:    one agent per file, in parallel
+VERIFY:     an independent checker on each proposed refactor, fresh context
+DEDUPE:     proposals against everything already seen
+CAP:        50 files on this first run
+REPORT:     how many files came back, so nothing fails silently
