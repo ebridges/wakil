@@ -1,0 +1,6 @@
+<quote>
+"Lossy compression" → "additive-only"
+> So the accepted scope drops compression entirely: compile now only unions everything already in the Timeline into Compiled Truth.
+</quote>
+
+This reads as: "compilation is adding more to, and not periodically distilling 'Compiled Truth'".  This seems like it would simply result in compiled truth becoming a union of the timeline.  How is that helpful?  Something needs to be making a judgement call on discarding information and maintaining relevant facts.  Please confirm what is meant by that passage
