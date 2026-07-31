@@ -1,0 +1,1 @@
+Fix the bugs in the CLI flags.  At a broader level, I'd like for the QMD index/collections to be stored in wakil's db (in this case located in @../kb/.wakil/wakil.db ) rather than another location.  Then, once we've arrived at that, provide a way to add collections and propose a strategy to dynamically generate collections automatically.
