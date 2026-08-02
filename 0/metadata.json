@@ -1,0 +1,90 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZ2A7WP1R5HH4NCCQZQ06JY3",
+  "session_id": "77205d86-d9a9-4c21-b0a9-b61292f3a454",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-02T22:41:56.538389Z",
+  "branch": "schema/person-relationship-contact",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/wakil/schema/entities/person.yaml"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "02ef85211e00",
+  "checkpoint_transcript_start": 23,
+  "transcript_lines_at_start": 23,
+  "compact_transcript_start": 3,
+  "token_usage": {
+    "input_tokens": 47,
+    "cache_creation_tokens": 47474,
+    "cache_read_tokens": 1491123,
+    "output_tokens": 8711,
+    "api_call_count": 24
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_014vaaMzGGvbqYHjJEgr5xVJ",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "commit"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "02ef85211e00",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 150,
+        "end": 151,
+        "entry_ids": [
+          "7d9ae8b8-a230-4cb4-9959-bdf6581e74e3"
+        ],
+        "tool_use_id": "toolu_014vaaMzGGvbqYHjJEgr5xVJ"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_014vaaMzGGvbqYHjJEgr5xVJ"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: commit",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-02T22:41:56.515925Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 1,
+    "total_committed": 0,
+    "total_lines_changed": 1,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 103,
+      "user_lines_removed": 1,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 102,
+        "src/wakil/schema/entities/person.yaml": 1
+      },
+      "user_removed_per_file": {
+        "src/wakil/schema/entities/person.yaml": 1
+      }
+    }
+  ]
+}

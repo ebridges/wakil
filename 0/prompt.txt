@@ -1,0 +1,5 @@
+a separate process added a new schema type called `contact`
+
+evaluate the impact of that change, and include other changes to integrate that as necessary.
+
+then, commit & pr the change
