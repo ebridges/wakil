@@ -10,7 +10,7 @@ fields:
   company: {required: false, kind: ref, ref_type: company}
   role: {required: false, kind: string}
   status: {required: true, kind: enum, values: [active, former, candidate, prospect, contact]}
-  relationship: {required: false, kind: enum, values: [coworker, report, manager, candidate, recruiter, vendor, mentor]}
+  relationship: {required: false, kind: enum, values: [coworker, report, manager, candidate, recruiter, vendor, mentor, contact]}
   linkedin: {required: false, kind: string}
   github: {required: false, kind: string}
   email: {required: false, kind: string}
