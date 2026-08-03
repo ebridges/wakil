@@ -3251,6 +3251,80 @@ def test_prepare_enrichment_no_false_positive_warning_when_stub_produced(
 
 
 # --------------------------------------------------------------------------
+# Incremental progress feedback (`on_progress`): the DAG runs behind a
+# single static spinner otherwise, with no signal for 20+ minutes on a large
+# source. Default `None` is a no-op for every existing caller above.
+
+
+def test_prepare_enrichment_on_progress_reports_all_four_phases_in_order(workspace, transcript):
+    # Default RESOLUTION_JSON has both a create (Dana Prieto) and an update
+    # (Jane Doe, against the fixture's real people/jane-doe.md), so all four
+    # model calls run -- see test_enrichment_analyzes_and_links.
+    source_id = _capture(workspace, transcript, context="Attendees: Jane Doe (Acme).")
+    client = FakeClient()
+    messages: list[str] = []
+
+    prepare_enrichment(workspace, source_id, client, on_progress=messages.append)
+
+    assert len(messages) == 4
+    assert "Extracting" in messages[0]
+    assert "Resolving entities" in messages[1]
+    assert "Revising" in messages[2] and "1" in messages[2]
+    assert "Synthesizing" in messages[3] and "1" in messages[3]
+
+
+def test_prepare_enrichment_on_progress_silent_for_no_update_candidates(workspace, transcript):
+    # Only a create resolution -- _run_entity_updates' `if not candidates:
+    # return` guard means the revision phase must never announce itself.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+                "proposed_frontmatter": {"status": "active", "role": "Claims platform lead"},
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution, STUB_SYNTHESIS_JSON])
+    messages: list[str] = []
+
+    prepare_enrichment(workspace, source_id, client, on_progress=messages.append)
+
+    assert not any("Revising" in message for message in messages)
+    assert any("Synthesizing" in message for message in messages)
+
+
+def test_prepare_enrichment_on_progress_silent_for_no_stub_entities(workspace, transcript):
+    # Only an update resolution -- _synthesize_stub_content's `if not
+    # proposal.stub_entities: return` guard means the synthesis phase must
+    # never announce itself.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {
+                "name": "Jane Doe",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/jane-doe.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript, context="Attendees: Jane Doe (Acme).")
+    client = FakeClient([extraction, resolution, REVISION_JSON])
+    messages: list[str] = []
+
+    prepare_enrichment(workspace, source_id, client, on_progress=messages.append)
+
+    assert any("Revising" in message for message in messages)
+    assert not any("Synthesizing" in message for message in messages)
+
+
+# --------------------------------------------------------------------------
 # Stub-content synthesis on create (issue #70): `_stub_content` used to
 # always write a hardcoded, empty placeholder regardless of how much the
 # source actually said about the new entity. `_synthesize_stub_content`

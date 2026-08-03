@@ -653,6 +653,8 @@ def _populate_proposal_from_models(
     title: str,
     related_notes: list[SearchHit],
     proposal: EnrichmentProposal,
+    *,
+    on_progress: Callable[[str], None] | None = None,
 ) -> None:
     """Run both DAG model calls (extraction, then entity resolution),
     mutating `proposal` in place with their results -- mirrors this file's
@@ -665,6 +667,8 @@ def _populate_proposal_from_models(
     # The raw *capture* path (sources/transcripts/...), not source.origin's
     # pre-capture location — origin may be a binary/external file (a
     # .whisper archive, a URL) the model can't cite as a KB source.
+    if on_progress is not None:
+        on_progress(f"Extracting content from source {source.id}...")
     extraction = _run_extraction(
         config,
         client,
@@ -713,7 +717,9 @@ def _populate_proposal_from_models(
         )
 
     # DAG node 2: entity resolution — always invoked, never optional.
-    _run_entity_resolution(config, client, source_text, related_pairs, proposal, guides)
+    _run_entity_resolution(
+        config, client, source_text, related_pairs, proposal, guides, on_progress=on_progress
+    )
     _warn_if_nothing_produced(source.id, proposal)
 
 
@@ -725,6 +731,8 @@ def prepare_enrichment(
     context_digest: str | None = None,
     context_referenced_paths: list[str] | None = None,
     force: bool = False,
+    *,
+    on_progress: Callable[[str], None] | None = None,
 ) -> EnrichmentProposal:
     with open_session(config) as session:
         source = session.get(Source, source_id)
@@ -771,7 +779,9 @@ def prepare_enrichment(
         source_captured_date=source_captured_date,
     )
     proposal.model = client.model
-    _populate_proposal_from_models(config, client, source, text, title, related_notes, proposal)
+    _populate_proposal_from_models(
+        config, client, source, text, title, related_notes, proposal, on_progress=on_progress
+    )
     return proposal
 
 
@@ -981,8 +991,12 @@ def _run_entity_resolution(
     related_pairs: list[tuple[str, str]],
     proposal: EnrichmentProposal,
     guides: dict[str, str],
+    *,
+    on_progress: Callable[[str], None] | None = None,
 ) -> None:
     """Second model call plus stub-page construction; degrades visibly."""
+    if on_progress is not None:
+        on_progress("Resolving entities...")
     skill = load_skill("entity-resolve", config.root_path)
     system = build_system_prompt(skill, EntityResolutionOutput)
     prompt = build_resolution_prompt(
@@ -1004,14 +1018,14 @@ def _run_entity_resolution(
     # Entity updates (DAG node 3) must run before link reconciliation: it can
     # further prune stub_entities (see _suppress_stubs_matching_updates), and
     # reconciliation needs the final stub set to correct links against.
-    _run_entity_updates(config, client, text, proposal)
+    _run_entity_updates(config, client, text, proposal, on_progress=on_progress)
     _suppress_stubs_matching_updates(proposal)
     _suppress_dated_record_stubs_matching_updates(config, proposal)
     _suppress_proposed_note_matching_updates(proposal)
     # Only now synthesize initial content for whichever stubs actually
     # survive suppression (issue #70) — anything dropped above never needs
     # its own model call.
-    _synthesize_stub_content(config, client, text, proposal)
+    _synthesize_stub_content(config, client, text, proposal, on_progress=on_progress)
     _reconcile_entity_links(config, proposal)
 
 
@@ -1490,7 +1504,12 @@ def _suppress_proposed_note_matching_updates(proposal: EnrichmentProposal) -> No
 
 
 def _synthesize_stub_content(
-    config: WorkspaceConfig, client: ModelClient, text: str, proposal: EnrichmentProposal
+    config: WorkspaceConfig,
+    client: ModelClient,
+    text: str,
+    proposal: EnrichmentProposal,
+    *,
+    on_progress: Callable[[str], None] | None = None,
 ) -> None:
     """Fourth model call: populate each surviving create-stub's Compiled
     Truth / Timeline from this source, instead of leaving `_stub_content`'s
@@ -1521,6 +1540,10 @@ def _synthesize_stub_content(
     if not proposal.stub_entities:
         return
 
+    if on_progress is not None:
+        count = len(proposal.stub_entities)
+        entity_word = "entity" if count == 1 else "entities"
+        on_progress(f"Synthesizing content for {count} new {entity_word}...")
     targets = [(stub.path, stub.content) for stub in proposal.stub_entities]
     skill = load_skill("note-revision", config.root_path)
     system = build_system_prompt(skill, EntityRevisionOutput)
@@ -1872,7 +1895,12 @@ _EntityCandidate = tuple[EntityResolution, Path, str]
 
 
 def _run_entity_updates(
-    config: WorkspaceConfig, client: ModelClient, text: str, proposal: EnrichmentProposal
+    config: WorkspaceConfig,
+    client: ModelClient,
+    text: str,
+    proposal: EnrichmentProposal,
+    *,
+    on_progress: Callable[[str], None] | None = None,
 ) -> None:
     """Third model call: for each action=update resolution on a
     compiled-truth-timeline entity, decide whether it warrants a real
@@ -1930,6 +1958,10 @@ def _run_entity_updates(
     if not candidates:
         return
 
+    if on_progress is not None:
+        count = len(candidates)
+        entity_word = "entity" if count == 1 else "entities"
+        on_progress(f"Revising {count} existing {entity_word}...")
     _revise_candidates(config, client, text, proposal, candidates)
 
 
