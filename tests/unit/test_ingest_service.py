@@ -51,7 +51,7 @@ from wakil.llm.client import ModelTruncatedError
 from wakil.llm.schemas import EntityResolution, EntityRevision, ModelContractError
 from wakil.schema.loader import load_entity_schemas
 from wakil.schema.validate import validate_frontmatter
-from wakil.storage.schema import IngestRun, Memory, Note, Relationship, Source
+from wakil.storage.schema import EnrichmentCheckpoint, IngestRun, Memory, Note, Relationship, Source
 
 MODEL_JSON = {
     "title": "Claims Kickoff Meeting",
@@ -3445,6 +3445,111 @@ def test_prepare_enrichment_on_progress_silent_for_no_stub_entities(workspace, t
 
     assert any("Revising" in message for message in messages)
     assert not any("Synthesizing" in message for message in messages)
+
+
+# --------------------------------------------------------------------------
+# Checkpointing/resume (docs/adr/0020): each DAG phase's output is persisted
+# to EnrichmentCheckpoint as it completes, so a killed/crashed run -- or one
+# that failed a later, unrelated validate_proposal check -- can resume from
+# the last completed phase on the next `prepare_enrichment` call instead of
+# redoing every model call from scratch.
+
+
+def test_prepare_enrichment_resumes_extraction_from_checkpoint(workspace, transcript):
+    # Extraction succeeds and is checkpointed; resolution then fails twice
+    # (never checkpointed -- see _run_entity_resolution). A second
+    # prepare_enrichment call on the same source, same context/model, is
+    # handed a fresh client whose queue has NO extraction payload at all --
+    # if the checkpoint weren't picked up, this would raise "FakeClient ran
+    # out of scripted responses" on the very first call.
+    source_id = _capture(workspace, transcript)
+    first_client = FakeClient([MODEL_JSON, "bad", "still bad"])
+    first_proposal = prepare_enrichment(workspace, source_id, first_client)
+    assert first_proposal.entity_resolutions == []
+    assert any("Entity resolution failed" in w for w in first_proposal.warnings)
+
+    second_client = FakeClient([RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON])
+    second_proposal = prepare_enrichment(workspace, source_id, second_client)
+
+    assert len(second_client.calls) == 3  # resolution, revision, synthesis -- no extraction
+    assert second_proposal.summary == MODEL_JSON["summary"]  # extraction's output, reused
+    assert second_proposal.proposed_note is not None
+    assert len(second_proposal.entity_resolutions) == len(RESOLUTION_JSON["entities"])
+
+
+def test_prepare_enrichment_checkpoint_invalidated_by_different_context(workspace, transcript):
+    # The staleness key includes context_digest -- a different digest means
+    # every phase is redone, even against the identical source content.
+    source_id = _capture(workspace, transcript)
+    client1 = FakeClient()
+    prepare_enrichment(workspace, source_id, client1, context_digest="digest-a")
+    assert len(client1.calls) == 4
+
+    client2 = FakeClient()
+    prepare_enrichment(workspace, source_id, client2, context_digest="digest-b")
+    assert len(client2.calls) == 4
+
+
+def test_prepare_enrichment_reuses_all_checkpoints_then_force_redoes_every_phase(
+    workspace, transcript
+):
+    source_id = _capture(workspace, transcript)
+    client1 = FakeClient()
+    prepare_enrichment(workspace, source_id, client1)
+    assert len(client1.calls) == 4
+
+    # Same source, same (absent) context, same model -- every phase's
+    # checkpoint is reused, so this client is never even asked for a response.
+    client2 = FakeClient([])
+    prepare_enrichment(workspace, source_id, client2)
+    assert len(client2.calls) == 0
+
+    # --force clears every checkpoint up front, so this run redoes all 4.
+    client3 = FakeClient()
+    prepare_enrichment(workspace, source_id, client3, force=True)
+    assert len(client3.calls) == 4
+
+
+def test_apply_enrichment_clears_checkpoints_on_success(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(workspace, source_id, FakeClient())
+    with open_session(workspace) as session:
+        assert (
+            session.scalar(
+                select(EnrichmentCheckpoint).where(EnrichmentCheckpoint.source_id == source_id)
+            )
+            is not None
+        )
+
+    apply_enrichment(workspace, proposal)
+
+    with open_session(workspace) as session:
+        assert (
+            session.scalar(
+                select(EnrichmentCheckpoint).where(EnrichmentCheckpoint.source_id == source_id)
+            )
+            is None
+        )
+
+
+def test_apply_enrichment_validation_failure_leaves_checkpoints_in_place(workspace, transcript):
+    # A schema-unknown create is a hard stop in validate_proposal, unrelated
+    # to whether the 4 model calls that produced it succeeded -- the whole
+    # point of checkpointing is that this path must NOT clear them.
+    source_id = _capture(workspace, transcript)
+    resolution = {"entities": [{"name": "The Guild", "entity_type": "guild", "action": "create"}]}
+    proposal = prepare_enrichment(workspace, source_id, FakeClient([MODEL_JSON, resolution]))
+
+    with pytest.raises(IngestError, match="failed validation"):
+        apply_enrichment(workspace, proposal)
+
+    with open_session(workspace) as session:
+        rows = list(
+            session.scalars(
+                select(EnrichmentCheckpoint).where(EnrichmentCheckpoint.source_id == source_id)
+            )
+        )
+        assert len(rows) >= 1
 
 
 # --------------------------------------------------------------------------

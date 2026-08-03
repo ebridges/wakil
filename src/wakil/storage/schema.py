@@ -172,6 +172,29 @@ class QueryRun(Base):
     metadata_json: Mapped[str | None] = mapped_column(Text, default=None)
 
 
+class EnrichmentCheckpoint(Base):
+    """One row per completed DAG phase of a `wakil enrich` run (docs/adr/0020):
+    lets a killed/crashed run resume from the last completed phase instead of
+    redoing every model call. `content_hash` gates reuse -- see
+    `_checkpoint_content_hash` in `app/ingest_service.py`; a mismatch (source
+    content, context, or model changed since this row was written) means the
+    phase is redone from scratch, never partially reused."""
+
+    __tablename__ = "enrichment_checkpoints"
+    __table_args__ = (
+        UniqueConstraint("source_id", "phase", name="uq_enrichment_checkpoints_source_phase"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"))
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
+    phase: Mapped[str] = mapped_column(String(20))  # extraction|resolution|revision|synthesis
+    content_hash: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class GitChange(Base):
     __tablename__ = "git_changes"
 

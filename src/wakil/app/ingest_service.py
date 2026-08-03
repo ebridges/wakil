@@ -39,7 +39,7 @@ from pathlib import Path, PurePosixPath
 
 import frontmatter as frontmatter_lib
 import yaml
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -74,6 +74,7 @@ from wakil.llm.skill_loader import SkillLoadError, build_system_prompt, load_ski
 from wakil.schema.loader import EntitySchema, load_entity_schemas, resolve_page_shape_template
 from wakil.schema.validate import validate_frontmatter
 from wakil.storage.schema import (
+    EnrichmentCheckpoint,
     IngestRun,
     Memory,
     Note,
@@ -646,6 +647,185 @@ def _gather_related_notes(
     return related_notes
 
 
+# --------------------------------------------------------------------------
+# Enrichment checkpointing (docs/adr/0020): one row per completed DAG phase
+# (extraction/resolution/revision/synthesis) so a killed/crashed `wakil
+# enrich` run can resume from the last completed phase on re-invocation
+# instead of redoing every model call. Only a phase's clean completion is
+# ever checkpointed -- a degraded-but-warned outcome from revision/synthesis
+# (which never raise) still counts as "complete" and is cached, but a
+# ModelContractError from extraction/resolution (which *do* short-circuit
+# the DAG) is deliberately never cached, so a transient failure can still be
+# retried on the very next invocation rather than becoming permanently
+# sticky until --force.
+
+
+def _checkpoint_content_hash(
+    source_content_hash: str | None, context_digest: str | None, model: str
+) -> str:
+    """Staleness key for a checkpoint row: source content, supplied context,
+    and the model in use must all match what produced the checkpoint, or
+    it's discarded and the phase is redone from scratch -- never partially
+    reused across a changed input (mirrors `_resume_source_branch`'s "if the
+    assumption doesn't hold, start fresh" shape, `git_service.py`)."""
+    basis = f"{source_content_hash or ''}|{context_digest or ''}|{model}"
+    return hashlib.sha256(basis.encode()).hexdigest()
+
+
+def _load_checkpoint(
+    config: WorkspaceConfig, source_id: int, phase: str, content_hash: str
+) -> dict | None:
+    with open_session(config) as session:
+        row = session.scalar(
+            select(EnrichmentCheckpoint).where(
+                EnrichmentCheckpoint.source_id == source_id,
+                EnrichmentCheckpoint.phase == phase,
+            )
+        )
+        if row is None or row.content_hash != content_hash:
+            return None
+        return json.loads(row.payload_json)
+
+
+def _save_checkpoint(
+    config: WorkspaceConfig,
+    source_id: int,
+    phase: str,
+    content_hash: str,
+    model: str,
+    payload: dict,
+) -> None:
+    # Opens its own short-lived session every time rather than sharing one
+    # across callers -- Part B runs entity-updates and stub-synthesis
+    # concurrently in separate threads, and a Session must never be shared
+    # across threads. Safe under the existing WAL + 30s busy_timeout
+    # (storage/database.py), which exists for exactly this kind of
+    # near-simultaneous short write from independent `wakil` processes/threads.
+    with open_session(config) as session:
+        workspace_id, _ = _require_workspace_ids(session, config)
+        existing = session.scalar(
+            select(EnrichmentCheckpoint).where(
+                EnrichmentCheckpoint.source_id == source_id,
+                EnrichmentCheckpoint.phase == phase,
+            )
+        )
+        payload_json = json.dumps(payload)
+        if existing is not None:
+            existing.content_hash = content_hash
+            existing.payload_json = payload_json
+            existing.model = model
+        else:
+            session.add(
+                EnrichmentCheckpoint(
+                    workspace_id=workspace_id,
+                    source_id=source_id,
+                    phase=phase,
+                    content_hash=content_hash,
+                    payload_json=payload_json,
+                    model=model,
+                )
+            )
+        session.commit()
+
+
+def _clear_checkpoints(config: WorkspaceConfig, source_id: int) -> None:
+    """Drop every saved checkpoint for `source_id`. Called up front by
+    `--force` (before phase 1, so a forced re-analysis never reuses stale
+    phase output) and after a successful `apply_enrichment` (the resume
+    window is closed once the source is actually enriched). Deliberately
+    NOT called after a declined preview or a failed `validate_proposal` --
+    leaving checkpoints in place across exactly that path is the entire
+    point of this feature."""
+    with open_session(config) as session:
+        session.execute(
+            delete(EnrichmentCheckpoint).where(EnrichmentCheckpoint.source_id == source_id)
+        )
+        session.commit()
+
+
+def _serialize_entity_update(update: EntityUpdate) -> dict:
+    return {
+        "target_note_path": update.target_note_path,
+        "old_content": update.old_content,
+        "new_content": update.new_content,
+        "confidence": update.confidence,
+    }
+
+
+def _deserialize_entity_update(data: dict) -> EntityUpdate:
+    return EntityUpdate(
+        target_note_path=data["target_note_path"],
+        old_content=data["old_content"],
+        new_content=data["new_content"],
+        confidence=data.get("confidence"),
+    )
+
+
+def _extraction_checkpoint_payload(proposal: "EnrichmentProposal") -> dict:
+    return {
+        "title": proposal.title,
+        "summary": proposal.summary,
+        "key_points": list(proposal.key_points),
+        "memories": [
+            {
+                "memory_type": m.memory_type,
+                "content": m.content,
+                "confidence": m.confidence,
+                "stance": m.stance,
+                "event_date": m.event_date.isoformat() if m.event_date else None,
+            }
+            for m in proposal.memories
+        ],
+        "relationships": [
+            {
+                "subject_index": r.subject_index,
+                "predicate": r.predicate,
+                "object_index": r.object_index,
+            }
+            for r in proposal.relationships
+        ],
+        "proposed_note": (
+            {
+                "path": proposal.proposed_note.path,
+                "content": proposal.proposed_note.content,
+                "confidence": proposal.proposed_note.confidence,
+            }
+            if proposal.proposed_note is not None
+            else None
+        ),
+    }
+
+
+def _apply_extraction_checkpoint(proposal: "EnrichmentProposal", payload: dict) -> None:
+    proposal.title = payload["title"]
+    proposal.summary = payload["summary"]
+    proposal.key_points = list(payload["key_points"])
+    proposal.memories = [
+        CandidateMemory(
+            memory_type=m["memory_type"],
+            content=m["content"],
+            confidence=m.get("confidence"),
+            stance=m.get("stance"),
+            event_date=date.fromisoformat(m["event_date"]) if m.get("event_date") else None,
+        )
+        for m in payload["memories"]
+    ]
+    proposal.relationships = [
+        CandidateRelationship(
+            subject_index=r["subject_index"],
+            predicate=r["predicate"],
+            object_index=r["object_index"],
+        )
+        for r in payload["relationships"]
+    ]
+    note = payload["proposed_note"]
+    proposal.proposed_note = (
+        ProposedFile(path=note["path"], content=note["content"], confidence=note.get("confidence"))
+        if note is not None
+        else None
+    )
+
+
 def _populate_proposal_from_models(
     config: WorkspaceConfig,
     client: ModelClient,
@@ -656,6 +836,7 @@ def _populate_proposal_from_models(
     proposal: EnrichmentProposal,
     *,
     on_progress: Callable[[str], None] | None = None,
+    checkpoint_hash: str | None = None,
 ) -> None:
     """Run both DAG model calls (extraction, then entity resolution),
     mutating `proposal` in place with their results -- mirrors this file's
@@ -670,56 +851,83 @@ def _populate_proposal_from_models(
     # .whisper archive, a URL) the model can't cite as a KB source.
     if on_progress is not None:
         on_progress(f"Extracting content from source {source.id}...")
-    extraction = _run_extraction(
+    cached = (
+        _load_checkpoint(config, source.id, "extraction", checkpoint_hash)
+        if checkpoint_hash is not None
+        else None
+    )
+    if cached is not None:
+        _apply_extraction_checkpoint(proposal, cached)
+    else:
+        extraction = _run_extraction(
+            config,
+            client,
+            source.source_type,
+            source.raw_text_path or source.origin or title,
+            source_text,
+            related_pairs,
+            proposal,
+            guides,
+        )
+        if extraction.title and extraction.title.strip():
+            proposal.title = extraction.title.strip()
+        proposal.summary = extraction.summary
+        proposal.key_points = list(extraction.key_points)
+        proposal.memories = [
+            CandidateMemory(
+                memory_type=m.type or "fact",
+                content=m.content,
+                confidence=_clamp01(m.confidence),
+                stance=m.stance,
+                event_date=m.event_date,
+            )
+            for m in extraction.memories
+            if m.content.strip()
+        ]
+        proposal.relationships = [
+            CandidateRelationship(
+                subject_index=r.subject, predicate=r.predicate, object_index=r.object
+            )
+            for r in extraction.relationships
+        ]
+        if extraction.proposed_note is not None:
+            proposal.proposed_note = _sanitize_note(
+                config,
+                ProposedFile(
+                    path=extraction.proposed_note.path,
+                    content=extraction.proposed_note.markdown,
+                ),
+                proposal,
+            )
+            # `_sanitize_note` may rebuild the ProposedFile (path/collision
+            # fixes), so the confidence carried on extraction's own output is
+            # applied after it settles rather than passed into the
+            # constructor above — mirrors `_build_stub_entities` setting
+            # `ProposedFile(confidence=...)` for the analogous action=create
+            # case (issue #72/#93).
+            proposal.proposed_note.confidence = _clamp01(
+                extraction.proposed_note.frontmatter_confidence
+            )
+        if checkpoint_hash is not None:
+            _save_checkpoint(
+                config,
+                source.id,
+                "extraction",
+                checkpoint_hash,
+                client.model,
+                _extraction_checkpoint_payload(proposal),
+            )
+
+    # DAG node 2: entity resolution — always invoked, never optional.
+    _run_entity_resolution(
         config,
         client,
-        source.source_type,
-        source.raw_text_path or source.origin or title,
         source_text,
         related_pairs,
         proposal,
         guides,
-    )
-    if extraction.title and extraction.title.strip():
-        proposal.title = extraction.title.strip()
-    proposal.summary = extraction.summary
-    proposal.key_points = list(extraction.key_points)
-    proposal.memories = [
-        CandidateMemory(
-            memory_type=m.type or "fact",
-            content=m.content,
-            confidence=_clamp01(m.confidence),
-            stance=m.stance,
-            event_date=m.event_date,
-        )
-        for m in extraction.memories
-        if m.content.strip()
-    ]
-    proposal.relationships = [
-        CandidateRelationship(subject_index=r.subject, predicate=r.predicate, object_index=r.object)
-        for r in extraction.relationships
-    ]
-    if extraction.proposed_note is not None:
-        proposal.proposed_note = _sanitize_note(
-            config,
-            ProposedFile(
-                path=extraction.proposed_note.path,
-                content=extraction.proposed_note.markdown,
-            ),
-            proposal,
-        )
-        # `_sanitize_note` may rebuild the ProposedFile (path/collision fixes),
-        # so the confidence carried on extraction's own output is applied
-        # after it settles rather than passed into the constructor above —
-        # mirrors `_build_stub_entities` setting `ProposedFile(confidence=...)`
-        # for the analogous action=create case (issue #72/#93).
-        proposal.proposed_note.confidence = _clamp01(
-            extraction.proposed_note.frontmatter_confidence
-        )
-
-    # DAG node 2: entity resolution — always invoked, never optional.
-    _run_entity_resolution(
-        config, client, source_text, related_pairs, proposal, guides, on_progress=on_progress
+        on_progress=on_progress,
+        checkpoint_hash=checkpoint_hash,
     )
     _warn_if_nothing_produced(source.id, proposal)
 
@@ -772,6 +980,12 @@ def prepare_enrichment(
             context_referenced_paths,
         )
 
+    if force:
+        # A forced re-analysis must never reuse phase output from a
+        # previous run -- start fully fresh.
+        _clear_checkpoints(config, source_id)
+    checkpoint_hash = _checkpoint_content_hash(source.content_hash, context_digest, client.model)
+
     proposal = EnrichmentProposal(
         source_id=source_id,
         title=title,
@@ -781,7 +995,15 @@ def prepare_enrichment(
     )
     proposal.model = client.model
     _populate_proposal_from_models(
-        config, client, source, text, title, related_notes, proposal, on_progress=on_progress
+        config,
+        client,
+        source,
+        text,
+        title,
+        related_notes,
+        proposal,
+        on_progress=on_progress,
+        checkpoint_hash=checkpoint_hash,
     )
     return proposal
 
@@ -994,27 +1216,54 @@ def _run_entity_resolution(
     guides: dict[str, str],
     *,
     on_progress: Callable[[str], None] | None = None,
+    checkpoint_hash: str | None = None,
 ) -> None:
     """Second model call plus stub-page construction; degrades visibly."""
     if on_progress is not None:
         on_progress("Resolving entities...")
-    skill = load_skill("entity-resolve", config.root_path)
-    system = build_system_prompt(skill, EntityResolutionOutput)
-    prompt = build_resolution_prompt(
-        text,
-        proposal.summary,
-        proposal.proposed_note.content if proposal.proposed_note else None,
-        related_pairs,
-        load_entity_schemas(config.root_path),
-        context=proposal.context,
-        guides=guides,
+    cached = (
+        _load_checkpoint(config, proposal.source_id, "resolution", checkpoint_hash)
+        if checkpoint_hash is not None
+        else None
     )
-    try:
-        resolution = complete_with_contract(client, system, prompt, EntityResolutionOutput)
-    except ModelContractError as exc:
-        proposal.warnings.append(f"Entity resolution failed; no entity pages proposed: {exc}")
-        return
-    proposal.entity_resolutions = list(resolution.entities)
+    if cached is not None:
+        proposal.entity_resolutions = [
+            EntityResolution.model_validate(r) for r in cached["entity_resolutions"]
+        ]
+    else:
+        skill = load_skill("entity-resolve", config.root_path)
+        system = build_system_prompt(skill, EntityResolutionOutput)
+        prompt = build_resolution_prompt(
+            text,
+            proposal.summary,
+            proposal.proposed_note.content if proposal.proposed_note else None,
+            related_pairs,
+            load_entity_schemas(config.root_path),
+            context=proposal.context,
+            guides=guides,
+        )
+        try:
+            resolution = complete_with_contract(client, system, prompt, EntityResolutionOutput)
+        except ModelContractError as exc:
+            # Deliberately never checkpointed: a transient failure here
+            # should still be retriable on the very next invocation rather
+            # than becoming permanently sticky until --force.
+            proposal.warnings.append(f"Entity resolution failed; no entity pages proposed: {exc}")
+            return
+        proposal.entity_resolutions = list(resolution.entities)
+        if checkpoint_hash is not None:
+            _save_checkpoint(
+                config,
+                proposal.source_id,
+                "resolution",
+                checkpoint_hash,
+                client.model,
+                {"entity_resolutions": [r.model_dump(mode="json") for r in resolution.entities]},
+            )
+    # _build_stub_entities is pure code re-run fresh every time (live or
+    # resumed) from whichever entity_resolutions ended up on the proposal --
+    # never itself persisted, so it can't drift from what a live run would
+    # produce for the same resolutions.
     proposal.stub_entities = _build_stub_entities(config, proposal)
     # Entity updates (DAG node 3) and stub-content synthesis (DAG node 4)
     # touch disjoint entity sets, so they run concurrently -- but suppression
@@ -1025,7 +1274,13 @@ def _run_entity_resolution(
     stub_snapshot = list(proposal.stub_entities)
     with ThreadPoolExecutor(max_workers=2) as executor:
         updates_future = executor.submit(
-            _run_entity_updates, config, client, text, proposal, on_progress=on_progress
+            _run_entity_updates,
+            config,
+            client,
+            text,
+            proposal,
+            on_progress=on_progress,
+            checkpoint_hash=checkpoint_hash,
         )
         synthesis_future = executor.submit(
             _synthesize_stub_content,
@@ -1035,6 +1290,7 @@ def _run_entity_resolution(
             proposal,
             stub_snapshot,
             on_progress=on_progress,
+            checkpoint_hash=checkpoint_hash,
         )
         updates_future.result()
         synthesis_future.result()
@@ -1529,6 +1785,7 @@ def _synthesize_stub_content(
     stubs: list[ProposedFile],
     *,
     on_progress: Callable[[str], None] | None = None,
+    checkpoint_hash: str | None = None,
 ) -> None:
     """Fourth model call: populate each surviving create-stub's Compiled
     Truth / Timeline from this source, instead of leaving `_stub_content`'s
@@ -1569,6 +1826,18 @@ def _synthesize_stub_content(
     if not stubs:
         return
 
+    cached = (
+        _load_checkpoint(config, proposal.source_id, "synthesis", checkpoint_hash)
+        if checkpoint_hash is not None
+        else None
+    )
+    if cached is not None:
+        overrides = cached["content_by_path"]
+        for stub in stubs:
+            if stub.path in overrides:
+                stub.content = overrides[stub.path]
+        return
+
     if on_progress is not None:
         count = len(stubs)
         entity_word = "entity" if count == 1 else "entities"
@@ -1604,6 +1873,16 @@ def _synthesize_stub_content(
         merged = _merge_entity_note(stub.content, revision, today)
         if merged is not None:
             stub.content = merged
+
+    if checkpoint_hash is not None:
+        _save_checkpoint(
+            config,
+            proposal.source_id,
+            "synthesis",
+            checkpoint_hash,
+            client.model,
+            {"content_by_path": {stub.path: stub.content for stub in stubs}},
+        )
 
 
 # Wikilink parsing/normalization live in wakil.knowledge.wikilinks (shared
@@ -1930,6 +2209,7 @@ def _run_entity_updates(
     proposal: EnrichmentProposal,
     *,
     on_progress: Callable[[str], None] | None = None,
+    checkpoint_hash: str | None = None,
 ) -> None:
     """Third model call: for each action=update resolution on a
     compiled-truth-timeline entity, decide whether it warrants a real
@@ -1987,11 +2267,37 @@ def _run_entity_updates(
     if not candidates:
         return
 
+    cached = (
+        _load_checkpoint(config, proposal.source_id, "revision", checkpoint_hash)
+        if checkpoint_hash is not None
+        else None
+    )
+    if cached is not None:
+        proposal.entity_updates.extend(
+            _deserialize_entity_update(u) for u in cached["entity_updates"]
+        )
+        proposal.warnings.extend(cached["warnings"])
+        return
+
     if on_progress is not None:
         count = len(candidates)
         entity_word = "entity" if count == 1 else "entities"
         on_progress(f"Revising {count} existing {entity_word}...")
+    warnings_before = len(proposal.warnings)
     _revise_candidates(config, client, text, proposal, candidates)
+
+    if checkpoint_hash is not None:
+        _save_checkpoint(
+            config,
+            proposal.source_id,
+            "revision",
+            checkpoint_hash,
+            client.model,
+            {
+                "entity_updates": [_serialize_entity_update(u) for u in proposal.entity_updates],
+                "warnings": proposal.warnings[warnings_before:],
+            },
+        )
 
 
 def _split_candidates_by_content_length(
@@ -2421,6 +2727,12 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
         session.add(run)
         index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
         session.commit()
+
+        # The resume window this feature exists for is closed once the
+        # source is actually enriched -- clear it. A declined preview or a
+        # failed validate_proposal() (the raise above) never reaches here,
+        # so checkpoints deliberately survive both of those paths.
+        _clear_checkpoints(config, source.id)
 
         return EnrichmentResult(
             source_id=source.id,
