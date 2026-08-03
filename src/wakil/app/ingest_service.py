@@ -32,6 +32,7 @@ import json
 import re
 import zipfile
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -1015,17 +1016,34 @@ def _run_entity_resolution(
         return
     proposal.entity_resolutions = list(resolution.entities)
     proposal.stub_entities = _build_stub_entities(config, proposal)
-    # Entity updates (DAG node 3) must run before link reconciliation: it can
-    # further prune stub_entities (see _suppress_stubs_matching_updates), and
+    # Entity updates (DAG node 3) and stub-content synthesis (DAG node 4)
+    # touch disjoint entity sets, so they run concurrently -- but suppression
+    # (below) prunes proposal.stub_entities using node 3's own output, so
+    # node 4 is handed a pre-suppression snapshot rather than reading
+    # proposal.stub_entities live (see _synthesize_stub_content's docstring
+    # for why that's still correct for stubs that survive suppression).
+    stub_snapshot = list(proposal.stub_entities)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        updates_future = executor.submit(
+            _run_entity_updates, config, client, text, proposal, on_progress=on_progress
+        )
+        synthesis_future = executor.submit(
+            _synthesize_stub_content,
+            config,
+            client,
+            text,
+            proposal,
+            stub_snapshot,
+            on_progress=on_progress,
+        )
+        updates_future.result()
+        synthesis_future.result()
+    # Entity updates must run before link reconciliation: it can further
+    # prune stub_entities (see _suppress_stubs_matching_updates), and
     # reconciliation needs the final stub set to correct links against.
-    _run_entity_updates(config, client, text, proposal, on_progress=on_progress)
     _suppress_stubs_matching_updates(proposal)
     _suppress_dated_record_stubs_matching_updates(config, proposal)
     _suppress_proposed_note_matching_updates(proposal)
-    # Only now synthesize initial content for whichever stubs actually
-    # survive suppression (issue #70) — anything dropped above never needs
-    # its own model call.
-    _synthesize_stub_content(config, client, text, proposal, on_progress=on_progress)
     _reconcile_entity_links(config, proposal)
 
 
@@ -1508,6 +1526,7 @@ def _synthesize_stub_content(
     client: ModelClient,
     text: str,
     proposal: EnrichmentProposal,
+    stubs: list[ProposedFile],
     *,
     on_progress: Callable[[str], None] | None = None,
 ) -> None:
@@ -1516,6 +1535,16 @@ def _synthesize_stub_content(
     hardcoded placeholder on disk forever (issue #70) — every fresh-create
     note used to reach disk empty regardless of how much the source actually
     said about it.
+
+    `stubs` is a pre-suppression snapshot of `proposal.stub_entities`
+    (passed explicitly, not read from `proposal` here) so this can run
+    concurrently with `_run_entity_updates` in `_run_entity_resolution`,
+    ahead of the suppression passes that prune `proposal.stub_entities`
+    using that call's output. The `ProposedFile` objects in the snapshot are
+    the same instances still referenced by `proposal.stub_entities`, so a
+    `stub.content` mutation here still lands correctly for any stub that
+    survives suppression; content synthesized for a stub suppression later
+    discards is simply thrown away with it.
 
     Deliberately reuses `_run_entity_updates`'s own machinery rather than
     inventing a parallel one: the same `EntityRevision` contract, the same
@@ -1537,14 +1566,14 @@ def _synthesize_stub_content(
     placeholder content plus a warning, never a crash — mirrors
     `_run_entity_resolution`'s own `ModelContractError` handling.
     """
-    if not proposal.stub_entities:
+    if not stubs:
         return
 
     if on_progress is not None:
-        count = len(proposal.stub_entities)
+        count = len(stubs)
         entity_word = "entity" if count == 1 else "entities"
         on_progress(f"Synthesizing content for {count} new {entity_word}...")
-    targets = [(stub.path, stub.content) for stub in proposal.stub_entities]
+    targets = [(stub.path, stub.content) for stub in stubs]
     skill = load_skill("note-revision", config.root_path)
     system = build_system_prompt(skill, EntityRevisionOutput)
     cacheable_prefix, prompt = build_revision_prompt(
@@ -1565,7 +1594,7 @@ def _synthesize_stub_content(
         return
 
     today = datetime.now(UTC).date().isoformat()
-    by_path = {stub.path: stub for stub in proposal.stub_entities}
+    by_path = {stub.path: stub for stub in stubs}
     for revision in result.revisions:
         stub = by_path.get(revision.target_note_path)
         if stub is None or not revision.has_update:

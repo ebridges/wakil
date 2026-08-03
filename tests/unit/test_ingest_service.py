@@ -1,4 +1,5 @@
 import json
+import threading
 import zipfile
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -125,20 +126,46 @@ class FakeClient:
     """Scripted responses, one per model call (extraction, resolution,
     entity-updates whenever a resolution's `update` target exists on disk,
     then stub-content synthesis whenever a create-resolution's stub
-    survives suppression, issue #70)."""
+    survives suppression, issue #70).
+
+    `router`: optional list of (needle, response) pairs, checked before the
+    queue on every call. Entity-updates and stub-content synthesis
+    (`_run_entity_updates`/`_synthesize_stub_content`) now run concurrently
+    (Part B / ThreadPoolExecutor in `_run_entity_resolution`) and share the
+    same `EntityRevisionOutput` contract and system prompt -- the queue's
+    strict pop(0) order is no longer reliable for telling them apart, since
+    thread scheduling decides which one calls `complete()` first. `needle`
+    should be a substring unique to one call's prompt (a target note path
+    works, since revision targets and synthesis targets never overlap);
+    a call whose prompt matches no needle falls back to the queue -- so a
+    test only needs a router entry for the call(s) it cares about pinning,
+    and can let the other one draw from the queue as before. A lock guards
+    the queue/router search since both threads can call `complete()` at
+    once.
+    """
 
     model = "fake-model"
 
-    def __init__(self, payloads=None):
+    def __init__(self, payloads=None, router=None):
         if payloads is None:
             payloads = [MODEL_JSON, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON]
         self.queue = [json.dumps(p) if isinstance(p, dict) else p for p in payloads]
+        self.router = [
+            (needle, json.dumps(r) if isinstance(r, dict) else r) for needle, r in (router or [])
+        ]
         self.calls: list[tuple[str, str]] = []
+        self._lock = threading.Lock()
 
     def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
-        self.calls.append((system, prompt))
-        assert self.queue, "FakeClient ran out of scripted responses"
-        step = self.queue.pop(0)
+        with self._lock:
+            self.calls.append((system, prompt))
+            for needle, response in self.router:
+                if needle in prompt:
+                    step = response
+                    break
+            else:
+                assert self.queue, "FakeClient ran out of scripted responses"
+                step = self.queue.pop(0)
         if isinstance(step, Exception):
             raise step
         return step
@@ -551,8 +578,16 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
     assert len(client.calls) == 4
     extraction_system, extraction_prompt = client.calls[0]
     resolution_system, resolution_prompt = client.calls[1]
-    revision_system, revision_prompt = client.calls[2]
-    synthesis_system, synthesis_prompt = client.calls[3]
+    # The entity-updates and stub-synthesis calls run concurrently (Part B),
+    # so calls[2]/calls[3] aren't in a guaranteed order -- tell them apart by
+    # which target path each call's prompt names instead.
+    third_call, fourth_call = client.calls[2], client.calls[3]
+    if "people/jane-doe.md" in third_call[1]:
+        revision_system, revision_prompt = third_call
+        synthesis_system, synthesis_prompt = fourth_call
+    else:
+        revision_system, revision_prompt = fourth_call
+        synthesis_system, synthesis_prompt = third_call
     assert "Find the resolution, not the first option" in extraction_system
     assert '"ExtractionOutput"' in extraction_system  # contract schema injected
     assert "Jane Doe (Acme)" in extraction_prompt
@@ -1544,9 +1579,16 @@ def test_stub_suppressed_when_matches_applied_entity_update_target(
         ]
     }
     source_id = _capture(workspace, transcript)
-    proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    # The journal create's stub survives long enough to be handed to a
+    # concurrent stub-content synthesis call (Part B) before suppression
+    # drops it below -- route the priya-shah.md revision by target path so
+    # the two concurrent calls can't get each other's response, and let the
+    # synthesis call (unrelated target) draw its no-op reply from the queue.
+    client = FakeClient(
+        [MODEL_JSON, resolution, STUB_SYNTHESIS_JSON],
+        router=[("people/priya-shah.md", revisions)],
     )
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert len(proposal.entity_updates) == 1
     assert proposal.stub_entities == []
@@ -1554,6 +1596,75 @@ def test_stub_suppressed_when_matches_applied_entity_update_target(
         "subject already updated via an existing entity" in warning
         for warning in proposal.warnings
     )
+
+
+def test_synthesized_content_for_a_stub_suppression_later_discards_never_leaks(
+    workspace, transcript, kb_path
+):
+    # Part B hands stub-content synthesis a pre-suppression snapshot so it
+    # can run concurrently with entity-updates -- meaning it can now spend a
+    # real model call synthesizing content for a stub that suppression goes
+    # on to discard (accepted, bounded cost; see _run_entity_resolution).
+    # This proves that discarded work never actually reaches the final
+    # proposal or disk: the suppressed stub is gone from stub_entities
+    # entirely, and applying the proposal never writes its file, regardless
+    # of how much real content the wasted synthesis call produced.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "Priya Shah",
+                "entity_type": "journal",
+                "action": "create",
+                "confidence": 0.7,
+            },
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    # A real (not no-op) synthesis response for the journal stub -- proving
+    # the wasted call's content, even when non-trivial, still never leaks.
+    wasted_synthesis = {
+        "revisions": [
+            {
+                "target_note_path": "journal/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "This content must never reach the final proposal.",
+                "timeline_entry": "### 2026-07-16 — should be discarded\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient(
+        [MODEL_JSON, resolution, wasted_synthesis],
+        router=[("people/priya-shah.md", revisions)],
+    )
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.stub_entities == []
+    assert not any(
+        "This content must never reach the final proposal" in (u.new_content or "")
+        for u in proposal.entity_updates
+    )
+    result = apply_enrichment(workspace, proposal)
+    assert "journal/priya-shah.md" not in result.files_written
+    assert not (workspace.root_path / "journal/priya-shah.md").exists()
 
 
 def test_stub_kept_when_create_subject_differs_from_update_target(
@@ -1592,13 +1703,15 @@ def test_stub_kept_when_create_subject_differs_from_update_target(
         ]
     }
     source_id = _capture(workspace, transcript)
-    # Dana Prieto's stub survives suppression -> a 4th call (stub-content
-    # synthesis) happens after the entity-updates call.
-    proposal = prepare_enrichment(
-        workspace,
-        source_id,
-        FakeClient([MODEL_JSON, resolution, revisions, STUB_SYNTHESIS_JSON]),
+    # Dana Prieto's stub survives suppression -> a stub-content synthesis
+    # call happens, concurrently with the entity-updates call (Part B) --
+    # route the priya-shah.md revision by target path so the two calls
+    # can't get each other's response.
+    client = FakeClient(
+        [MODEL_JSON, resolution, STUB_SYNTHESIS_JSON],
+        router=[("people/priya-shah.md", revisions)],
     )
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert len(proposal.entity_updates) == 1
     assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
@@ -1654,9 +1767,15 @@ def test_dated_record_stub_suppressed_when_source_already_merged_via_update(
         ]
     }
     source_id = _capture(workspace, transcript)
-    proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    # The journal create's stub survives long enough to be handed to a
+    # concurrent stub-content synthesis call (Part B) before suppression
+    # drops it below -- route the priya-shah.md revision by target path so
+    # the two concurrent calls can't get each other's response.
+    client = FakeClient(
+        [MODEL_JSON, resolution, STUB_SYNTHESIS_JSON],
+        router=[("people/priya-shah.md", revisions)],
     )
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert len(proposal.entity_updates) == 1
     assert proposal.stub_entities == []
@@ -1750,13 +1869,15 @@ def test_stub_kept_for_type_outside_narrow_dated_record_scope(workspace, transcr
         ]
     }
     source_id = _capture(workspace, transcript)
-    # Elektrum's stub survives suppression -> a 4th call (stub-content
-    # synthesis) happens after the entity-updates call.
-    proposal = prepare_enrichment(
-        workspace,
-        source_id,
-        FakeClient([payload, resolution, revisions, STUB_SYNTHESIS_JSON]),
+    # Elektrum's stub survives suppression -> a stub-content synthesis call
+    # happens, concurrently with the entity-updates call (Part B) -- route
+    # the priya-shah.md revision by target path so the two calls can't get
+    # each other's response.
+    client = FakeClient(
+        [payload, resolution, STUB_SYNTHESIS_JSON],
+        router=[("people/priya-shah.md", revisions)],
     )
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert len(proposal.entity_updates) == 1
     assert [stub.path for stub in proposal.stub_entities] == ["projects/elektrum.md"]
@@ -3266,11 +3387,13 @@ def test_prepare_enrichment_on_progress_reports_all_four_phases_in_order(workspa
 
     prepare_enrichment(workspace, source_id, client, on_progress=messages.append)
 
+    # The revision and synthesis phases run concurrently (Part B), so
+    # messages[2]/messages[3] aren't in a guaranteed order.
     assert len(messages) == 4
     assert "Extracting" in messages[0]
     assert "Resolving entities" in messages[1]
-    assert "Revising" in messages[2] and "1" in messages[2]
-    assert "Synthesizing" in messages[3] and "1" in messages[3]
+    assert any("Revising" in message and "1" in message for message in messages[2:])
+    assert any("Synthesizing" in message and "1" in message for message in messages[2:])
 
 
 def test_prepare_enrichment_on_progress_silent_for_no_update_candidates(workspace, transcript):
@@ -3459,7 +3582,9 @@ def test_synthesize_stub_content_skips_call_when_no_stubs_survive(workspace):
     proposal = EnrichmentProposal(source_id=1, title="t")
     client = FakeClient([])
 
-    ingest_service._synthesize_stub_content(workspace, client, "some source text", proposal)
+    ingest_service._synthesize_stub_content(
+        workspace, client, "some source text", proposal, proposal.stub_entities
+    )
 
     assert client.calls == []
 
