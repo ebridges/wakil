@@ -55,6 +55,12 @@ def _rewind_to_legacy(engine) -> None:
     inserted afterward would get `id = NULL` instead of a real id.)"""
     with engine.begin() as connection:
         connection.execute(text("DROP TABLE alembic_version"))
+        # enrichment_checkpoints (0007) is a whole table added post-baseline,
+        # not a column on an already-existing table -- a real pre-Alembic
+        # wakil.db never had it at all, so it must be dropped here too, or
+        # replaying 0007's migration during the upgrade below tries to
+        # CREATE TABLE a table that create_all() already built.
+        connection.execute(text("DROP TABLE enrichment_checkpoints"))
         for table, columns in (
             ("memories", _LEGACY_MEMORY_COLUMNS),
             ("relationships", _LEGACY_RELATIONSHIP_COLUMNS),

@@ -1,4 +1,5 @@
 import json
+import threading
 import zipfile
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -50,7 +51,7 @@ from wakil.llm.client import ModelTruncatedError
 from wakil.llm.schemas import EntityResolution, EntityRevision, ModelContractError
 from wakil.schema.loader import load_entity_schemas
 from wakil.schema.validate import validate_frontmatter
-from wakil.storage.schema import IngestRun, Memory, Note, Relationship, Source
+from wakil.storage.schema import EnrichmentCheckpoint, IngestRun, Memory, Note, Relationship, Source
 
 MODEL_JSON = {
     "title": "Claims Kickoff Meeting",
@@ -125,20 +126,46 @@ class FakeClient:
     """Scripted responses, one per model call (extraction, resolution,
     entity-updates whenever a resolution's `update` target exists on disk,
     then stub-content synthesis whenever a create-resolution's stub
-    survives suppression, issue #70)."""
+    survives suppression, issue #70).
+
+    `router`: optional list of (needle, response) pairs, checked before the
+    queue on every call. Entity-updates and stub-content synthesis
+    (`_run_entity_updates`/`_synthesize_stub_content`) now run concurrently
+    (Part B / ThreadPoolExecutor in `_run_entity_resolution`) and share the
+    same `EntityRevisionOutput` contract and system prompt -- the queue's
+    strict pop(0) order is no longer reliable for telling them apart, since
+    thread scheduling decides which one calls `complete()` first. `needle`
+    should be a substring unique to one call's prompt (a target note path
+    works, since revision targets and synthesis targets never overlap);
+    a call whose prompt matches no needle falls back to the queue -- so a
+    test only needs a router entry for the call(s) it cares about pinning,
+    and can let the other one draw from the queue as before. A lock guards
+    the queue/router search since both threads can call `complete()` at
+    once.
+    """
 
     model = "fake-model"
 
-    def __init__(self, payloads=None):
+    def __init__(self, payloads=None, router=None):
         if payloads is None:
             payloads = [MODEL_JSON, RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON]
         self.queue = [json.dumps(p) if isinstance(p, dict) else p for p in payloads]
+        self.router = [
+            (needle, json.dumps(r) if isinstance(r, dict) else r) for needle, r in (router or [])
+        ]
         self.calls: list[tuple[str, str]] = []
+        self._lock = threading.Lock()
 
     def complete(self, system, prompt, max_tokens=8192, *, cacheable_prefix=None):
-        self.calls.append((system, prompt))
-        assert self.queue, "FakeClient ran out of scripted responses"
-        step = self.queue.pop(0)
+        with self._lock:
+            self.calls.append((system, prompt))
+            for needle, response in self.router:
+                if needle in prompt:
+                    step = response
+                    break
+            else:
+                assert self.queue, "FakeClient ran out of scripted responses"
+                step = self.queue.pop(0)
         if isinstance(step, Exception):
             raise step
         return step
@@ -551,8 +578,16 @@ def test_enrichment_analyzes_and_links(workspace, transcript):
     assert len(client.calls) == 4
     extraction_system, extraction_prompt = client.calls[0]
     resolution_system, resolution_prompt = client.calls[1]
-    revision_system, revision_prompt = client.calls[2]
-    synthesis_system, synthesis_prompt = client.calls[3]
+    # The entity-updates and stub-synthesis calls run concurrently (Part B),
+    # so calls[2]/calls[3] aren't in a guaranteed order -- tell them apart by
+    # which target path each call's prompt names instead.
+    third_call, fourth_call = client.calls[2], client.calls[3]
+    if "people/jane-doe.md" in third_call[1]:
+        revision_system, revision_prompt = third_call
+        synthesis_system, synthesis_prompt = fourth_call
+    else:
+        revision_system, revision_prompt = fourth_call
+        synthesis_system, synthesis_prompt = third_call
     assert "Find the resolution, not the first option" in extraction_system
     assert '"ExtractionOutput"' in extraction_system  # contract schema injected
     assert "Jane Doe (Acme)" in extraction_prompt
@@ -1544,9 +1579,16 @@ def test_stub_suppressed_when_matches_applied_entity_update_target(
         ]
     }
     source_id = _capture(workspace, transcript)
-    proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    # The journal create's stub survives long enough to be handed to a
+    # concurrent stub-content synthesis call (Part B) before suppression
+    # drops it below -- route the priya-shah.md revision by target path so
+    # the two concurrent calls can't get each other's response, and let the
+    # synthesis call (unrelated target) draw its no-op reply from the queue.
+    client = FakeClient(
+        [MODEL_JSON, resolution, STUB_SYNTHESIS_JSON],
+        router=[("people/priya-shah.md", revisions)],
     )
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert len(proposal.entity_updates) == 1
     assert proposal.stub_entities == []
@@ -1554,6 +1596,75 @@ def test_stub_suppressed_when_matches_applied_entity_update_target(
         "subject already updated via an existing entity" in warning
         for warning in proposal.warnings
     )
+
+
+def test_synthesized_content_for_a_stub_suppression_later_discards_never_leaks(
+    workspace, transcript, kb_path
+):
+    # Part B hands stub-content synthesis a pre-suppression snapshot so it
+    # can run concurrently with entity-updates -- meaning it can now spend a
+    # real model call synthesizing content for a stub that suppression goes
+    # on to discard (accepted, bounded cost; see _run_entity_resolution).
+    # This proves that discarded work never actually reaches the final
+    # proposal or disk: the suppressed stub is gone from stub_entities
+    # entirely, and applying the proposal never writes its file, regardless
+    # of how much real content the wasted synthesis call produced.
+    _write_person(kb_path, "priya-shah")
+    resolution = {
+        "entities": [
+            {
+                "name": "Priya Shah",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/priya-shah.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "Priya Shah",
+                "entity_type": "journal",
+                "action": "create",
+                "confidence": 0.7,
+            },
+        ]
+    }
+    revisions = {
+        "revisions": [
+            {
+                "target_note_path": "people/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "New synthesized truth.",
+                "timeline_entry": "### 2026-07-16 — new info\n- detail",
+            }
+        ]
+    }
+    # A real (not no-op) synthesis response for the journal stub -- proving
+    # the wasted call's content, even when non-trivial, still never leaks.
+    wasted_synthesis = {
+        "revisions": [
+            {
+                "target_note_path": "journal/priya-shah.md",
+                "has_update": True,
+                "compiled_truth": "This content must never reach the final proposal.",
+                "timeline_entry": "### 2026-07-16 — should be discarded\n- detail",
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient(
+        [MODEL_JSON, resolution, wasted_synthesis],
+        router=[("people/priya-shah.md", revisions)],
+    )
+    proposal = prepare_enrichment(workspace, source_id, client)
+
+    assert proposal.stub_entities == []
+    assert not any(
+        "This content must never reach the final proposal" in (u.new_content or "")
+        for u in proposal.entity_updates
+    )
+    result = apply_enrichment(workspace, proposal)
+    assert "journal/priya-shah.md" not in result.files_written
+    assert not (workspace.root_path / "journal/priya-shah.md").exists()
 
 
 def test_stub_kept_when_create_subject_differs_from_update_target(
@@ -1592,13 +1703,15 @@ def test_stub_kept_when_create_subject_differs_from_update_target(
         ]
     }
     source_id = _capture(workspace, transcript)
-    # Dana Prieto's stub survives suppression -> a 4th call (stub-content
-    # synthesis) happens after the entity-updates call.
-    proposal = prepare_enrichment(
-        workspace,
-        source_id,
-        FakeClient([MODEL_JSON, resolution, revisions, STUB_SYNTHESIS_JSON]),
+    # Dana Prieto's stub survives suppression -> a stub-content synthesis
+    # call happens, concurrently with the entity-updates call (Part B) --
+    # route the priya-shah.md revision by target path so the two calls
+    # can't get each other's response.
+    client = FakeClient(
+        [MODEL_JSON, resolution, STUB_SYNTHESIS_JSON],
+        router=[("people/priya-shah.md", revisions)],
     )
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert len(proposal.entity_updates) == 1
     assert [stub.path for stub in proposal.stub_entities] == ["people/dana-prieto.md"]
@@ -1654,9 +1767,15 @@ def test_dated_record_stub_suppressed_when_source_already_merged_via_update(
         ]
     }
     source_id = _capture(workspace, transcript)
-    proposal = prepare_enrichment(
-        workspace, source_id, FakeClient([MODEL_JSON, resolution, revisions])
+    # The journal create's stub survives long enough to be handed to a
+    # concurrent stub-content synthesis call (Part B) before suppression
+    # drops it below -- route the priya-shah.md revision by target path so
+    # the two concurrent calls can't get each other's response.
+    client = FakeClient(
+        [MODEL_JSON, resolution, STUB_SYNTHESIS_JSON],
+        router=[("people/priya-shah.md", revisions)],
     )
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert len(proposal.entity_updates) == 1
     assert proposal.stub_entities == []
@@ -1750,13 +1869,15 @@ def test_stub_kept_for_type_outside_narrow_dated_record_scope(workspace, transcr
         ]
     }
     source_id = _capture(workspace, transcript)
-    # Elektrum's stub survives suppression -> a 4th call (stub-content
-    # synthesis) happens after the entity-updates call.
-    proposal = prepare_enrichment(
-        workspace,
-        source_id,
-        FakeClient([payload, resolution, revisions, STUB_SYNTHESIS_JSON]),
+    # Elektrum's stub survives suppression -> a stub-content synthesis call
+    # happens, concurrently with the entity-updates call (Part B) -- route
+    # the priya-shah.md revision by target path so the two calls can't get
+    # each other's response.
+    client = FakeClient(
+        [payload, resolution, STUB_SYNTHESIS_JSON],
+        router=[("people/priya-shah.md", revisions)],
     )
+    proposal = prepare_enrichment(workspace, source_id, client)
 
     assert len(proposal.entity_updates) == 1
     assert [stub.path for stub in proposal.stub_entities] == ["projects/elektrum.md"]
@@ -3251,6 +3372,187 @@ def test_prepare_enrichment_no_false_positive_warning_when_stub_produced(
 
 
 # --------------------------------------------------------------------------
+# Incremental progress feedback (`on_progress`): the DAG runs behind a
+# single static spinner otherwise, with no signal for 20+ minutes on a large
+# source. Default `None` is a no-op for every existing caller above.
+
+
+def test_prepare_enrichment_on_progress_reports_all_four_phases_in_order(workspace, transcript):
+    # Default RESOLUTION_JSON has both a create (Dana Prieto) and an update
+    # (Jane Doe, against the fixture's real people/jane-doe.md), so all four
+    # model calls run -- see test_enrichment_analyzes_and_links.
+    source_id = _capture(workspace, transcript, context="Attendees: Jane Doe (Acme).")
+    client = FakeClient()
+    messages: list[str] = []
+
+    prepare_enrichment(workspace, source_id, client, on_progress=messages.append)
+
+    # The revision and synthesis phases run concurrently (Part B), so
+    # messages[2]/messages[3] aren't in a guaranteed order.
+    assert len(messages) == 4
+    assert "Extracting" in messages[0]
+    assert "Resolving entities" in messages[1]
+    assert any("Revising" in message and "1" in message for message in messages[2:])
+    assert any("Synthesizing" in message and "1" in message for message in messages[2:])
+
+
+def test_prepare_enrichment_on_progress_silent_for_no_update_candidates(workspace, transcript):
+    # Only a create resolution -- _run_entity_updates' `if not candidates:
+    # return` guard means the revision phase must never announce itself.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {
+                "name": "Dana Prieto",
+                "entity_type": "person",
+                "action": "create",
+                "confidence": 0.85,
+                "proposed_frontmatter": {"status": "active", "role": "Claims platform lead"},
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript)
+    client = FakeClient([extraction, resolution, STUB_SYNTHESIS_JSON])
+    messages: list[str] = []
+
+    prepare_enrichment(workspace, source_id, client, on_progress=messages.append)
+
+    assert not any("Revising" in message for message in messages)
+    assert any("Synthesizing" in message for message in messages)
+
+
+def test_prepare_enrichment_on_progress_silent_for_no_stub_entities(workspace, transcript):
+    # Only an update resolution -- _synthesize_stub_content's `if not
+    # proposal.stub_entities: return` guard means the synthesis phase must
+    # never announce itself.
+    extraction = dict(MODEL_JSON, proposed_note=None)
+    resolution = {
+        "entities": [
+            {
+                "name": "Jane Doe",
+                "entity_type": "person",
+                "action": "update",
+                "target_note_path": "people/jane-doe.md",
+                "confidence": 0.9,
+            }
+        ]
+    }
+    source_id = _capture(workspace, transcript, context="Attendees: Jane Doe (Acme).")
+    client = FakeClient([extraction, resolution, REVISION_JSON])
+    messages: list[str] = []
+
+    prepare_enrichment(workspace, source_id, client, on_progress=messages.append)
+
+    assert any("Revising" in message for message in messages)
+    assert not any("Synthesizing" in message for message in messages)
+
+
+# --------------------------------------------------------------------------
+# Checkpointing/resume (docs/adr/0020): each DAG phase's output is persisted
+# to EnrichmentCheckpoint as it completes, so a killed/crashed run -- or one
+# that failed a later, unrelated validate_proposal check -- can resume from
+# the last completed phase on the next `prepare_enrichment` call instead of
+# redoing every model call from scratch.
+
+
+def test_prepare_enrichment_resumes_extraction_from_checkpoint(workspace, transcript):
+    # Extraction succeeds and is checkpointed; resolution then fails twice
+    # (never checkpointed -- see _run_entity_resolution). A second
+    # prepare_enrichment call on the same source, same context/model, is
+    # handed a fresh client whose queue has NO extraction payload at all --
+    # if the checkpoint weren't picked up, this would raise "FakeClient ran
+    # out of scripted responses" on the very first call.
+    source_id = _capture(workspace, transcript)
+    first_client = FakeClient([MODEL_JSON, "bad", "still bad"])
+    first_proposal = prepare_enrichment(workspace, source_id, first_client)
+    assert first_proposal.entity_resolutions == []
+    assert any("Entity resolution failed" in w for w in first_proposal.warnings)
+
+    second_client = FakeClient([RESOLUTION_JSON, REVISION_JSON, STUB_SYNTHESIS_JSON])
+    second_proposal = prepare_enrichment(workspace, source_id, second_client)
+
+    assert len(second_client.calls) == 3  # resolution, revision, synthesis -- no extraction
+    assert second_proposal.summary == MODEL_JSON["summary"]  # extraction's output, reused
+    assert second_proposal.proposed_note is not None
+    assert len(second_proposal.entity_resolutions) == len(RESOLUTION_JSON["entities"])
+
+
+def test_prepare_enrichment_checkpoint_invalidated_by_different_context(workspace, transcript):
+    # The staleness key includes context_digest -- a different digest means
+    # every phase is redone, even against the identical source content.
+    source_id = _capture(workspace, transcript)
+    client1 = FakeClient()
+    prepare_enrichment(workspace, source_id, client1, context_digest="digest-a")
+    assert len(client1.calls) == 4
+
+    client2 = FakeClient()
+    prepare_enrichment(workspace, source_id, client2, context_digest="digest-b")
+    assert len(client2.calls) == 4
+
+
+def test_prepare_enrichment_reuses_all_checkpoints_then_force_redoes_every_phase(
+    workspace, transcript
+):
+    source_id = _capture(workspace, transcript)
+    client1 = FakeClient()
+    prepare_enrichment(workspace, source_id, client1)
+    assert len(client1.calls) == 4
+
+    # Same source, same (absent) context, same model -- every phase's
+    # checkpoint is reused, so this client is never even asked for a response.
+    client2 = FakeClient([])
+    prepare_enrichment(workspace, source_id, client2)
+    assert len(client2.calls) == 0
+
+    # --force clears every checkpoint up front, so this run redoes all 4.
+    client3 = FakeClient()
+    prepare_enrichment(workspace, source_id, client3, force=True)
+    assert len(client3.calls) == 4
+
+
+def test_apply_enrichment_clears_checkpoints_on_success(workspace, transcript):
+    source_id = _capture(workspace, transcript)
+    proposal = prepare_enrichment(workspace, source_id, FakeClient())
+    with open_session(workspace) as session:
+        assert (
+            session.scalar(
+                select(EnrichmentCheckpoint).where(EnrichmentCheckpoint.source_id == source_id)
+            )
+            is not None
+        )
+
+    apply_enrichment(workspace, proposal)
+
+    with open_session(workspace) as session:
+        assert (
+            session.scalar(
+                select(EnrichmentCheckpoint).where(EnrichmentCheckpoint.source_id == source_id)
+            )
+            is None
+        )
+
+
+def test_apply_enrichment_validation_failure_leaves_checkpoints_in_place(workspace, transcript):
+    # A schema-unknown create is a hard stop in validate_proposal, unrelated
+    # to whether the 4 model calls that produced it succeeded -- the whole
+    # point of checkpointing is that this path must NOT clear them.
+    source_id = _capture(workspace, transcript)
+    resolution = {"entities": [{"name": "The Guild", "entity_type": "guild", "action": "create"}]}
+    proposal = prepare_enrichment(workspace, source_id, FakeClient([MODEL_JSON, resolution]))
+
+    with pytest.raises(IngestError, match="failed validation"):
+        apply_enrichment(workspace, proposal)
+
+    with open_session(workspace) as session:
+        rows = list(
+            session.scalars(
+                select(EnrichmentCheckpoint).where(EnrichmentCheckpoint.source_id == source_id)
+            )
+        )
+        assert len(rows) >= 1
+
+
+# --------------------------------------------------------------------------
 # Stub-content synthesis on create (issue #70): `_stub_content` used to
 # always write a hardcoded, empty placeholder regardless of how much the
 # source actually said about the new entity. `_synthesize_stub_content`
@@ -3385,7 +3687,9 @@ def test_synthesize_stub_content_skips_call_when_no_stubs_survive(workspace):
     proposal = EnrichmentProposal(source_id=1, title="t")
     client = FakeClient([])
 
-    ingest_service._synthesize_stub_content(workspace, client, "some source text", proposal)
+    ingest_service._synthesize_stub_content(
+        workspace, client, "some source text", proposal, proposal.stub_entities
+    )
 
     assert client.calls == []
 

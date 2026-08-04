@@ -430,7 +430,7 @@ def _prepare_enrichment_or_exit(
     from wakil.llm.client import ModelError
 
     try:
-        with console.status(f"Analyzing source #{source_id} with {client.model}..."):
+        with console.status(f"Analyzing source #{source_id} with {client.model}...") as status:
             return prepare_enrichment(
                 config,
                 source_id,
@@ -441,6 +441,7 @@ def _prepare_enrichment_or_exit(
                     resolved_context.referenced_paths if resolved_context else None
                 ),
                 force=force,
+                on_progress=lambda msg: status.update(status=msg),
             )
     except (IngestError, ModelError) as exc:
         console.print(f"[red]Enrichment failed:[/red] {exc}")
