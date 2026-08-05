@@ -14,6 +14,24 @@ nothing; see the `development-docs` skill (`.claude/skills/development-docs/SKIL
 the judgment process that maintains this file. Every entry cites a concrete
 source (commit SHA, PR #, or session detail) for traceability.
 
+### `anthropics/claude-code-action` fails 3x on OIDC token fetch without `id-token: write`
+**Date:** 2026-08-05 · **Source:** `.github/workflows/pr-review.yml`; PR #184, commit 30d8044
+
+**Symptom:** The new `pr-review.yml` workflow (runs the `pr-reviewer` subagent on PRs via `anthropics/claude-code-action@v1`) failed on its first run with `Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable`, retried 3 times, then hard-failed before ever sending a prompt to the model — no Claude-side error, nothing about the `ANTHROPIC_API_KEY` secret.
+
+**Root cause:** The action fetches a GitHub Actions OIDC token on startup as part of its own setup (independent of the `ANTHROPIC_API_KEY` authentication path), and GitHub only issues that token to a job whose workflow permissions include `id-token: write`. The initial workflow granted only `contents: read` and `pull-requests: write` — reasonable guesses from the action's job (read the repo, comment on the PR) — with nothing about the OIDC requirement documented in the action's basic usage examples.
+
+**Fix:** Add `id-token: write` to the job's `permissions:` block. Any future workflow step using `anthropics/claude-code-action` needs this even when authenticating via a plain API key, not just for the OAuth/GitHub-App flow.
+
+### `anthropics/claude-code-action` silently no-ops on a PR that itself modifies the workflow file
+**Date:** 2026-08-05 · **Source:** `.github/workflows/pr-review.yml`; PR #184, run 31022867184
+
+**Symptom:** After fixing the `id-token: write` issue above, the `claude-review` check on PR #184 passed in ~20-30s — far too fast for a run that reads several ADRs, runs `ruff`/`pytest`, and invokes a subagent — and no PR comment ever appeared, with no error surfaced anywhere in the PR UI.
+
+**Root cause:** `anthropics/claude-code-action` fetches the workflow YAML from the repository's default branch and refuses to execute if it differs from the workflow file actually running in the current job — a deliberate guard against a PR changing its own CI workflow (e.g. adding a step, widening permissions) and having that untrusted version run with real secrets. Since PR #184 was the PR *introducing* `pr-review.yml` (it didn't exist on `main` yet), every run on that PR hit this check and exited early with `success`, logging only `Skipping action due to workflow validation... this is normal ... your workflow will begin working once you merge your PR` — easy to miss since it isn't a failure and doesn't block the PR.
+
+**Fix:** No code change — this is expected behavior. A PR that adds or edits a `claude-code-action` workflow can never be used to verify that workflow's actual behavior (posting comments, etc.); merge it to `main` first, then open a *separate*, unrelated PR to exercise the now-trusted copy of the workflow.
+
 ### Commit-message emoji was a "manual commits only" presentation layer, so automatic commits silently lacked it
 **Date:** 2026-07-23 · **Source:** `src/wakil/app/git_service.py`, `src/wakil/skills/kb-commit/SKILL.md`
 
