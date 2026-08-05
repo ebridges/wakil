@@ -1,0 +1,77 @@
+Run Claude Code Action
+15s
+Run # Do NOT pass --tsconfig-override here. It triggers a Bun runtime bug
+  Auto-detected mode: agent for event: pull_request
+  Requesting OIDC token...
+  Attempt 1 of 3...
+  Failed to get OIDC token: 66 |                 const id_token = yield OidcClient.getCall(id_token_url);
+  67 |                 (0, core_1.setSecret)(id_token);
+  68 |                 return id_token;
+  69 |             }
+  70 |             catch (error) {
+  71 |                 throw new Error(`Error message: ${error.message}`);
+                                 ^
+  error: Error message: Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:71:27)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:8:71)
+        at new Promise (1:11)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:4:12)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:319:46)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:31:71)
+        at new Promise (1:11)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:27:12)
+        at getOidcToken (/home/runner/work/_actions/anthropics/claude-code-action/v1/src/github/token.ts:58:34)
+        at retryWithBackoff (/home/runner/work/_actions/anthropics/claude-code-action/v1/base-action/src/retry.ts:27:20)
+  
+  Attempt 1 failed: Could not fetch an OIDC token. Did you remember to add `id-token: write` to your workflow permissions?
+  Retrying in 5 seconds...
+  Attempt 2 of 3...
+  Failed to get OIDC token: 66 |                 const id_token = yield OidcClient.getCall(id_token_url);
+  67 |                 (0, core_1.setSecret)(id_token);
+  68 |                 return id_token;
+  69 |             }
+  70 |             catch (error) {
+  71 |                 throw new Error(`Error message: ${error.message}`);
+                                 ^
+  error: Error message: Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:71:27)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:8:71)
+        at new Promise (1:11)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:4:12)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:319:46)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:31:71)
+        at new Promise (1:11)
+  Retrying in 10 seconds...
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:27:12)
+        at getOidcToken (/home/runner/work/_actions/anthropics/claude-code-action/v1/src/github/token.ts:58:34)
+        at retryWithBackoff (/home/runner/work/_actions/anthropics/claude-code-action/v1/base-action/src/retry.ts:27:20)
+        at async setupGitHubToken (/home/runner/work/_actions/anthropics/claude-code-action/v1/src/github/token.ts:168:27)
+        at async run (/home/runner/work/_actions/anthropics/claude-code-action/v1/src/entrypoints/run.ts:173:27)
+  
+  Attempt 2 failed: Could not fetch an OIDC token. Did you remember to add `id-token: write` to your workflow permissions?
+  Attempt 3 of 3...
+  Failed to get OIDC token: 66 |                 const id_token = yield OidcClient.getCall(id_token_url);
+  67 |                 (0, core_1.setSecret)(id_token);
+  68 |                 return id_token;
+  69 |             }
+  70 |             catch (error) {
+  71 |                 throw new Error(`Error message: ${error.message}`);
+                                 ^
+  error: Error message: Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:71:27)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:8:71)
+        at new Promise (1:11)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/oidc-utils.js:4:12)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:319:46)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:31:71)
+        at new Promise (1:11)
+        at <anonymous> (/home/runner/work/_actions/anthropics/claude-code-action/v1/node_modules/@actions/core/lib/core.js:27:12)
+        at getOidcToken (/home/runner/work/_actions/anthropics/claude-code-action/v1/src/github/token.ts:58:34)
+        at retryWithBackoff (/home/runner/work/_actions/anthropics/claude-code-action/v1/base-action/src/retry.ts:27:20)
+        at async setupGitHubToken (/home/runner/work/_actions/anthropics/claude-code-action/v1/src/github/token.ts:168:27)
+        at async run (/home/runner/work/_actions/anthropics/claude-code-action/v1/src/entrypoints/run.ts:173:27)
+  
+  Attempt 3 failed: Could not fetch an OIDC token. Did you remember to add `id-token: write` to your workflow permissions?
+  Operation failed after 3 attempts
+  Error: Action failed with error: Could not fetch an OIDC token. Did you remember to add `id-token: write` to your workflow permissions?
+  Error: Process completed with exit code 1.
