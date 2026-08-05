@@ -14,6 +14,15 @@ nothing; see the `development-docs` skill (`.claude/skills/development-docs/SKIL
 the judgment process that maintains this file. Every entry cites a concrete
 source (commit SHA, PR #, or session detail) for traceability.
 
+### `anthropics/claude-code-action` fails 3x on OIDC token fetch without `id-token: write`
+**Date:** 2026-08-05 · **Source:** `.github/workflows/pr-review.yml`; PR #184, commit 30d8044
+
+**Symptom:** The new `pr-review.yml` workflow (runs the `pr-reviewer` subagent on PRs via `anthropics/claude-code-action@v1`) failed on its first run with `Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable`, retried 3 times, then hard-failed before ever sending a prompt to the model — no Claude-side error, nothing about the `ANTHROPIC_API_KEY` secret.
+
+**Root cause:** The action fetches a GitHub Actions OIDC token on startup as part of its own setup (independent of the `ANTHROPIC_API_KEY` authentication path), and GitHub only issues that token to a job whose workflow permissions include `id-token: write`. The initial workflow granted only `contents: read` and `pull-requests: write` — reasonable guesses from the action's job (read the repo, comment on the PR) — with nothing about the OIDC requirement documented in the action's basic usage examples.
+
+**Fix:** Add `id-token: write` to the job's `permissions:` block. Any future workflow step using `anthropics/claude-code-action` needs this even when authenticating via a plain API key, not just for the OAuth/GitHub-App flow.
+
 ### Commit-message emoji was a "manual commits only" presentation layer, so automatic commits silently lacked it
 **Date:** 2026-07-23 · **Source:** `src/wakil/app/git_service.py`, `src/wakil/skills/kb-commit/SKILL.md`
 
