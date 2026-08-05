@@ -1,0 +1,9 @@
+How can I wire up the @.claude/agents/pr-reviewer.md into CI for this project so that it gets run and adds comments onto PRs that are created?
+
+---
+
+How much would it roughly cost for me to use your recommended approach vs. the claude github app
+
+---
+
+actually lets go with the ANTHROPIC_API_KEY approach you recommended
