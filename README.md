@@ -471,3 +471,8 @@ patterns and known gotchas live in `docs/DEVELOPMENT.md` and
 Releases are cut via the `Release` GitHub Actions workflow
 (`workflow_dispatch`, choose a `patch`/`minor`/`major` bump); see
 `CHANGELOG.md` for release history.
+
+Every non-draft PR also gets an automated review comment from the
+`pr-reviewer` subagent (`.github/workflows/pr-review.yml`), applying the
+same staff-level, ADR-aware review it runs on request — see
+`.claude/agents/pr-reviewer.md` for what it checks.
