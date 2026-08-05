@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZ9A8AWDMEXYK6A80CHZNKB6",
+  "strategy": "manual-commit",
+  "branch": "ci/pr-review-agent",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/TROUBLESHOOTING.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 6050,
+    "cache_read_tokens": 1009160,
+    "output_tokens": 2088,
+    "api_call_count": 3
+  }
+}
