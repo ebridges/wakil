@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZ9G8EFGWHWRCK7A9AH3XF77",
+  "strategy": "manual-commit",
+  "branch": "docs/mention-pr-review-workflow",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "README.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 16,
+    "cache_creation_tokens": 5418,
+    "cache_read_tokens": 2900655,
+    "output_tokens": 2042,
+    "api_call_count": 8
+  }
+}
