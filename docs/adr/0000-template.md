@@ -1,6 +1,6 @@
 ---
-title: <Decision-stating title, not a topic label — "X over Y", not "X">
-status: proposed
+title: <What was decided, stated as a decision rather than a topic label>
+status: template
 date: YYYY-MM-DD
 audience: wakil design
 ---
@@ -8,20 +8,38 @@ audience: wakil design
 <!--
   Derived from the structure of docs/adr/0001-0020. Copy this file to
   docs/adr/<NNNN>-<slug>.md (next sequential number, zero-padded to 4
-  digits; slug matches the title) and fill in each section. Delete every
-  HTML comment (including this one) once the section above it is written —
-  they're instructions, not content.
+  digits; slug is a short kebab-case abbreviation of the title, not a
+  literal derivation of it — cf. 0018-mcp-interface.md for "MCP server
+  interface, exposed as prepare/apply tool pairs") and fill in each
+  section. Delete every HTML comment (including this one) once the section
+  above it is written — they're instructions, not content.
 
-  House style observed across every existing ADR, not just structure:
+  Frontmatter:
+  - Set `status:` to `proposed` or `accepted` (this file carries `template`
+    only so the unfilled skeleton doesn't read as a live proposal when the
+    ADR set is skimmed by title and status).
+  - `title:` should state the decision, not name the topic — "Markdown as
+    source of truth, SQLite as operational store" (0007), not "Storage."
+    A comparative "X over Y" form (0002, "QMD as First-Class Search Over
+    SQLite FTS5") works when the decision really was a choice between two
+    named options, but most titles aren't comparative and shouldn't be
+    forced into it.
+  - Sentence case for the title, which is where recent ADRs (0018-0020)
+    have landed; the older half of the corpus uses Title Case.
+
+  House style, beyond structure:
   - No H1 heading duplicating the frontmatter title — Context is the first
-    visible heading.
+    visible heading. Note that the existing corpus is genuinely split on
+    this (0002, 0004-0006, 0013-0017, 0020 open with an H1; 0001, 0003,
+    0007-0012, 0018, 0019 don't, and there's no chronological trend). This
+    template settles it going forward rather than describing what's there.
   - Every non-obvious claim is grounded in something a reader can go check:
     a file path (with a line number when it pins a specific fact), another
     ADR number, a commit SHA, a PR number, or a session transcript path.
     Prose reasoning with no anchor reads as asserted, not decided.
   - Consequences includes real costs and known gaps, not just benefits —
-    see the "drift risk" bullet in 0018 or the "known, accepted gap" bullet
-    in 0020 for the register to aim for.
+    see the "drift risk" bullet in 0018 (line 86) or the "known, accepted
+    gap" sentence in 0015 (line 332) for the register to aim for.
 -->
 
 ## Context
@@ -84,6 +102,24 @@ audience: wakil design
   deliberately accepted limitation, a question left open for a future
   decision), not just an upside list. A Consequences section with no
   downside is usually missing something.
+-->
+
+<!--
+## Implementation
+
+  Optional but strongly preferred — record what actually landed, and when.
+  Used by 0008 (line 33), 0009, 0010, 0011, and 0012 (line 296), placed
+  between Consequences and Sources. One bullet per PR: number, title, and
+  the dates it was opened and merged (0008's bullets are the format to
+  copy). For a `proposed` ADR, say so plainly instead of omitting the
+  section — 0012 records "Not yet started. This ADR is the proposal..."
+  along with the PR that carried the document itself.
+
+  This section is what keeps the gotcha in docs/DEVELOPMENT.md ("An ADR's
+  `status: accepted` means the decision was made, not that it was
+  implemented") from biting the next reader: a decision whose consequences
+  never landed in code looks identical to a shipped one from the
+  frontmatter alone.
 -->
 
 ## Sources
