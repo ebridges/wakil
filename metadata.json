@@ -3,11 +3,15 @@
   "checkpoint_id": "01KZFAEQJH380JRBH4NKP10832",
   "strategy": "manual-commit",
   "branch": "fix/cross-branch-update-target",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
+    "README.md",
     "src/wakil/app/ingest_service.py",
     "src/wakil/cli/main.py",
-    "src/wakil/mcp/tools.py"
+    "src/wakil/integrations/git.py",
+    "src/wakil/mcp/tools.py",
+    "tests/integration/test_ingest_cli.py",
+    "tests/unit/test_ingest_service.py"
   ],
   "sessions": [
     {
@@ -15,6 +19,13 @@
       "transcript": "/0/full.jsonl",
       "compact_transcript": "/0/transcript.jsonl",
       "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    },
+    {
+      "metadata": "/1/metadata.json",
+      "transcript": "/1/full.jsonl",
+      "compact_transcript": "/1/transcript.jsonl",
+      "content_hash": "/1/content_hash.txt",
       "prompt": ""
     }
   ],
