@@ -13,8 +13,10 @@ audience: wakil design
   digits; slug is a short kebab-case abbreviation of the title, not a
   literal derivation of it — cf. 0018-mcp-interface.md for "MCP server
   interface, exposed as prepare/apply tool pairs") and fill in each
-  section. Delete every HTML comment (including this one) once the section
-  above it is written — they're instructions, not content.
+  section. Two things need changing that aren't sections: replace the H1
+  above with your own file's slug (see the H1 rule below), and delete every
+  HTML comment (including this one) once the section above it is written —
+  they're instructions, not content.
 
   Frontmatter:
   - Set `status:` to `proposed` or `accepted` (this file carries `template`
@@ -31,12 +33,21 @@ audience: wakil design
     preferred going forward.
 
   House style, beyond structure:
-  - H1 heading should be kebab-case version of the frontmatter title (aka
-    the filename). H2 Context is the next heading after that. Note that the
-    existing corpus is genuinely split on this (0002, 0004-0006, 0013-0017,
-    0020 open with an H1; 0001, 0003, 0007-0012, 0018, 0019 don't, and there's
-    no chronological trend). This template settles it going forward rather
-    than describing what's there.
+  - Open with an H1 that is the file's own kebab-case slug — i.e. the
+    filename without its `.md` extension, matching the `# 0000-template`
+    above. For an ADR saved as `0021-drop-the-widget-cache.md` that is
+    `# 0021-drop-the-widget-cache`. `## Context` is the next heading.
+
+    This is a new standard set here, not a description of the corpus: no
+    existing ADR uses it. Ten open with an H1 carrying the prose title
+    (0002, 0004-0006, 0013-0017, 0020) and ten open with no H1 at all
+    (0001, 0003, 0007-0012, 0018, 0019). Those are deliberately not being
+    backfilled — the rule applies to ADRs written from here on. A
+    filename-shaped H1 is unambiguous, cannot drift from the filename, and
+    gives markdownlint's MD041 the top-level heading it wants without
+    restating the frontmatter title (which is why `.markdownlint.yaml` sets
+    `MD025: front_matter_title: ""` — it stops the frontmatter `title:`
+    from counting as a second H1).
   - Every non-obvious claim is grounded in something a reader can go check:
     a file path (with a line number when it pins a specific fact), another
     ADR number, a commit SHA, a PR number, or a session transcript path.
