@@ -4496,3 +4496,136 @@ def test_capture_refuses_an_owned_path_even_when_the_file_is_gone(workspace, kb_
     assert proposal.collision_source_id is not None
     with pytest.raises(IngestError, match="raw capture of source"):
         apply_capture(workspace, proposal)
+
+# --------------------------------------------------------------------------
+# Proposal routing and identity dedup (issues #187, #186)
+
+
+def _note(path: str, *, type_: str, name: str, body: str = "Body.") -> ProposedFile:
+    return ProposedFile(
+        path=path,
+        content=f"---\ntype: {type_}\nname: {name}\ntitle: {name}\n---\n\n# {name}\n\n{body}\n",
+    )
+
+
+def test_proposed_note_directory_is_corrected_not_fatal(workspace):
+    """Issue #187: a `type: source` page proposed under drafts/ hard-failed
+    the whole run, discarding every model call, over a mechanically
+    derivable path."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    proposal = EnrichmentProposal(source_id=1, title="TechTalks Overview")
+    note = _note("drafts/techtalks-overview.md", type_="source", name="TechTalks Overview")
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert sanitized.path.startswith("sources/")
+    assert not sanitized.path.startswith("drafts/")
+    assert any("Moved the proposed note" in w for w in proposal.warnings)
+    # The specific issue that used to discard the whole run is gone. (Other
+    # frontmatter issues may remain -- `source` requires `captured` -- but
+    # the unwinnable directory one is what #187 is about.)
+    issues = validate_proposal(
+        EnrichmentProposal(source_id=1, title="x", proposed_note=sanitized),
+        kb_root=workspace.root_path,
+    )
+    assert not any("belong under" in str(issue) for issue in issues)
+
+
+def test_a_subdirectory_of_the_canonical_directory_is_left_alone(workspace):
+    """`meetings/2026/...` is deliberate, not drift."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    proposal = EnrichmentProposal(source_id=1, title="Planning")
+    note = _note("meetings/2026/2026-09-30-planning.md", type_="meeting", name="Planning")
+    sanitized = _sanitize_note(workspace, note, proposal)
+    assert sanitized.path.startswith("meetings/2026/")
+    assert not any("Moved the proposed note" in w for w in proposal.warnings)
+
+
+def test_collision_fallback_routes_by_type_not_straight_to_drafts(workspace, kb_path):
+    """The drafts/ fallback ignoring `type:` is what manufactured #187's
+    unwinnable failure in the first place."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    (kb_path / "concepts").mkdir(exist_ok=True)
+    (kb_path / "concepts" / "taken.md").write_text("x\n", encoding="utf-8")
+    proposal = EnrichmentProposal(source_id=1, title="Taken")
+    note = _note("concepts/taken.md", type_="concept", name="Taken")
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert sanitized.path.startswith("concepts/")
+    assert sanitized.path != "concepts/taken.md"
+
+
+def test_untyped_note_still_falls_back_to_drafts(workspace):
+    """No `type:` means no canonical directory to route to."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    proposal = EnrichmentProposal(source_id=1, title="Loose Idea")
+    note = ProposedFile(path="/etc/passwd", content="no frontmatter here\n")
+    sanitized = _sanitize_note(workspace, note, proposal)
+    assert sanitized.path.startswith("drafts/")
+
+
+def test_stub_is_suppressed_when_it_duplicates_the_proposed_note_identity(workspace):
+    """Issue #186: after a filename correction the two paths differ, so the
+    path-based checks pass and both files get written -- with byte-identical
+    `type:` and `name:`."""
+    from wakil.app.ingest_service import _build_stub_entities
+
+    proposal = EnrichmentProposal(source_id=1, title="Compositional Skill Routing")
+    # Faithful to the report: the note was reslugged to `...-skillweaver.md`,
+    # while entity-resolution's create carried the longer combined name (so
+    # the stub lands at `...-skillweaver-sad.md`) -- the two slugs differ, so
+    # the existing exact-slug suppression cannot fire. But the stub's
+    # `proposed_frontmatter` supplies a `name:` that overrides
+    # `resolution.name` in the file it actually writes, which is how both
+    # files ended up byte-identical in `type:` and `name:`.
+    proposal.proposed_note = _note(
+        "concepts/compositional-skill-routing-skillweaver.md",
+        type_="concept",
+        name="Compositional Skill Routing",
+    )
+    proposal.entity_resolutions = [
+        EntityResolution(
+            name="Compositional Skill Routing / SKILLWEAVER & SAD",
+            entity_type="concept",
+            action="create",
+            confidence=0.9,
+            proposed_frontmatter={"name": "Compositional Skill Routing"},
+        )
+    ]
+
+    stubs = _build_stub_entities(workspace, proposal)
+
+    # Exactly one page for the entity, and it is the richer proposed note.
+    assert [stub.path for stub in stubs] == []
+    assert any("duplicates the proposed note" in w for w in proposal.warnings)
+
+
+def test_a_genuinely_different_entity_still_gets_its_stub(workspace):
+    """Regression guard: suppression keys on (type, name), so an unrelated
+    entity must be unaffected."""
+    from wakil.app.ingest_service import _build_stub_entities
+
+    proposal = EnrichmentProposal(source_id=1, title="Compositional Skill Routing")
+    proposal.proposed_note = _note(
+        "concepts/compositional-skill-routing.md",
+        type_="concept",
+        name="Compositional Skill Routing",
+    )
+    proposal.entity_resolutions = [
+        EntityResolution(
+            name="Retrieval Augmented Generation",
+            entity_type="concept",
+            action="create",
+            confidence=0.9,
+        )
+    ]
+
+    stubs = _build_stub_entities(workspace, proposal)
+
+    assert len(stubs) == 1
+    assert "retrieval-augmented-generation" in stubs[0].path
