@@ -3987,3 +3987,84 @@ def test_empty_authored_values_do_not_clobber_generated_ones(workspace, kb_path)
     parsed = frontmatter.loads(proposal.raw_file.content)
     assert parsed["title"] == "Real Title"
     assert parsed["abstract"] == "Generated abstract."
+
+
+# --------------------------------------------------------------------------
+# Local-timezone dates (issue #174)
+
+
+def _at(instant: str, zone: str = "UTC"):
+    """Freeze `workspace_today`'s clock at a real instant."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    return _dt.fromisoformat(instant).replace(tzinfo=ZoneInfo(zone))
+
+
+def test_workspace_today_uses_the_configured_timezone(workspace, monkeypatch):
+    """20:49 US-Eastern is already tomorrow in UTC -- which is exactly how
+    four consecutive evening captures came out a day ahead (#174)."""
+    from wakil.config import settings as settings_module
+
+    workspace.timezone = "America/New_York"
+
+    class _FrozenClock:
+        @staticmethod
+        def now(tz=None):
+            return _at("2026-08-04T00:49:00").astimezone(tz) if tz else _at("2026-08-04T00:49:00")
+
+    monkeypatch.setattr(settings_module, "datetime", _FrozenClock)
+    assert settings_module.workspace_today(workspace) == "2026-08-03"
+
+
+def test_workspace_today_falls_back_to_local_on_an_unknown_zone(workspace):
+    """A config typo must not fail a capture."""
+    from wakil.config.settings import workspace_today
+
+    workspace.timezone = "Not/AZone"
+    assert len(workspace_today(workspace)) == 10  # still a valid ISO date
+
+
+def test_timezone_defaults_to_unset_and_round_trips(kb_path):
+    from wakil.config.settings import WorkspaceConfig
+
+    init_workspace(kb_path)
+    config = WorkspaceConfig.load(kb_path)
+    assert config.timezone is None  # existing workspaces load unchanged
+    config.timezone = "Europe/Berlin"
+    config.save()
+    assert WorkspaceConfig.load(kb_path).timezone == "Europe/Berlin"
+
+
+def test_capture_filename_and_frontmatter_agree_on_the_date(workspace, kb_path, monkeypatch):
+    """The filename prefix, `created`, and `captured` all come from one
+    helper, so they can't disagree the way UTC-vs-local made them."""
+    from wakil.app import ingest_service as svc
+
+    monkeypatch.setattr(svc, "workspace_today", lambda config: "2026-08-03")
+    path = kb_path / "evening-call.txt"
+    path.write_text("Jane: evening sync.\n", encoding="utf-8")
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    assert proposal.raw_file.path.startswith("sources/transcripts/2026-08-03-")
+    parsed = frontmatter.loads(proposal.raw_file.content)
+    for key in ("created", "captured"):
+        if key in parsed.metadata:
+            assert str(parsed[key]) == "2026-08-03"
+
+
+def test_db_timestamps_stay_utc(workspace, transcript):
+    """Instants stay UTC; only calendar dates are local. memory_service's age
+    arithmetic depends on this split."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        assert source is not None
+        assert source.retrieved_at is not None
+        stored = source.retrieved_at
+        # SQLite hands back a naive datetime; compare against UTC "now",
+        # which a local-time value would be hours away from.
+        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        assert abs((now_utc - stored).total_seconds()) < 300

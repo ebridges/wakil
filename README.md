@@ -243,6 +243,13 @@ date, create date, origin, url) are filled in, the rest are left as blank
 placeholders. `--context`/`-C` accepts a few lines about the source
 (attendees, company, purpose) and is stored on the source record for step 2.
 
+Dates that appear in frontmatter, filenames, and branch names (`captured`,
+`created`, the `YYYY-MM-DD-` filename prefix) use your machine's local
+timezone, so an evening capture isn't stamped with tomorrow's date. Set
+`timezone: <IANA name>` in `.wakil/config.yaml` to pin a specific zone —
+useful when wakil runs on a host in a different zone than you. Database
+timestamps remain UTC.
+
 If the input is a `.md` file that already carries its own YAML frontmatter
 and/or an H1 — a hand-cleaned transcript with a real title, date, and tags —
 that file is treated as authored: its frontmatter wins over wakil's generated
