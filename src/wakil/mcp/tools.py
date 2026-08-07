@@ -407,6 +407,11 @@ def ingest_prepare(
         # review moment off the CLI preview and onto the coordinating skill,
         # so a warning that only reaches the preview reaches nobody here.
         "warnings": proposal.warnings,
+        # A coordinating agent needs to see this before calling apply, which
+        # will refuse. Deliberately no `overwrite` parameter on `ingest_apply`:
+        # overwriting a knowledge-base file with no human present is exactly
+        # what working-agreement items 11/12 rule out.
+        "collision": proposal.collision,
     }
 
 

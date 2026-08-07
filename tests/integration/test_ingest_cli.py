@@ -684,3 +684,67 @@ def test_entities_compile_full_flag_skips_size_menu_entirely(kb_path: Path, monk
     on_disk = (kb_path / "people" / "priya-shah.md").read_text()
     assert "Extensive detail about this ongoing relationship." in on_disk
     assert "still over" in result.output
+
+
+# --- destination-path collisions (issue #173) ------------------------------
+
+
+def _preplace_destination(kb_path: Path, transcript: Path) -> Path:
+    """Hand-place a file at the exact destination the ingest will compute --
+    the scenario from #173, where a cleaned transcript was already sitting at
+    its intended final path."""
+    first = _capture(kb_path, transcript)
+    assert first.exit_code == 0
+    landed = next(
+        p
+        for p in (kb_path / "sources" / "transcripts").iterdir()
+        if p.name != "notitle.md"
+    )
+    return landed
+
+
+def test_capture_refuses_a_destination_collision_instead_of_suffixing(
+    kb_path: Path, monkeypatch
+):
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
+    transcript = _init(kb_path)
+    landed = _preplace_destination(kb_path, transcript)
+
+    # Same filename shape, different content, so the content-hash dedup path
+    # doesn't catch it first -- this has to fail on the *path*.
+    transcript.write_text("A completely different conversation.\n")
+    result = _capture(kb_path, transcript)
+
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+    assert "--overwrite" in result.output
+    # The silent duplicate #173 is about must not exist.
+    suffixed = landed.with_name(landed.stem + "-1.md")
+    assert not suffixed.exists()
+
+
+def test_capture_collision_warns_before_the_confirm_prompt(kb_path: Path, monkeypatch):
+    """A --yes caller still has to be able to see why the run aborted."""
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
+    transcript = _init(kb_path)
+    _preplace_destination(kb_path, transcript)
+    transcript.write_text("A completely different conversation.\n")
+
+    result = _capture(kb_path, transcript)
+    warning_at = result.output.find("already exists")
+    preview_at = result.output.find("Raw capture:")
+    assert warning_at != -1
+    assert preview_at != -1
+    assert warning_at < preview_at
+
+
+def test_capture_overwrite_flag_replaces_the_existing_file(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
+    transcript = _init(kb_path)
+    landed = _preplace_destination(kb_path, transcript)
+    transcript.write_text("A completely different conversation.\n")
+
+    result = _capture(kb_path, transcript, "--overwrite")
+
+    assert result.exit_code == 0
+    assert "different conversation" in landed.read_text(encoding="utf-8")
