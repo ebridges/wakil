@@ -1,0 +1,32 @@
+push & comment on the pr
+
+---
+
+/doctor
+
+---
+
+push & comment on the pr
+
+---
+
+1. fix cliff.toml to be compatible and to generate a changelog that is compatible with markdownlint
+2. Fix this so that going forward kebab-case H1 is the standard.  I don't care if past ones don't abide 
+
+I don't want a runner at this time.  I will add it later.  Tell it to ignore that.
+
+The non-blockers will be fixed at a later time -- create an issue for them.
+
+---
+
+<task-notification>
+<task-id>bnzn59q6b</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/adf7939a-e09b-4b9b-a1a7-7ec227ebe313/tasks/bnzn59q6b.output</output-file>
+<status>killed</status>
+<summary>Background command "Enumerate transcript scan window" was stopped</summary>
+</task-notification>
+
+---
+
+resume
