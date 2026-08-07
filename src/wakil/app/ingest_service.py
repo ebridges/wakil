@@ -46,6 +46,7 @@ from sqlalchemy.orm import Session
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
 from wakil.config.settings import WorkspaceConfig, workspace_date, workspace_today
+from wakil.integrations import git
 from wakil.integrations.web import fetch_article
 from wakil.knowledge.wikilinks import WIKILINK_RE as _WIKILINK_RE
 from wakil.knowledge.wikilinks import normalize_target as _normalize_link_path
@@ -219,6 +220,20 @@ class EntityUpdate:
 
 
 @dataclass
+class _MissingUpdateTarget:
+    """An `action=update` resolution whose target isn't in the working tree.
+
+    Kept structured rather than folded into `warnings` so the CLI/MCP layer
+    can decide the exit code: a run that produced nothing *because* its
+    targets live on an unmerged branch is a failure, not a quiet success
+    (#188)."""
+
+    name: str
+    path: str
+    branches: list[str] = field(default_factory=list)
+
+
+@dataclass
 class EnrichmentProposal:
     source_id: int
     title: str
@@ -244,6 +259,10 @@ class EnrichmentProposal:
     # carry a real date of its own (issue #77) — never left as a
     # placeholder like "(date not recorded)" in an append-only Timeline.
     source_captured_date: str | None = None
+    # Update targets entity resolution asked for that the working tree
+    # doesn't have -- typically because an earlier, unmerged ingest branch
+    # created them (#188).
+    missing_update_targets: list[_MissingUpdateTarget] = field(default_factory=list)
 
 
 @dataclass
@@ -2455,10 +2474,27 @@ def _run_entity_updates(
             continue
         target = config.root_path / resolution.target_note_path
         if not target.is_file():
+            # Entity resolution matched against the index, which knows about
+            # pages earlier sources created; the writer only sees the working
+            # tree. Capturing a cluster of related sources before reviewing
+            # any PRs is wakil's own model, so the target commonly lives on
+            # an earlier, unmerged ingest branch (#188). Say which one.
+            elsewhere = git.branches_containing(config.root_path, resolution.target_note_path)
+            proposal.missing_update_targets.append(
+                _MissingUpdateTarget(
+                    name=resolution.name,
+                    path=resolution.target_note_path,
+                    branches=elsewhere,
+                )
+            )
+            located = (
+                f" — it exists on {', '.join(elsewhere)}, which hasn't been merged yet"
+                if elsewhere
+                else " — that file doesn't exist on disk"
+            )
             proposal.warnings.append(
                 f"{resolution.name}: entity resolution says update "
-                f"{resolution.target_note_path}, but that file doesn't exist on disk — "
-                "skipped"
+                f"{resolution.target_note_path}{located} — skipped"
             )
             continue
         try:

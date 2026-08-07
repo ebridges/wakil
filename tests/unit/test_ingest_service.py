@@ -4817,3 +4817,59 @@ def test_the_type_correction_mover_frees_its_path_and_carries_links(workspace, k
     assert f"[[{corrected.path}|this]]" in corrected.content
     assert "[[concepts/ada-lovelace.md" not in corrected.content
     assert (kb_path / "people" / "ada-lovelace.md").read_text() == "mine\n"
+
+# --------------------------------------------------------------------------
+# Update targets that live on an unmerged branch (issue #188)
+
+
+def test_branches_containing_finds_a_page_on_an_unmerged_ingest_branch(kb_path):
+    import subprocess as _sp
+
+    from wakil.integrations import git as git_mod
+
+    def _g(*args):
+        _sp.run(["git", "-C", str(kb_path), *args], check=True, capture_output=True)
+
+    _sp.run(["git", "init", "-q", "-b", "main"], cwd=kb_path, check=True)
+    _g("config", "user.email", "t@example.com")
+    _g("config", "user.name", "T")
+    _g("config", "commit.gpgsign", "false")
+    _g("add", "-A")
+    _g("commit", "-q", "-m", "seed")
+    _g("switch", "-q", "-c", "wakil/ingest/2026-08-06-first-source")
+    (kb_path / "concepts" / "new-idea.md").write_text("---\ntype: concept\n---\n\n# New\n")
+    _g("add", "-A")
+    _g("commit", "-q", "-m", "add page")
+    _g("switch", "-q", "main")
+
+    assert not (kb_path / "concepts" / "new-idea.md").exists()
+    found = git_mod.branches_containing(kb_path, "concepts/new-idea.md")
+    assert found == ["wakil/ingest/2026-08-06-first-source"]
+    assert git_mod.branches_containing(kb_path, "concepts/nowhere.md") == []
+
+
+def test_a_missing_update_target_is_recorded_not_just_warned(workspace):
+    """Issue #188: the skip was warning-only, so `enrich` reported success
+    with nothing written and the source's unique material landed nowhere."""
+    from wakil.app.ingest_service import _run_entity_updates
+
+    proposal = EnrichmentProposal(source_id=27, title="Second Source")
+    proposal.entity_resolutions = [
+        EntityResolution(
+            name="Compositional Skill Routing",
+            entity_type="concept",
+            action="update",
+            target_note_path="concepts/only-on-another-branch.md",
+            confidence=0.9,
+            relevance="central",
+        )
+    ]
+
+    # No model call happens: every candidate is dropped before the batch is
+    # assembled, which is exactly the silent-no-op path.
+    _run_entity_updates(workspace, FakeClient([]), "source text", proposal)
+
+    assert [m.path for m in proposal.missing_update_targets] == [
+        "concepts/only-on-another-branch.md"
+    ]
+    assert any("skipped" in w for w in proposal.warnings)

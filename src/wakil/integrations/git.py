@@ -419,3 +419,24 @@ def inspect_git(root: Path) -> GitInfo:
         remote_url=remote,
         recent_commits=log.splitlines() if log else [],
     )
+
+
+def branches_containing(root: Path, path: str) -> list[str]:
+    """The `wakil/ingest/*` branches whose tree contains `path`.
+
+    Enrichment resolves entity targets against the index/database, which
+    knows about pages created by earlier sources, but writes against the
+    working tree. When a cluster of related sources is captured in one
+    sitting -- wakil's own branch-per-source model -- every source after the
+    first can resolve to a page that exists only on an earlier, unmerged
+    branch. Naming that branch is the difference between an actionable error
+    and a silent no-op (#188).
+
+    Display-only, so it degrades to `[]` rather than raising: this decorates
+    a failure that has already happened.
+    """
+    found = []
+    for branch in wakil_branches(root):
+        if _run_git(root, "cat-file", "-e", f"{branch}:{path}") is not None:
+            found.append(branch)
+    return found

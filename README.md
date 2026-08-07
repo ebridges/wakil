@@ -297,6 +297,11 @@ just as much as wakil's `title:`). A scratch note or a stretch of dialogue
 between two `---` rules is kept as content instead of being parsed away, and
 the preview says so — though a transcript still gets the normal cleanup pass.
 
+When enrichment resolves an entity page that exists only on an earlier,
+unmerged ingest branch — normal when you capture a cluster of related sources
+before reviewing any PRs — it now exits non-zero naming that branch, instead
+of reporting success with nothing written.
+
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:
 
