@@ -488,6 +488,7 @@ def _run_ingest(
     file: Path | None = None,
     url: str | None = None,
     local: bool = False,
+    overwrite: bool = False,
     context: list[str] | None = None,
     context_file: list[Path] | None = None,
 ) -> None:
@@ -530,6 +531,7 @@ def _run_ingest(
         console.print(f"[red]Ingest failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    proposal.overwrite = overwrite
     if proposal.duplicate_of is not None:
         console.print(
             f"[yellow]Already ingested[/yellow] (matches source #{proposal.duplicate_of}); "
@@ -672,6 +674,13 @@ def enrich(
 
 
 _YES = Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")]
+_OVERWRITE = Annotated[
+    bool,
+    typer.Option(
+        "--overwrite",
+        help="Replace an existing file at the computed destination path.",
+    ),
+]
 _LOCAL = Annotated[
     bool,
     typer.Option(
@@ -688,6 +697,7 @@ def ingest_transcript(
     context_file: _CONTEXT_FILE = None,
     yes: _YES = False,
     local: _LOCAL = False,
+    overwrite: _OVERWRITE = False,
 ) -> None:
     """Ingest a meeting or call transcript."""
     _run_ingest(
@@ -696,6 +706,7 @@ def ingest_transcript(
         yes,
         file=file,
         local=local,
+        overwrite=overwrite,
         context=context,
         context_file=context_file,
     )
@@ -709,6 +720,7 @@ def ingest_text(
     context_file: _CONTEXT_FILE = None,
     yes: _YES = False,
     local: _LOCAL = False,
+    overwrite: _OVERWRITE = False,
 ) -> None:
     """Ingest a plain text file, pasted note, or clipping."""
     _run_ingest(
@@ -717,6 +729,7 @@ def ingest_text(
         yes,
         file=file,
         local=local,
+        overwrite=overwrite,
         context=context,
         context_file=context_file,
     )
@@ -730,6 +743,7 @@ def ingest_article(
     context_file: _CONTEXT_FILE = None,
     yes: _YES = False,
     local: _LOCAL = False,
+    overwrite: _OVERWRITE = False,
 ) -> None:
     """Fetch a web article, extract its text, and ingest it."""
     _run_ingest(
@@ -738,6 +752,7 @@ def ingest_article(
         yes,
         url=url,
         local=local,
+        overwrite=overwrite,
         context=context,
         context_file=context_file,
     )

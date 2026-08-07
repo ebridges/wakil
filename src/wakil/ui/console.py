@@ -217,6 +217,14 @@ def print_capture_proposal(proposal: CaptureProposal) -> None:
     if proposal.context:
         header += f"\n[dim]Context: {proposal.context}[/dim]"
     console.print(Panel(header, title="Capture preview", border_style="cyan"))
+    if proposal.collision:
+        # Before the confirm, not after: a --yes caller still needs to see
+        # why the run is about to abort (#173).
+        console.print(
+            f"[yellow]warning:[/yellow] {proposal.collision} already exists. "
+            "Capture will refuse to overwrite it; re-run with [bold]--overwrite[/bold] "
+            "to replace it, or point at a different input."
+        )
     console.print("[bold]Raw capture:[/bold]")
     _print_file_preview(proposal.raw_file)
 

@@ -160,6 +160,11 @@ class CaptureProposal:
     # H1 suppresses the generated one so the note is never double-wrapped.
     authored_metadata: dict = field(default_factory=dict)
     authored_h1: str | None = None
+    # Set when the computed destination is already occupied (#173). Capture
+    # used to silently pick `<name>-1.md` instead, producing a near-duplicate
+    # nobody noticed. Surfaced in the preview and refused at apply time.
+    collision: str | None = None
+    overwrite: bool = False
 
 
 @dataclass
@@ -397,8 +402,12 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
         raise IngestError(f"Source already ingested (source id {proposal.duplicate_of})")
 
     target = config.root_path / proposal.raw_file.path
-    if target.exists():
-        raise IngestError(f"Refusing to overwrite existing file: {proposal.raw_file.path}")
+    if target.exists() and not proposal.overwrite:
+        raise IngestError(
+            f"{proposal.raw_file.path} already exists. Re-run with --overwrite to replace "
+            f"it, or point at a different input. (If this is the same recording captured "
+            f"twice, check `wakil sources list` first.)"
+        )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(proposal.raw_file.content, encoding="utf-8")
 
@@ -3376,7 +3385,14 @@ def _build_raw_file(
     # content-free input (e.g. an all-punctuation title).
     slug = slugify(slug_source)
     base = f"{proposal.meeting_date or created}-{slug}"
-    path = _unused_path(config.root_path, directory, base)
+    # Deliberately not `_unused_path` here: silently sliding to `<base>-1.md`
+    # is how two near-duplicate transcripts for one recording ended up in a
+    # vault, one of them invisibly shadowed (#173). Record the collision and
+    # let `apply_capture` refuse. `_unused_path`'s other caller
+    # (`_sanitize_note`) legitimately does want silent disambiguation.
+    path = directory / f"{base}.md"
+    if (config.root_path / path).exists():
+        proposal.collision = str(path)
 
     if proposal.source_type == "transcript":
         metadata = _transcript_metadata(config, proposal, created)
