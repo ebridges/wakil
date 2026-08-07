@@ -243,6 +243,11 @@ date, create date, origin, url) are filled in, the rest are left as blank
 placeholders. `--context`/`-C` accepts a few lines about the source
 (attendees, company, purpose) and is stored on the source record for step 2.
 
+If the computed destination path is already taken, capture refuses rather
+than quietly writing `<name>-1.md` alongside it — pass `--overwrite` to
+replace the existing file, or point at a different input. The warning appears
+before the confirmation prompt, so `--yes` callers still see it.
+
 Dates that appear in frontmatter, filenames, and branch names (`captured`,
 `created`, the `YYYY-MM-DD-` filename prefix) use your machine's local
 timezone, so an evening capture isn't stamped with tomorrow's date. Set

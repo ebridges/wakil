@@ -4068,3 +4068,69 @@ def test_db_timestamps_stay_utc(workspace, transcript):
         # which a local-time value would be hours away from.
         now_utc = datetime.now(UTC).replace(tzinfo=None)
         assert abs((now_utc - stored).total_seconds()) < 300
+
+
+# --------------------------------------------------------------------------
+# Destination-path collisions (issue #173)
+
+
+def _existing_transcript_at(workspace, kb_path: Path, transcript: Path) -> str:
+    """Run one capture and leave its file on disk, so a second capture of the
+    same shape collides."""
+    first = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    apply_capture(workspace, first)
+    return first.raw_file.path
+
+
+def test_capture_records_a_collision_instead_of_sliding_to_a_suffix(
+    workspace, kb_path, transcript
+):
+    """Issue #173: capture silently picked `<name>-1.md`, producing a real,
+    easy-to-miss duplicate rather than a hard stop."""
+    taken = _existing_transcript_at(workspace, kb_path, transcript)
+
+    # A different input that computes the same destination path.
+    twin = kb_path / transcript.name.replace(".txt", "-copy.txt")
+    twin.write_text("Jane: a different conversation entirely.\n", encoding="utf-8")
+    monkey = prepare_capture(workspace, "transcript", _capture_client(), file=twin)
+    # Force the same destination the first capture already occupies.
+    monkey.raw_file = ProposedFile(path=taken, content=monkey.raw_file.content)
+
+    with pytest.raises(IngestError, match="already exists"):
+        apply_capture(workspace, monkey)
+    assert not (kb_path / taken.replace(".md", "-1.md")).exists()
+
+
+def test_build_raw_file_flags_the_collision_on_the_proposal(workspace, kb_path, transcript):
+    taken = _existing_transcript_at(workspace, kb_path, transcript)
+    same_shape = kb_path / transcript.name
+    same_shape.write_text("Jane: same filename, different words.\n", encoding="utf-8")
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+
+    assert proposal.collision == taken
+    assert proposal.raw_file.path == taken  # no silent -1
+    assert not proposal.raw_file.path.endswith("-1.md")
+
+
+def test_capture_overwrite_replaces_the_existing_file(workspace, kb_path, transcript):
+    taken = _existing_transcript_at(workspace, kb_path, transcript)
+    same_shape = kb_path / transcript.name
+    same_shape.write_text("Jane: replacement content.\n", encoding="utf-8")
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+    proposal.overwrite = True
+    apply_capture(workspace, proposal)
+
+    assert "replacement content" in (kb_path / taken).read_text(encoding="utf-8")
+
+
+def test_sanitize_note_still_dedupes_silently(workspace, kb_path):
+    """Regression guard: `_unused_path`'s other caller genuinely wants silent
+    disambiguation -- a model-proposed note path that collides is routed to a
+    free name, not turned into a hard error."""
+    from wakil.app.ingest_service import _unused_path
+
+    (kb_path / "drafts").mkdir(exist_ok=True)
+    (kb_path / "drafts" / "taken.md").write_text("x\n", encoding="utf-8")
+    assert str(_unused_path(kb_path, Path("drafts"), "taken")) == "drafts/taken-1.md"

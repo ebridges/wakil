@@ -378,6 +378,11 @@ def ingest_prepare(
         "origin": proposal.origin,
         "meeting_date": proposal.meeting_date,
         "raw_file_path": proposal.raw_file.path,
+        # A coordinating agent needs to see this before calling apply, which
+        # will refuse. Deliberately no `overwrite` parameter on `ingest_apply`:
+        # overwriting a knowledge-base file with no human present is exactly
+        # what working-agreement items 11/12 rule out.
+        "collision": proposal.collision,
     }
 
 
