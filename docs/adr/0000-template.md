@@ -31,11 +31,12 @@ audience: wakil design
     preferred going forward.
 
   House style, beyond structure:
-  - No H1 heading duplicating the frontmatter title — Context is the first
-    visible heading. Note that the existing corpus is genuinely split on
-    this (0002, 0004-0006, 0013-0017, 0020 open with an H1; 0001, 0003,
-    0007-0012, 0018, 0019 don't, and there's no chronological trend). This
-    template settles it going forward rather than describing what's there.
+  - H1 heading should be kebab-case version of the frontmatter title (aka
+    the filename). H2 Context is the next heading after that. Note that the
+    existing corpus is genuinely split on this (0002, 0004-0006, 0013-0017,
+    0020 open with an H1; 0001, 0003, 0007-0012, 0018, 0019 don't, and there's
+    no chronological trend). This template settles it going forward rather
+    than describing what's there.
   - Every non-obvious claim is grounded in something a reader can go check:
     a file path (with a line number when it pins a specific fact), another
     ADR number, a commit SHA, a PR number, or a session transcript path.
@@ -44,7 +45,7 @@ audience: wakil design
     see the "drift risk" bullet in 0018 (line 86) or the "known, accepted
     gap" sentence in 0015 (line 332) for the register to aim for.
   - In past docs (e.g. 0015-0017) there is content between the H1 header
-    and the `## Context` section. Sometimes, it may be helpful to but a
+    and the `## Context` section. Sometimes, it may be helpful to put a
     brief abstract or TLDR passage in this location (for example if it's
     a long/verbose ADR).
 -->
@@ -68,7 +69,7 @@ audience: wakil design
   concrete mechanism if it has moving parts (see 0018's bulleted
   sub-decisions: packaging, transport, tool shape, etc.). Say what was
   *not* included as clearly as what was — 0018's "deliberately out of
-  scope" bullet is the pattern. This is the section a future reader skims
+  scope" sentence is the pattern. This is the section a future reader skims
   to answer "what did we actually agree to."
 
   If status is `proposed` rather than `accepted`, 0012 uses "Proposed
@@ -127,9 +128,6 @@ audience: wakil design
   implemented") from biting the next reader: a decision whose consequences
   never landed in code looks identical to a shipped one from the
   frontmatter alone.
-
-  When this section is added, update the status to either `accepted(implemented)` or
-  just `implemented`.
 -->
 
 ## Sources
