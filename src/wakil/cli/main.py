@@ -1,5 +1,6 @@
 """wakil CLI entry point."""
 
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -330,6 +331,24 @@ def query(
     print_query_result(result)
 
 
+@contextlib.contextmanager
+def _workspace_git_lock(config: WorkspaceConfig, *, local: bool):
+    """Serialize the git-owning part of a command, and turn a lost race into
+    a clear message rather than an interleaved checkout. `--local` touches no
+    git state, so it doesn't contend."""
+    from wakil.app.locking import WorkspaceBusyError, git_lock
+
+    if local:
+        yield
+        return
+    try:
+        with git_lock(config):
+            yield
+    except WorkspaceBusyError as exc:
+        console.print(f"[red]Workspace busy:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+
 def _land_written_files(
     config: WorkspaceConfig,
     landing,
@@ -545,33 +564,37 @@ def _run_ingest(
         console.print("Aborted; nothing was written.")
         raise typer.Exit(code=0)
 
-    try:
-        landing = prepare_landing(config, source_id=None, title=proposal.title, local=local)
-        if landing.branch:
-            console.print(f"On branch [bold]{landing.branch}[/bold]")
-    except GitServiceError as exc:
-        console.print(f"[red]Ingest failed:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
+    # One lock for the whole checkout → write → commit → return sequence: it
+    # is the working tree, not any single git call, that two wakil processes
+    # can't share (#182).
+    with _workspace_git_lock(config, local=local):
+        try:
+            landing = prepare_landing(config, source_id=None, title=proposal.title, local=local)
+            if landing.branch:
+                console.print(f"On branch [bold]{landing.branch}[/bold]")
+        except GitServiceError as exc:
+            console.print(f"[red]Ingest failed:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
 
-    try:
-        result = apply_capture(config, proposal)
-    except IngestError as exc:
-        console.print(f"[red]Ingest failed:[/red] {exc}")
-        abandon_landing(config, landing)
-        raise typer.Exit(code=1) from exc
-    print_capture_result(result)
+        try:
+            result = apply_capture(config, proposal)
+        except IngestError as exc:
+            console.print(f"[red]Ingest failed:[/red] {exc}")
+            abandon_landing(config, landing)
+            raise typer.Exit(code=1) from exc
+        print_capture_result(result)
 
-    _land_written_files(
-        config,
-        landing,
-        source_id=result.source_id,
-        files=[result.raw_file_path],
-        title=proposal.title,
-        summary=None,
-        ingest_run_id=result.ingest_run_id,
-        kind="source",
-        phase="capture",
-    )
+        _land_written_files(
+            config,
+            landing,
+            source_id=result.source_id,
+            files=[result.raw_file_path],
+            title=proposal.title,
+            summary=None,
+            ingest_run_id=result.ingest_run_id,
+            kind="source",
+            phase="capture",
+        )
     _refresh_qmd_index(config)
 
 
@@ -636,42 +659,50 @@ def enrich(
     # Resolve/switch onto the source's branch *before* reading anything --
     # the raw capture prepare_enrichment reads back was committed there, not
     # on whatever branch this session started on.
-    try:
-        landing = prepare_landing(
-            config, source_id=source_id, title=f"source-{source_id}", local=local
-        )
-        if landing.branch:
-            console.print(f"On branch [bold]{landing.branch}[/bold]")
-    except GitServiceError as exc:
-        console.print(f"[red]Enrichment failed:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
+    # The lock spans the whole command, not just the git calls: the checkout
+    # stays parked on the source's branch across the model calls and the
+    # confirm prompt (that's why prepare_landing has to run first, above), so
+    # a second process switching branches mid-run is exactly the interference
+    # #182 reports.
+    with _workspace_git_lock(config, local=local):
+        try:
+            landing = prepare_landing(
+                config, source_id=source_id, title=f"source-{source_id}", local=local
+            )
+            if landing.branch:
+                console.print(f"On branch [bold]{landing.branch}[/bold]")
+        except GitServiceError as exc:
+            console.print(f"[red]Enrichment failed:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
 
-    proposal = _prepare_enrichment_or_exit(
-        config,
-        source_id=source_id,
-        client=client,
-        resolved_context=resolved_context,
-        force=force,
-        landing=landing,
-    )
-    result = _confirm_and_apply_enrichment(config, proposal=proposal, landing=landing, yes=yes)
+        proposal = _prepare_enrichment_or_exit(
+            config,
+            source_id=source_id,
+            client=client,
+            resolved_context=resolved_context,
+            force=force,
+            landing=landing,
+        )
+        result = _confirm_and_apply_enrichment(config, proposal=proposal, landing=landing, yes=yes)
+
+        if result.files_written:
+            _land_written_files(
+                config,
+                landing,
+                source_id=source_id,
+                files=result.files_written,
+                title=proposal.title,
+                summary=proposal.summary or None,
+                ingest_run_id=result.ingest_run_id,
+                kind="ingest",
+                phase="enrichment",
+            )
+        else:
+            abandon_landing(config, landing)
+            console.print("[dim]No files were written; nothing to land.[/dim]")
 
     if result.files_written:
-        _land_written_files(
-            config,
-            landing,
-            source_id=source_id,
-            files=result.files_written,
-            title=proposal.title,
-            summary=proposal.summary or None,
-            ingest_run_id=result.ingest_run_id,
-            kind="ingest",
-            phase="enrichment",
-        )
         _refresh_qmd_index(config)
-    else:
-        abandon_landing(config, landing)
-        console.print("[dim]No files were written; nothing to land.[/dim]")
 
 
 _YES = Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")]
