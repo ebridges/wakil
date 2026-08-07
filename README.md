@@ -243,6 +243,14 @@ date, create date, origin, url) are filled in, the rest are left as blank
 placeholders. `--context`/`-C` accepts a few lines about the source
 (attendees, company, purpose) and is stored on the source record for step 2.
 
+If the input is a `.md` file that already carries its own YAML frontmatter
+and/or an H1 — a hand-cleaned transcript with a real title, date, and tags —
+that file is treated as authored: its frontmatter wins over wakil's generated
+fields (wakil only fills the gaps, and keeps ownership of `type`), no second
+frontmatter block or H1 is added, the destination filename is derived from the
+note's own title rather than the input's basename, and the timestamp-cleanup
+pass is skipped so markers like `**[00:36]**` survive verbatim.
+
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:
 

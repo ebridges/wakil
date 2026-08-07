@@ -155,6 +155,11 @@ class CaptureProposal:
     meeting_date: str | None = None
     duplicate_of: int | None = None
     abstract: str | None = None  # model-generated, docs/adr/0010
+    # Frontmatter/H1 the input file already carried (#172). Authored fields
+    # win over wakil's generated ones in `_build_raw_file`, and an authored
+    # H1 suppresses the generated one so the note is never double-wrapped.
+    authored_metadata: dict = field(default_factory=dict)
+    authored_h1: str | None = None
 
 
 @dataclass
@@ -264,6 +269,7 @@ def prepare_capture(
     context_referenced_paths: list[str] | None = None,
 ) -> CaptureProposal:
     meeting_date: str | None = None
+    parsed: ParsedInput | None = None
     if kind in ("transcript", "text"):
         if file is None:
             raise IngestError(f"{kind} ingest needs a file path")
@@ -278,10 +284,25 @@ def prepare_capture(
                 raw = file.read_text(encoding="utf-8", errors="replace")
             except OSError as exc:
                 raise IngestError(f"Could not read {file}: {exc}") from exc
-            text = strip_srt(raw) if file.suffix.lower() == ".srt" else raw
+            if file.suffix.lower() == ".srt":
+                text = strip_srt(raw)
+            elif file.suffix.lower() == ".md":
+                # Only `.md` can meaningfully carry frontmatter/an H1; a
+                # `.txt`/`.srt` dump is machine output either way.
+                parsed = _split_authored_markdown(raw)
+                text = parsed.body
+            else:
+                text = raw
             if kind == "transcript":
-                text = clean_transcript(text)
+                # An authored `.md` is a human artifact whose `**[00:36]**`
+                # markers are deliberate -- cleaning it deletes real content
+                # (#179). A bare dump still needs the timestamp/whitespace
+                # pass.
+                if parsed is None or not parsed.is_authored_markdown:
+                    text = clean_transcript(text)
                 meeting_date = infer_meeting_date(file, text)
+            if parsed is not None:
+                meeting_date = _authored_meeting_date(parsed) or meeting_date
         origin = _relative_origin(config, file)
         # Strip a leading date off the origin filename's own stem (falling
         # back to the unstripped stem when the filename is nothing *but* a
@@ -289,8 +310,14 @@ def prepare_capture(
         # repeat this strip, for why that fallback matters).
         stem = _LEADING_DATE_RE.sub("", file.stem) or file.stem
         # Deterministic basis for the raw file's slug only -- see below,
-        # this is intentionally never overwritten by the model's title.
-        slug_source = stem.replace("-", " ").replace("_", " ").strip() or file.name
+        # this is intentionally never overwritten by the model's title. An
+        # authored title/H1 is preferred over the (often scratch-pad)
+        # filename, and is just as deterministic (#172).
+        slug_source = (
+            (_authored_slug_source(parsed) if parsed is not None else None)
+            or stem.replace("-", " ").replace("_", " ").strip()
+            or file.name
+        )
     elif kind == "article":
         if url is None:
             raise IngestError("article ingest needs a URL")
@@ -316,6 +343,8 @@ def prepare_capture(
         context_referenced_paths=list(context_referenced_paths or []),
         meeting_date=meeting_date,
         raw_file=ProposedFile(path="", content=""),
+        authored_metadata=parsed.metadata if parsed is not None else {},
+        authored_h1=parsed.h1 if parsed is not None else None,
     )
 
     with open_session(config) as session:
@@ -325,7 +354,17 @@ def prepare_capture(
             return proposal
 
     metadata = _generate_capture_metadata(client, kind, origin, text, context)
-    proposal.title = metadata.title
+    # An authored title is the user's own, so the model's doesn't replace it
+    # (working agreement item 12). The abstract is still generated -- authored
+    # frontmatter overrides it later in `_build_raw_file` if it has one.
+    authored_title = proposal.authored_metadata.get("title") or proposal.authored_metadata.get(
+        "name"
+    )
+    proposal.title = (
+        authored_title.strip()
+        if isinstance(authored_title, str) and authored_title.strip()
+        else metadata.title
+    )
     proposal.abstract = metadata.abstract
     proposal.raw_file = _build_raw_file(config, proposal, slug_source)
     return proposal
@@ -3001,8 +3040,11 @@ def strip_srt(raw: str) -> str:
 
 
 # Bracketed timestamps anywhere; bare timestamps only at line start so times
-# mentioned in speech ("let's meet at 3:30") survive.
-_BRACKET_TS_RE = re.compile(r"[\[(]\d{1,2}:\d{2}(:\d{2})?([,.]\d{1,3})?[\])]")
+# mentioned in speech ("let's meet at 3:30") survive. The `[*_]` lookarounds
+# keep an emphasised marker intact: `**[00:36]**` is a deliberate authored
+# turn label, and stripping just the brackets' contents left a bare `****`
+# behind (#179). An unemphasised `[00:36]` is still ASR noise and still goes.
+_BRACKET_TS_RE = re.compile(r"(?<![*_])[\[(]\d{1,2}:\d{2}(:\d{2})?([,.]\d{1,3})?[\])](?![*_])")
 _LEADING_TS_RE = re.compile(r"^\s*\d{1,2}:\d{2}(:\d{2})?([,.]\d{1,3})?\s*[-–>]*\s*")
 
 
@@ -3159,6 +3201,78 @@ def slugify(value: str, max_length: int = 60) -> str:
     return slug[:max_length].rstrip("-") or "untitled"
 
 
+@dataclass
+class ParsedInput:
+    """An input file split into its own frontmatter, body, and H1 (if any).
+
+    A hand-authored `.md` — a cleaned transcript with a real title, date,
+    tags, and company already set — is user knowledge. Capture used to wrap
+    such a file whole, producing a note with two frontmatter blocks and two
+    H1s where every outer field was empty or a day off (#172). `body` keeps
+    its H1 in place so the file is never restructured; `h1` is extracted
+    separately only so the destination slug can be derived from the note's
+    own title rather than the scratch file's basename.
+    """
+
+    metadata: dict
+    body: str
+    h1: str | None
+
+    @property
+    def is_authored_markdown(self) -> bool:
+        return bool(self.metadata) or self.h1 is not None
+
+
+def _split_authored_markdown(raw: str) -> ParsedInput:
+    """Parse an input's own frontmatter/H1. Unparseable YAML is not an error:
+    the file is simply treated as unauthored prose, exactly as before."""
+    try:
+        post = frontmatter_lib.loads(raw)
+        metadata = dict(post.metadata)
+        body = post.content
+    except Exception:  # noqa: BLE001 - any YAML/parse failure means "not authored"
+        metadata, body = {}, raw
+    match = _H1_RE.search(body)
+    h1 = match.group(0).lstrip("#").strip() if match else None
+    return ParsedInput(metadata=metadata, body=body, h1=h1 or None)
+
+
+def _authored_slug_source(parsed: ParsedInput) -> str | None:
+    """The note's own title, for the destination filename. Any leading date is
+    stripped because `_build_raw_file` prepends one itself."""
+    for candidate in (parsed.metadata.get("title"), parsed.metadata.get("name"), parsed.h1):
+        if isinstance(candidate, str) and candidate.strip():
+            stripped = _LEADING_DATE_RE.sub("", candidate.strip()) or candidate.strip()
+            if stripped.strip():
+                return stripped.strip()
+    return None
+
+
+def _authored_meeting_date(parsed: ParsedInput) -> str | None:
+    """An explicit date the author already set beats anything inferred."""
+    for key in ("meeting_date", "date", "captured"):
+        value = parsed.metadata.get(key)
+        text = value.isoformat() if isinstance(value, date) else value
+        if isinstance(text, str) and _ISO_DATE_RE.fullmatch(text.strip()):
+            return text.strip()
+    return None
+
+
+def _merge_authored_metadata(generated: dict, authored: dict) -> dict:
+    """Authored frontmatter wins over wakil's generated fields, but only where
+    it actually says something — an empty authored value must not clobber a
+    real generated one. Key order follows the schema template, so fields the
+    author added beyond the schema land at the end."""
+    merged = dict(generated)
+    for key, value in authored.items():
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        if isinstance(value, list | dict) and not value:
+            continue
+        merged[key] = value
+    return merged
+
+
 def _relative_origin(config: WorkspaceConfig, file: Path) -> str:
     """POSIX path from the KB root, so DB rows, prompts, and frontmatter never
     leak a machine-specific absolute path. Falls back to the absolute path
@@ -3270,9 +3384,19 @@ def _build_raw_file(
         if proposal.context:
             metadata["context"] = proposal.context
 
+    # The input's own frontmatter is authoritative where it says something
+    # (#172): wakil fills the gaps rather than wrapping a second, emptier
+    # block around a better-populated one. `type` stays wakil's, since note
+    # routing and schema validation key on it.
+    if proposal.authored_metadata:
+        metadata = _merge_authored_metadata(metadata, proposal.authored_metadata)
+        metadata["type"] = "source"
+
     frontmatter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True)
     body = proposal.text
-    if proposal.source_type == "transcript":
+    # Only add an H1 when the input didn't bring its own -- `proposal.text` is
+    # the body with its authored H1 still in place.
+    if proposal.source_type == "transcript" and proposal.authored_h1 is None:
         body = f"# {path.stem}\n\n{body}"
     return ProposedFile(path=str(path), content=f"---\n{frontmatter}---\n\n" + body + "\n")
 
