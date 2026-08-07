@@ -3823,3 +3823,167 @@ def test_infer_meeting_date():
 def test_slugify():
     assert slugify("Claims Kickoff: Q3 / FNOL!") == "claims-kickoff-q3-fnol"
     assert slugify("   ") == "untitled"
+
+
+# --------------------------------------------------------------------------
+# Authored-markdown capture (issues #172, #179)
+
+
+AUTHORED_TRANSCRIPT = """---
+title: "2026-08-03: AI-mentoring 1:1 with Engineer H (Acme)"
+type: source
+origin: transcript
+tags:
+  - mentoring
+  - acme
+company: companies/acme
+meeting_date: '2026-08-03'
+abstract: Onsite-week 1:1 between Edward Bridges and Engineer H.
+---
+
+# 2026-08-03-acme-engineer-h
+
+**[00:36]** — Hello? Hi there. How do I pronounce your name?
+
+**[25:42]** — Thanks, talk next week.
+"""
+
+
+@pytest.fixture
+def authored_transcript(kb_path: Path) -> Path:
+    # Deliberately a scratch-pad basename that shares nothing with the note's
+    # own title -- issue #172's destination-filename half.
+    path = kb_path / "mydraft-final-v2.md"
+    path.write_text(AUTHORED_TRANSCRIPT, encoding="utf-8")
+    return path
+
+
+def test_capture_does_not_double_wrap_authored_frontmatter(workspace, authored_transcript):
+    """Issue #172: capture wrapped the whole input -- frontmatter and H1
+    included -- inside a second, emptier block."""
+    proposal = prepare_capture(
+        workspace, "transcript", _capture_client(), file=authored_transcript
+    )
+    content = proposal.raw_file.content
+
+    assert content.count("\n---\n") == 1, "expected exactly one frontmatter block"
+    assert len([line for line in content.splitlines() if line.startswith("# ")]) == 1
+
+    parsed = frontmatter.loads(content)
+    # Authored fields survive instead of being shadowed by empty ones.
+    assert parsed["company"] == "companies/acme"
+    assert parsed["tags"] == ["mentoring", "acme"]
+    assert parsed["title"] == "2026-08-03: AI-mentoring 1:1 with Engineer H (Acme)"
+    assert str(parsed["abstract"]).startswith("Onsite-week 1:1")
+    # `type` stays wakil's -- note routing and schema validation key on it.
+    assert parsed["type"] == "source"
+
+
+def test_capture_slug_comes_from_the_authored_title_not_the_scratch_filename(
+    workspace, authored_transcript
+):
+    proposal = prepare_capture(
+        workspace, "transcript", _capture_client(), file=authored_transcript
+    )
+    assert proposal.raw_file.path == (
+        "sources/transcripts/2026-08-03-ai-mentoring-1-1-with-engineer-h-acme.md"
+    )
+    assert "mydraft" not in proposal.raw_file.path
+
+
+def test_authored_title_is_not_replaced_by_the_model(workspace, authored_transcript):
+    """Working-agreement item 12: don't silently rewrite user knowledge."""
+    proposal = prepare_capture(
+        workspace,
+        "transcript",
+        _capture_client({"title": "Some Model Title", "abstract": "Model abstract."}),
+        file=authored_transcript,
+    )
+    assert proposal.title == "2026-08-03: AI-mentoring 1:1 with Engineer H (Acme)"
+    assert "Some Model Title" not in proposal.raw_file.content
+
+
+def test_authored_meeting_date_beats_the_inferred_one(workspace, kb_path):
+    path = kb_path / "2026-01-01-scratch.md"
+    path.write_text(
+        "---\nmeeting_date: '2026-08-03'\n---\n\n# Real Title\n\nBody.\n", encoding="utf-8"
+    )
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+    assert proposal.meeting_date == "2026-08-03"
+    assert proposal.raw_file.path.startswith("sources/transcripts/2026-08-03-")
+
+
+def test_capture_still_wraps_a_plain_transcript(workspace, transcript):
+    """Regression guard: a bare .txt dump is unchanged by the #172 fix."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    content = proposal.raw_file.content
+    assert content.count("\n---\n") == 1
+    body = content.split("\n---\n", 1)[1]
+    assert body.lstrip().startswith("# ")
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        # Emphasised markers are authored turn labels -- issue #179.
+        ("**[00:36]** - Hello there.", "**[00:36]** - Hello there."),
+        ("__[1:02:03]__ speaking", "__[1:02:03]__ speaking"),
+        # Unemphasised bracketed timestamps are still ASR noise.
+        ("[00:36] Hello there.", "Hello there."),
+        ("(1:02) yes", "yes"),
+        # Bare timestamps: stripped at line start only.
+        ("00:36 - Hello there.", "Hello there."),
+        ("let's meet at 3:30 tomorrow", "let's meet at 3:30 tomorrow"),
+        # Not a timestamp at all.
+        ("(see fig. 1)", "(see fig. 1)"),
+    ],
+)
+def test_clean_transcript_preserves_emphasised_timestamps(line, expected):
+    assert clean_transcript(line) == expected
+
+
+def test_authored_markdown_is_not_run_through_clean_transcript(workspace, authored_transcript):
+    """End-to-end version of #179: the timestamps in an authored file are
+    content, and must survive capture verbatim."""
+    proposal = prepare_capture(
+        workspace, "transcript", _capture_client(), file=authored_transcript
+    )
+    assert "**[00:36]** — Hello?" in proposal.raw_file.content
+    assert "**[25:42]** — Thanks" in proposal.raw_file.content
+    assert "****" not in proposal.raw_file.content
+
+
+def test_unauthored_markdown_is_still_cleaned(workspace, kb_path):
+    """A bare .md ASR dump has no frontmatter and no H1, so it still gets the
+    timestamp/whitespace pass."""
+    path = kb_path / "dump.md"
+    path.write_text("[00:36] Jane: hello.\n[00:42] Bob: hi.\n", encoding="utf-8")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+    assert "[00:36]" not in proposal.raw_file.content
+    assert "Jane: hello." in proposal.raw_file.content
+
+
+def test_unparseable_frontmatter_is_treated_as_plain_prose(workspace, kb_path):
+    path = kb_path / "broken.md"
+    path.write_text("---\ntitle: [unclosed\n---\n\nBody text.\n", encoding="utf-8")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+    assert "Body text." in proposal.raw_file.content
+
+
+def test_empty_authored_values_do_not_clobber_generated_ones(workspace, kb_path):
+    """The #172 wrapper's damage was empty fields winning; the merge must not
+    reintroduce that in the other direction."""
+    path = kb_path / "sparse.md"
+    path.write_text(
+        "---\ntitle: Real Title\nabstract: ''\ntags: []\n---\n\n# Real Title\n\nBody.\n",
+        encoding="utf-8",
+    )
+    proposal = prepare_capture(
+        workspace,
+        "transcript",
+        _capture_client({"title": "Model Title", "abstract": "Generated abstract."}),
+        file=path,
+    )
+    parsed = frontmatter.loads(proposal.raw_file.content)
+    assert parsed["title"] == "Real Title"
+    assert parsed["abstract"] == "Generated abstract."
