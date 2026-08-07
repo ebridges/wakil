@@ -45,7 +45,7 @@ from sqlalchemy.orm import Session
 
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
-from wakil.config.settings import WorkspaceConfig
+from wakil.config.settings import WorkspaceConfig, workspace_today
 from wakil.integrations.web import fetch_article
 from wakil.knowledge.wikilinks import WIKILINK_RE as _WIKILINK_RE
 from wakil.knowledge.wikilinks import normalize_target as _normalize_link_path
@@ -406,7 +406,7 @@ def prepare_capture(
     if authored_title and authored_abstract:
         proposal.title, proposal.abstract = authored_title, authored_abstract
     else:
-        metadata = _generate_capture_metadata(client, kind, origin, text, context)
+        metadata = _generate_capture_metadata(config, client, kind, origin, text, context)
         proposal.title = authored_title or metadata.title
         # Keep the DB row and the file's frontmatter agreeing: `_build_raw_file`
         # would otherwise write the authored abstract while `Source` kept the
@@ -427,11 +427,16 @@ def _authored_text(metadata: dict, *keys: str) -> str | None:
 
 
 def _generate_capture_metadata(
-    client: ModelClient, source_type: str, origin: str, text: str, context: str | None
+    config: WorkspaceConfig,
+    client: ModelClient,
+    source_type: str,
+    origin: str,
+    text: str,
+    context: str | None,
 ) -> CaptureMetadata:
     """The one model call capture makes (docs/adr/0010): title + abstract,
     grounded in the captured text itself rather than just the filename."""
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     prompt = build_capture_metadata_prompt(
         source_type, origin, text[:MAX_SOURCE_CHARS], today, context=context
     )
@@ -543,7 +548,12 @@ def plan_abstract_backfill(
             except IngestError:
                 continue
             generated = _generate_capture_metadata(
-                client, source.source_type, source.origin or "", text, metadata.get("context")
+                config,
+                client,
+                source.source_type,
+                source.origin or "",
+                text,
+                metadata.get("context"),
             )
             items.append(
                 AbstractBackfillItem(
@@ -1466,6 +1476,7 @@ def _correct_proposed_note_type(
     resolution: EntityResolution,
     schema: EntitySchema,
     proposal: "EnrichmentProposal",
+    today: str,
 ) -> ProposedFile:
     """When a create-resolution's subject matches proposed_note's own
     subject (see `_proposed_note_subject_slug`) but entity-resolution
@@ -1502,7 +1513,6 @@ def _correct_proposed_note_type(
         return proposed_note
 
     existing_label = str(metadata.get("name") or metadata.get("title") or resolution.name)
-    today = datetime.now(UTC).date().isoformat()
     new_metadata = _populate_type_frontmatter(
         schema, resolution.entity_type, resolution.proposed_frontmatter, existing_label, today
     )
@@ -1557,6 +1567,7 @@ def _suppress_duplicate_of_proposed_note(
     schema: EntitySchema,
     proposal: EnrichmentProposal,
     taken: set[str],
+    today: str,
     proposed_note_slug: str | None,
 ) -> bool:
     """Suppress `resolution` when its subject duplicates proposal.proposed_note
@@ -1570,7 +1581,7 @@ def _suppress_duplicate_of_proposed_note(
     if proposal.proposed_note is not None:
         old_path = proposal.proposed_note.path
         proposal.proposed_note = _correct_proposed_note_type(
-            proposal.proposed_note, resolution, schema, proposal
+            proposal.proposed_note, resolution, schema, proposal, today
         )
         if proposal.proposed_note.path != old_path:
             taken.discard(old_path)
@@ -1652,7 +1663,7 @@ def _build_stub_entities(
     domain entity that guidance was meant to produce.
     """
     schemas = load_entity_schemas(config.root_path)
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     stubs: list[ProposedFile] = []
     taken = {proposal.proposed_note.path} if proposal.proposed_note else set()
     kept_resolutions: list[EntityResolution] = []
@@ -1681,7 +1692,7 @@ def _build_stub_entities(
             )
             continue
         if _suppress_duplicate_of_proposed_note(
-            resolution, schema, proposal, taken, proposed_note_slug
+            resolution, schema, proposal, taken, today, proposed_note_slug
         ):
             kept_resolutions.append(resolution)
             continue
@@ -1957,7 +1968,7 @@ def _synthesize_stub_content(
         )
         return
 
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     by_path = {stub.path: stub for stub in stubs}
     for revision in result.revisions:
         stub = by_path.get(revision.target_note_path)
@@ -2422,8 +2433,8 @@ def _apply_entity_revisions(
     proposal: EnrichmentProposal,
     candidates: list[_EntityCandidate],
     revisions: list[EntityRevision],
+    today: str,
 ) -> None:
-    today = datetime.now(UTC).date().isoformat()
     by_path = {res.target_note_path: content for res, _, content in candidates}
     name_by_path = {res.target_note_path: res.name for res, _, _ in candidates}
     for revision in revisions:
@@ -2508,7 +2519,7 @@ def _revise_candidates(
         )
         return
 
-    _apply_entity_revisions(proposal, candidates, result.revisions)
+    _apply_entity_revisions(proposal, candidates, result.revisions, workspace_today(config))
 
 
 def _stub_content(metadata: dict, name: str) -> str:
@@ -2920,7 +2931,7 @@ def prepare_entity_compile(config: WorkspaceConfig, client: ModelClient, slug: s
         timeline_entry=None,
         frontmatter_updates=None,
     )
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     new_content = _merge_entity_note(old_content, revision, today)
     if new_content is None:
         # Shouldn't happen — _split_note_sections above already validated
@@ -2998,7 +3009,7 @@ def prepare_entity_full_resynthesis(
         timeline_entry=None,
         frontmatter_updates=None,
     )
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     new_content = _merge_entity_note(old_content, revision, today)
     if new_content is None:
         # Shouldn't happen — _split_note_sections above already validated
@@ -3034,7 +3045,7 @@ def compiled_truth_text(content: str) -> str | None:
 
 
 def rebuild_entity_update_with_compiled_truth(
-    update: EntityUpdate, compiled_truth: str
+    update: EntityUpdate, compiled_truth: str, today: str
 ) -> EntityUpdate | None:
     """Re-run the deterministic merge (docs/adr/0017, Stage 1's "Edit"
     choice) with `compiled_truth` — e.g. text a user hand-edited via
@@ -3053,7 +3064,6 @@ def rebuild_entity_update_with_compiled_truth(
         timeline_entry=None,
         frontmatter_updates=None,
     )
-    today = datetime.now(UTC).date().isoformat()
     new_content = _merge_entity_note(update.old_content, revision, today)
     if new_content is None:
         return None
@@ -3586,7 +3596,7 @@ def _build_raw_file(
     non-deterministic and break capture's idempotent-by-content-hash dedup
     across identical re-ingests.
     """
-    created = datetime.now(UTC).date().isoformat()
+    created = workspace_today(config)
     directory = Path(config.ingest_directory) / RAW_DIRS.get(proposal.source_type, "clippings")
     # slug_source already had any leading date stripped (for file-derived
     # captures, in prepare_capture; article titles never carry one to begin

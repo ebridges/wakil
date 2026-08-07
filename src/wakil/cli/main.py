@@ -10,7 +10,12 @@ import typer
 import wakil
 from wakil.app.workspace_service import get_status, init_workspace
 from wakil.config.registry import lookup_workspace, register_workspace
-from wakil.config.settings import WorkspaceConfig, find_workspace_root, is_initialized
+from wakil.config.settings import (
+    WorkspaceConfig,
+    find_workspace_root,
+    is_initialized,
+    workspace_today,
+)
 from wakil.ui.console import (
     console,
     print_capture_proposal,
@@ -916,6 +921,7 @@ def _resolve_oversized_compiled_truth(
     text: str,
     size: int,
     *,
+    today: str,
     run_full_resynthesis,
 ) -> "EntityUpdate":
     """Interactive a/e/f/c menu for a Compiled Truth over the size target.
@@ -987,7 +993,7 @@ def _resolve_oversized_compiled_truth(
                 "with the note's real Timeline section — remove it, or cancel.[/red]"
             )
             continue
-        rebuilt = rebuild_entity_update_with_compiled_truth(update, edited)
+        rebuilt = rebuild_entity_update_with_compiled_truth(update, edited, today)
         if rebuilt is None:
             console.print("[red]Could not merge the edited text — try again, or cancel.[/red]")
             continue
@@ -1114,7 +1120,11 @@ def entities_compile(
         size = len(text)
         if size > _COMPILED_TRUTH_TARGET_CHARS:
             update = _resolve_oversized_compiled_truth(
-                update, text, size, run_full_resynthesis=_run_full_resynthesis
+                update,
+                text,
+                size,
+                today=workspace_today(config),
+                run_full_resynthesis=_run_full_resynthesis,
             )
 
     print_entity_update_preview(update)
