@@ -134,7 +134,6 @@ def test_prepare_landing_branches_from_default_not_current_head(git_kb):
 
     landing = prepare_landing(git_kb, source_id=None, title="Claims Kickoff", local=False)
     assert landing.branch is not None
-    assert landing.original_branch == "main"
     log = _git(root, "log", "--format=%s")
     assert "unrelated-only commit" not in log
 
@@ -246,11 +245,14 @@ def test_land_ingestion_opens_draft_pr_on_capture(git_kb, monkeypatch):
         lambda r, name: calls.setdefault("pushed", name),
     )
 
-    def _fake_create_pr(r, title, body, draft=False):
+    def _fake_create_pr(r, title, body, *, head, base, draft=False):
         calls["pr"] = (title, body, draft)
+        calls["head"] = head
+        calls["base"] = base
         return "https://pr.url/1"
 
     monkeypatch.setattr("wakil.app.git_service.create_pull_request", _fake_create_pr)
+    monkeypatch.setattr("wakil.app.git_service.find_pull_request", lambda r, head: None)
 
     outcome = land_ingestion(
         git_kb,
@@ -265,6 +267,10 @@ def test_land_ingestion_opens_draft_pr_on_capture(git_kb, monkeypatch):
     )
     assert calls["pushed"] == landing.branch
     assert calls["pr"][2] is True  # draft=True on capture
+    # gh must be told the head branch explicitly; left to infer it from cwd it
+    # opened PRs against whatever happened to be checked out (#180).
+    assert calls["head"] == landing.branch
+    assert calls["base"] == "main"
     assert outcome.pr_url == "https://pr.url/1"
 
     with open_session(git_kb) as session:
@@ -285,8 +291,9 @@ def test_land_ingestion_enrichment_reuses_pr_and_marks_ready(git_kb, monkeypatch
     monkeypatch.setattr("wakil.app.git_service.git.push_branch", lambda r, name: None)
     monkeypatch.setattr(
         "wakil.app.git_service.create_pull_request",
-        lambda r, title, body, draft=False: "https://pr.url/42",
+        lambda r, title, body, *, head, base, draft=False: "https://pr.url/42",
     )
+    monkeypatch.setattr("wakil.app.git_service.find_pull_request", lambda r, head: None)
 
     capture_landing = prepare_landing(git_kb, source_id=None, title="Lifecycle Test", local=False)
     (root / "sources").mkdir(exist_ok=True)
@@ -641,3 +648,171 @@ def test_the_recovery_command_does_not_sweep_in_the_users_staged_work(git_kb, mo
     assert committed == ["wakil_note.md"]
     # The user's own staged file is untouched, still staged.
     assert "MY_PRIVATE_DRAFT.md" in _git(root, "diff", "--cached", "--name-only")
+
+
+# --- landing observes reality instead of asserting it (issues #180, #181) ---
+
+
+def test_land_ingestion_refuses_when_head_drifted(git_kb):
+    """Issue #181: `land_ingestion` committed to whatever HEAD happened to be
+    and then *printed* the branch it meant to use, so enrichment output
+    landed silently on main."""
+    root = git_kb.root_path
+    source_id = _insert_source(git_kb, "Drifted")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Drifted", local=False)
+    assert landing.branch is not None
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "d.md").write_text("written\n")
+
+    main_before = _git(root, "rev-parse", "main")
+    # Something else moves the working tree -- a concurrent wakil process
+    # (#182), or the user.
+    _git(root, "switch", "-q", "main")
+
+    with pytest.raises(GitServiceError) as excinfo:
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["drafts/d.md"],
+            title="Drifted",
+            summary=None,
+            ingest_run_id=None,
+            kind="source",
+            phase="capture",
+        )
+
+    message = str(excinfo.value)
+    assert landing.branch in message
+    assert "HEAD is on 'main'" in message
+    # Nothing committed anywhere, and no rescue-checkout under the other process.
+    assert _git(root, "rev-parse", "main") == main_before
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert (root / "drafts" / "d.md").exists()
+
+
+def test_land_ingestion_returns_to_default_not_the_shell_branch(git_kb):
+    """Issue #181 part 2: the return branch was frozen at prepare time, so
+    enrich 'returned to' an unrelated branch left over from an earlier
+    command."""
+    root = git_kb.root_path
+    git.create_branch(root, "some-unrelated-branch")
+    _git(root, "add", "-A")
+    source_id = _insert_source(git_kb, "Return Test")
+
+    landing = prepare_landing(git_kb, source_id=source_id, title="Return Test", local=False)
+    assert landing.branch is not None
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "r.md").write_text("x\n")
+    outcome = land_ingestion(
+        git_kb,
+        landing,
+        source_id=source_id,
+        files=["drafts/r.md"],
+        title="Return Test",
+        summary=None,
+        ingest_run_id=None,
+        kind="source",
+        phase="capture",
+    )
+
+    assert outcome.returned_to == "main"
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    # The commit really is on the ingest branch, not just labelled that way.
+    assert outcome.branch == landing.branch
+    assert outcome.commit_sha == _git(root, "log", "-1", "--format=%H", landing.branch)
+    assert outcome.commit_sha != _git(root, "rev-parse", "main")
+
+
+def test_ensure_clean_raises_when_status_cannot_be_read(git_kb, monkeypatch):
+    """A failed `git status` used to read as 'tree is clean', which lets wakil
+    branch and commit on top of the user's uncommitted work."""
+    monkeypatch.setattr(
+        "wakil.app.git_service.git.status_lines",
+        lambda root: (_ for _ in ()).throw(git.GitError("status exploded")),
+    )
+    with pytest.raises(GitServiceError, match="Could not read the working tree"):
+        ensure_clean_for_branch(git_kb)
+
+
+def test_require_branch_exists_distinguishes_absent_from_unreadable(git_kb, tmp_path):
+    root = git_kb.root_path
+    assert git.require_branch_exists(root, "main") is True
+    assert git.require_branch_exists(root, "no-such-branch") is False
+    # Not a repo at all: an answer is not available, so it must not invent one.
+    outside = tmp_path / "not-a-repo"
+    outside.mkdir()
+    with pytest.raises(git.GitError):
+        git.require_branch_exists(outside, "main")
+
+
+def test_resume_refuses_to_guess_when_the_branch_check_fails(git_kb, monkeypatch):
+    """A false 'no such branch' cuts a *second* branch for a source that
+    already had one, and the DB then disagrees with reality (#180)."""
+    source_id = _insert_source(git_kb, "Guess Test")
+    with open_session(git_kb) as session:
+        source = session.get(Source, source_id)
+        assert source is not None
+        source.git_branch = "wakil/ingest/2026-01-01-guess-test"
+        session.commit()
+
+    monkeypatch.setattr(
+        "wakil.app.git_service.git.require_branch_exists",
+        lambda root, name: (_ for _ in ()).throw(git.GitError("ref check exploded")),
+    )
+    with pytest.raises(GitServiceError, match="Refusing to guess"):
+        prepare_landing(git_kb, source_id=source_id, title="Guess Test", local=False)
+
+
+def test_create_fresh_branch_requires_a_resolvable_default(git_kb, monkeypatch):
+    """Unresolvable default branch used to mean 'branch from current HEAD',
+    so a fresh ingest branch could be cut off an unrelated branch."""
+    monkeypatch.setattr("wakil.app.git_service.git.resolve_default_branch", lambda root: None)
+    branches_before = _git(git_kb.root_path, "branch", "--format=%(refname:short)")
+    with pytest.raises(GitServiceError, match="default branch"):
+        prepare_landing(git_kb, source_id=None, title="No Default", local=False)
+    assert _git(git_kb.root_path, "branch", "--format=%(refname:short)") == branches_before
+
+
+def test_land_pr_adopts_an_existing_pr_found_by_head(git_kb, monkeypatch):
+    """A PR can exist on GitHub without being recorded locally; discovering
+    that at `gh pr create` time was a hard failure (#180)."""
+    root = git_kb.root_path
+    _add_local_origin(root)
+    source_id = _insert_source(git_kb, "Adopt Test")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Adopt Test", local=False)
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "a.md").write_text("x\n")
+
+    seen = {}
+    monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: True)
+    monkeypatch.setattr("wakil.app.git_service.git.push_branch", lambda r, name: None)
+    def _fake_find_pr(r, head):
+        seen["head"] = head
+        return "https://pr.url/99"
+
+    monkeypatch.setattr("wakil.app.git_service.find_pull_request", _fake_find_pr)
+    monkeypatch.setattr(
+        "wakil.app.git_service.create_pull_request",
+        lambda *a, **k: pytest.fail("must not create a PR when one already exists"),
+    )
+    monkeypatch.setattr("wakil.app.git_service.comment_on_pull_request", lambda r, url, body: None)
+
+    outcome = land_ingestion(
+        git_kb,
+        landing,
+        source_id=source_id,
+        files=["drafts/a.md"],
+        title="Adopt Test",
+        summary=None,
+        ingest_run_id=None,
+        kind="source",
+        phase="capture",
+    )
+
+    assert seen["head"] == landing.branch  # looked up by exact branch, not fuzzily
+    assert outcome.pr_url == "https://pr.url/99"
+    with open_session(git_kb) as session:
+        source = session.get(Source, source_id)
+        assert source is not None
+        assert source.git_pr_url == "https://pr.url/99"  # backfilled

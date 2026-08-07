@@ -298,6 +298,12 @@ commit is recorded in the workspace database (`git_changes`). `wakil git
 summary` shows the current branch, pending changes, recent commits, and
 wakil-created branches; `wakil git history <path>` shows one file's history.
 
+Every commit is verified to be landing on the branch wakil resolved for that
+source: if something moved the working tree in between (a concurrent wakil
+process, or your own `git switch`), the command refuses to commit and says so,
+rather than committing wherever HEAD happens to be. Afterwards the working
+tree is left on the repository's default branch.
+
 If your repository signs commits (SSH signing via a hardware key or 1Password),
 `git commit` blocks on an interactive approval prompt. wakil allows 10 minutes
 for that step; set `WAKIL_GIT_COMMIT_TIMEOUT` (seconds) to change it.
