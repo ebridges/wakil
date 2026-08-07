@@ -1,0 +1,5 @@
+merge 185
+
+---
+
+assess the structure of existing ADRs in @docs/adr and derive a template to be stored at @docs/adr/0000-template.md
