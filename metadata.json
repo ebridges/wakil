@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZF1KG3K98VANWNW2SY81KKS",
+  "strategy": "manual-commit",
+  "branch": "fix/git-landing-correctness",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/wakil/app/git_service.py",
+    "src/wakil/integrations/git.py",
+    "src/wakil/integrations/github.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4,
+    "cache_creation_tokens": 1991,
+    "cache_read_tokens": 462750,
+    "output_tokens": 816,
+    "api_call_count": 2
+  }
+}
