@@ -30,6 +30,7 @@ untested tribal knowledge, check these first:
   recorded here. `status: accepted` means the decision was made, not
   necessarily that every consequence of it landed in code — grep for the
   actual implementation before citing an ADR as current behavior.
+  - **`docs/adr/0000-template.md`** - example template for future ADRs
 - **`docs/DEVELOPMENT.md`** — recurring dev patterns worth generalizing
   (mandatory reading; see Working Agreement item 13 below).
 - **`docs/TROUBLESHOOTING.md`** — a dated, append-only log of real bugs and

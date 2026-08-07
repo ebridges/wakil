@@ -163,9 +163,11 @@ uv run wakil -w kb memory archive 1
 
 Ingests propose memories in `candidate` state; you review and decide:
 
+```text
     working → candidate → durable
                       ↘ rejected
     durable → archived
+```
 
 `wakil memory list` (with `--state`/`--type` filters) reviews them, `promote`
 moves them to durable, `reject` removes them from search, and `archive` keeps
@@ -465,7 +467,8 @@ uv run ty check           # type-check (uvx ty check if ty isn't installed local
 uv run pytest -m eval     # live-model skill evals (needs ANTHROPIC_API_KEY or another configured provider; skipped if none is set)
 ```
 
-Design decisions are recorded as ADRs under `docs/adr/`; recurring dev
+Design decisions are recorded as ADRs under `docs/adr/` (with `docs/adr/0000-template.md`
+establishing how they're structured); recurring dev
 patterns and known gotchas live in `docs/DEVELOPMENT.md` and
 `docs/TROUBLESHOOTING.md` — see `CLAUDE.md` for when/how those get updated.
 Releases are cut via the `Release` GitHub Actions workflow

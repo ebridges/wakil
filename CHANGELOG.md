@@ -1,17 +1,21 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+
 ## [0.2.1] - 2026-07-30
 
 ### 📝 Documentation
+
 - 📝 docs(readme): rewrite with upfront use cases, full command reference, mcp-coordinator walkthrough
 - 📝 docs(claude): add repo map, dev workflow, and mandatory dev-docs guidance
 - 📝 docs: preserve KB directory/routing conventions from PROMPT.md
 - 📝 docs(readme): link and explain the two page-shape templates
+- 📝 docs(changelog): v0.2.1
 
 ## [0.2.0] - 2026-07-30
 
 ### ♻️ Refactoring
+
 - ♻️ refactor(ingest): split apply_enrichment into write/update/persist helpers (#109)
 - ♻️ refactor(ingest): extract duplicate/stub-build branches from _build_stub_entities (#110)
 - ♻️ refactor(ingest): split validate_proposal into per-collection validators (#111)
@@ -21,17 +25,17 @@ All notable changes to this project are documented in this file.
 - ♻️ refactor(cli): split enrich into prepare/confirm-and-apply helpers (#114)
 - ♻️ refactor(ingest): split prepare_enrichment into related-notes/model-population helpers (#115)
 
-
 ### ✨ Features
+
 - ✨ feat(cli): add --version flag alongside the version subcommand (#107)
 
-
 ### 🐛 Bug Fixes
+
 - 🐛 fix(release): the publish job's gh release create had no repo context
 - 🐛 fix(release): escape `@mentions` in generated changelog/release notes
 
-
 ### 📝 Documentation
+
 - 📝 docs(troubleshooting): record the gh release create missing-repo-context gotcha
 - 📝 docs(troubleshooting): record the `@mention-parsing` release-page gotcha
 - 📝 docs(readme): add CI, release, and license status badges
@@ -41,13 +45,14 @@ All notable changes to this project are documented in this file.
 ## [0.1.0] - 2026-07-28
 
 ### ♻️ Refactoring
+
 - ♻️ refactor(workspace): handle Optional scalar() return in count helper
 - ♻️ refactor: drop unneeded __future__ annotations imports
 - ♻️ refactor(ingest)!: split ingest into capture and enrichment steps
 - ♻️ refactor(skills): flatten skills/builtin/ into skills/
 
-
 ### ✨ Features
+
 - ✨ feat(phase-1): scaffold wakil CLI with init, status, and note indexing
 - ✨ feat(storage): add FTS5 indexes and QMD search wrapper
 - ✨ feat(query): add search and query commands with model client
@@ -93,8 +98,8 @@ All notable changes to this project are documented in this file.
 - ✨ feat(ingest): synthesize real content on entity create, not a placeholder
 - ✨ feat: thread frontmatter confidence through extraction's proposed_note
 
-
 ### 🐛 Bug Fixes
+
 - 🐛 fix(ci): pin setup-uv to v8 so python-version is actually honored
 - 🐛 fix(ci): pin setup-uv to the exact v8.3.2 tag
 - 🐛 fix(tests): update test_skills_list for the now-populated builtin catalog
@@ -126,8 +131,8 @@ All notable changes to this project are documented in this file.
 - 🔥 fix(ingest): remove reflection-shape code backstop, keep skill guidance fix
 - 🐛 fix(release): trim commit bodies out of generated changelog entries
 
-
 ### 📝 Documentation
+
 - 📃 docs(spec): add specs for memory, ingestion skills, and entity model
 - 📝 docs(spec): add entity-resolution.md, a critical read of RESOLVER.md
 - 📝 docs(spec): add entity-metadata.md, a critical read of schema.md §4
@@ -163,5 +168,3 @@ All notable changes to this project are documented in this file.
 - 📝 docs(troubleshooting): record the git-cliff commit.message full-body gotcha
 - 📝 docs(troubleshooting): record the upload/download-artifact v6 Node-24 mismatch
 - 📝 docs(changelog): v0.1.0
-
-

@@ -132,6 +132,13 @@ jobs:
         run: |
           set -euo pipefail
           uvx git-cliff --config cliff.toml --tag "${{ steps.compute.outputs.new_tag }}" -o CHANGELOG.md
+          # Each release body ends with a blank line so it is separated from the
+          # next release's heading; on the last release that blank lands at
+          # end-of-file, where markdownlint flags it (MD012/MD047). git-cliff
+          # can't fix this itself -- its postprocessors run per release body, so
+          # an end-anchored rule would strip every separator too (see
+          # cliff.toml). Collapse the tail to a single newline here instead.
+          printf '%s\n' "$(cat CHANGELOG.md)" > CHANGELOG.md
           uvx git-cliff --config cliff.toml --tag "${{ steps.compute.outputs.new_tag }}" --unreleased --strip all > release-notes.md
 
       - name: Upload changelog artifact

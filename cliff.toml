@@ -10,28 +10,54 @@
 [changelog]
 # A Tera template to be rendered for each release in the changelog.
 # See https://keats.github.io/tera/docs/#introduction
+# The trailing blank line is load-bearing: it is what puts a blank line between
+# the header and the first `## [version]` heading (MD022). Do not hand-add that
+# blank line to CHANGELOG.md instead -- the release workflow regenerates the
+# whole file (`git-cliff ... -o CHANGELOG.md`), so a hand-edit is silently lost.
 header = """
 # Changelog
 
 All notable changes to this project are documented in this file.
+
 """
+# Whitespace here is markdownlint-driven. Every `##`/`###` heading ends up with
+# exactly one blank line above and below it (MD022) and no two blank lines ever
+# land next to each other (MD012). Each release body therefore ends with one
+# trailing blank line, which is what separates it from the next release's
+# heading; the extra copy of that blank at end-of-file is removed by the
+# trailing-newline postprocessor below (MD047).
+#
+# Mechanics: a `\` at end-of-line is TOML's line-continuation -- it swallows the
+# newline *and* the next line's indentation. `-%}` is Tera's equivalent,
+# trimming the newline that follows a tag. A tag whose newline is *not* trimmed
+# contributes that newline to the output, which is how the blank lines above are
+# produced. `trim = true` (below) strips each release body's *leading* newline,
+# so blank lines must be emitted trailing, not leading -- a leading-blank
+# variant renders correctly for the first release and then loses the blank
+# between every subsequent pair.
+#
+# Verify the rendered output, never the template, after any edit:
+#   uvx git-cliff --config cliff.toml -o /tmp/cl.md && npx markdownlint-cli2 /tmp/cl.md
 body = """
 {% if version %}\
-    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else %}\
-    ## [Unreleased]
-{% endif %}\
-{% for group, commits in commits | group_by(attribute="group") %}
-    ### {{ group | striptags | trim | upper_first }}
-    {% for commit in commits -%}
-        - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
-            {% if commit.breaking %}[**breaking**] {% endif %}\
-            {{ commit.message | split(pat="\n") | first | trim | upper_first }}
-    {% endfor %}
+## [Unreleased]
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") -%}
+### {{ group | striptags | trim | upper_first }}
+
+{% for commit in commits -%}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+{% if commit.breaking %}[**breaking**] {% endif %}\
+{{ commit.message | split(pat="\n") | first | trim | upper_first }}
 {% endfor %}
+{% endfor %}\
 """
 footer = ""
-# Remove leading and trailing whitespaces from the changelog's body.
+# Remove leading and trailing whitespaces from the changelog's body. Note this
+# also strips each release body's leading newline -- see the body comment above
+# for why that forces blank lines to be emitted trailing rather than leading.
 trim = true
 # Render body even when there are no releases to process.
 render_always = false
@@ -43,9 +69,13 @@ render_always = false
 # v0.1.0 release). Wrap any `@word` in backticks so it renders as code
 # instead of being mention-parsed; this is a single-user project, so there's
 # no real contributor mention this could ever suppress.
-postprocessors = [
-    { pattern = '@([A-Za-z0-9_-]+)', replace = "`@${1}`" },
-]
+#
+# Note for future edits: postprocessors run against each *release body*, not the
+# assembled document, so an end-anchored rule cannot be used to tidy the file's
+# tail -- `\n{2,}\z` was tried and it stripped the blank line separating every
+# release from the next one. The trailing blank line at end-of-file is trimmed
+# by the release workflow instead (.github/workflows/release.yml).
+postprocessors = [{ pattern = '@([A-Za-z0-9_-]+)', replace = "`@${1}`" }]
 
 [git]
 # The project's commits are gitmoji-prefixed Conventional Commits
