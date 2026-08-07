@@ -18,11 +18,14 @@ All notable changes to this project are documented in this file.
 body = """
 {% if version %}\
     ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+
 {% else %}\
     ## [Unreleased]
+
 {% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
     ### {{ group | striptags | trim | upper_first }}
+
     {% for commit in commits -%}
         - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
             {% if commit.breaking %}[**breaking**] {% endif %}\
@@ -43,9 +46,7 @@ render_always = false
 # v0.1.0 release). Wrap any `@word` in backticks so it renders as code
 # instead of being mention-parsed; this is a single-user project, so there's
 # no real contributor mention this could ever suppress.
-postprocessors = [
-    { pattern = '@([A-Za-z0-9_-]+)', replace = "`@${1}`" },
-]
+postprocessors = [{ pattern = '@([A-Za-z0-9_-]+)', replace = "`@${1}`" }]
 
 [git]
 # The project's commits are gitmoji-prefixed Conventional Commits

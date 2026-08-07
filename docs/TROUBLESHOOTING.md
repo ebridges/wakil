@@ -6,6 +6,8 @@ audience: wakil design
 
 # Troubleshooting
 
+## About
+
 A dated, append-only log of real bugs and gotchas encountered while building
 `wakil` — not a general FAQ. An entry only belongs here if it (a) cost real
 debugging time, (b) wasn't obvious from reading the code, and (c) would
@@ -15,6 +17,7 @@ the judgment process that maintains this file. Every entry cites a concrete
 source (commit SHA, PR #, or session detail) for traceability.
 
 ### `anthropics/claude-code-action` fails 3x on OIDC token fetch without `id-token: write`
+
 **Date:** 2026-08-05 · **Source:** `.github/workflows/pr-review.yml`; PR #184, commit 30d8044
 
 **Symptom:** The new `pr-review.yml` workflow (runs the `pr-reviewer` subagent on PRs via `anthropics/claude-code-action@v1`) failed on its first run with `Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable`, retried 3 times, then hard-failed before ever sending a prompt to the model — no Claude-side error, nothing about the `ANTHROPIC_API_KEY` secret.
@@ -24,6 +27,7 @@ source (commit SHA, PR #, or session detail) for traceability.
 **Fix:** Add `id-token: write` to the job's `permissions:` block. Any future workflow step using `anthropics/claude-code-action` needs this even when authenticating via a plain API key, not just for the OAuth/GitHub-App flow.
 
 ### `anthropics/claude-code-action` silently no-ops on a PR that itself modifies the workflow file
+
 **Date:** 2026-08-05 · **Source:** `.github/workflows/pr-review.yml`; PR #184, run 31022867184
 
 **Symptom:** After fixing the `id-token: write` issue above, the `claude-review` check on PR #184 passed in ~20-30s — far too fast for a run that reads several ADRs, runs `ruff`/`pytest`, and invokes a subagent — and no PR comment ever appeared, with no error surfaced anywhere in the PR UI.
@@ -32,7 +36,16 @@ source (commit SHA, PR #, or session detail) for traceability.
 
 **Fix:** No code change — this is expected behavior. A PR that adds or edits a `claude-code-action` workflow can never be used to verify that workflow's actual behavior (posting comments, etc.); merge it to `main` first, then open a *separate*, unrelated PR to exercise the now-trusted copy of the workflow.
 
+### A 29.5-minute `wakil enrich` run was lost entirely to a `validate_proposal` schema gap unrelated to any of its 4 model calls
+
+**Date:** 2026-08-02 · **Source:** Claude Code session `d821aebf-363d-4efc-a74d-6a77ff0e3ed8`, `kb-professional` workspace, `wakil -w professional enrich 11 --yes`; see `docs/adr/0020-enrich-progress-visibility-concurrency-and-checkpointing.md` for the fix
+
+A 21-entity email source ran 22:03:27 → 22:32:55 (~29.5 minutes, exceeding the CLI's own 300-second foreground timeout and continuing in the background) with `prepare_enrichment`'s single static spinner as its only output for the entire duration — no phase-level feedback existed at all. The run completed all 4 DAG calls successfully (extraction, entity resolution, 4 new pages + 12 update candidates + 1 sensitive proposed-note draft), then hit `validate_proposal`'s all-or-nothing gate: 8 of the 12 updates failed on an *identical* cause — `relationship: 'contact' is not one of: coworker, report, manager, ...`, a schema-enum gap unrelated to anything any of the 4 model calls had actually produced (the model's output was schema-valid against its own contract; the gap was in a downstream frontmatter-field enum the entity schema hadn't caught up to). Nothing was written — `apply_enrichment` raises before any file or DB write on a validation issue — so all ~29.5 minutes of extraction, resolution, revision, and synthesis work had to be redone from scratch on any retry, even though none of the 4 model calls' actual output was at fault. The schema gap itself was fixed separately by commit `1be685e` (PR #169, adding `contact` to the allowed `relationship` enum values).
+
+This incident, plus the complete lack of progress feedback during the 29.5 minutes, motivated `docs/adr/0020`'s three-part fix: phase-level progress messages so a run like this isn't silent, concurrent revision/synthesis calls to cut the wall-clock this kind of run spends in that portion, and — the part that directly addresses *this* incident — per-phase checkpointing, so a retry after picking up a fix like `1be685e` (or any other post-hoc fix that doesn't change the source content/context/model) skips straight past all 4 already-completed phases to `validate_proposal`/`apply_enrichment`, turning a 29.5-minute redo into a near-instant one. When a `wakil enrich` run fails at `validate_proposal` after a long run, check `enrichment_checkpoints` for that source before assuming a retry means starting over.
+
 ### Commit-message emoji was a "manual commits only" presentation layer, so automatic commits silently lacked it
+
 **Date:** 2026-07-23 · **Source:** `src/wakil/app/git_service.py`, `src/wakil/skills/kb-commit/SKILL.md`
 
 **Symptom:** Commits made by `wakil ingest --commit`/`--branch`/`--pr` (on by default per ADR 0003) showed up in `git log` with no emoji (e.g. `wakil source: add mosaic offer sync ian gutwinski`), while the `kb-commit` skill's documented examples all showed an emoji-prefixed subject (`📥 wakil source: ...`) — read as a bug from the user's side.
@@ -42,6 +55,7 @@ source (commit SHA, PR #, or session detail) for traceability.
 **Fix:** Moved the emoji into `commit_message()` itself (`COMMIT_EMOJI` dict, keyed by kind) so every wakil-generated commit — automatic CLI flag or `kb-commit`'s manual commit — carries the same prefix. When a "presentation layer added on top of a shared helper" is actually visible to the end user (not just internal/programmatic consumers), prefer folding it into the helper rather than splitting it across two call paths that both write to the same user-visible log.
 
 ### Unquoted `[[wikilink]]` in YAML frontmatter parses as a nested list
+
 **Date:** 2026-07-18 · **Source:** session 0062da63-7923-40bd-b839-86cf8fb1d21f
 
 **Symptom:** An entity-revision smoke test kept failing with `validate_proposal` rejecting a `ref` field (e.g. `company`) as "expected a reference string, got list," even after the model's proposal was fixed — looking like a wakil merge/validation bug.
@@ -51,21 +65,25 @@ source (commit SHA, PR #, or session detail) for traceability.
 **Fix:** Quote wikilink-valued frontmatter fields as strings when hand-authoring fixtures or notes. If you see a `ref`-field validation error blaming a list value, check the source frontmatter for an unquoted `[[...]]` before suspecting the ingest/merge code.
 
 ### FTS5 snippet() highlighting the wrong column
+
 **Date:** 2026-07-17 · **Source:** `src/wakil/storage/fts.py` (commit 20b75a6)
 
 Search snippets in `search_notes`, `search_memories`, and `search_sources` could highlight the wrong part of a result. The `snippet()` calls hardcoded the column-index argument to `0`, which SQLite FTS5 takes literally as "always highlight the first column" — `title` in `notes_fts` (`["title", "path", "frontmatter_json"]`) and `sources_fts` (`["title", "origin", "author"]`) — rather than the column that actually matched the query. Since `0` is a valid column index, this ran without error and only surfaced as subtly wrong/misleading snippets. Fix: pass `-1`, FTS5's documented sentinel for "use the best-matching column," in all three `snippet()` calls.
 
 ### Deleted/recreated remote leaves local README unrecoverable via fetch/pull
+
 **Date:** 2026-07-09 · **Source:** session 23a47c01-9864-400e-b831-5c3e3fd6994d
 
 Symptom: after deleting and recreating the GitHub remote and re-running `git fetch`/`git pull`, the local `README.md` was gone, replaced by whatever the recreated remote's initial commit contained (in this case just `.gitignore`). Root cause: the recreated repo's initial commit (`2e10ed7`) has no shared history with the original local commit (`469011b`), so pulling force-overwrote the working tree with the new remote's tree instead of merging. Fix: the original commit was still sitting in the local object database as a dangling commit (not yet garbage-collected), so it could be recovered with `git show 469011b:README.md > README.md` and then pushed back (force-push, since histories diverged). This only works if the dangling commit hasn't been pruned yet — recover promptly, and avoid deleting/recreating remotes as a way to "reset" a repo.
 
 ### Rich console markup mangles wikilink warnings
+
 **Date:** 2026-07-17 · **Source:** `src/wakil/ui/console.py` (warning print sites); session `93aecd7b-3db1-4708-aaf6-81eeb2653a37`
 
 Warning messages containing wikilinks (e.g. `[[people/eleni-karahalios|Eleni Karahalios]] -> [[people/eleni-karahalios.md|Eleni Karahalios]]`) rendered as mangled `[] -> []` output instead of the real link text. Root cause: these warnings were interpolated into f-strings passed straight to `console.print(...)`, and Rich's console treats any bare `[...]` in printed text as a style tag, not literal content — so the wikilink brackets were parsed and swallowed as markup rather than displayed. This was only caught by live/manual verification, not by unit tests, because existing tests asserted on `proposal.warnings` list contents but never exercised the actual `console.print` render path. Fix: escape dynamic content with `rich.markup.escape()` before interpolating it into any markup-enabled `console.print()` call (`from rich.markup import escape; console.print(f"[yellow]warning:[/yellow] {escape(warning)}")`), and add a regression test that renders through `console.print` and inspects captured stdout. The same risk applies to any other dynamic, bracket-containing text (titles, paths, model output) printed elsewhere in `console.py` — each call site needs the same escaping unless it's a fixed literal.
 
 ### Entity-link reconciliation false-corrected links over `.md` suffix convention
+
 **Date:** 2026-07-17 · **Source:** `src/wakil/app/ingest_service.py` (`_normalize_link_path`, `_deslug`); session `93aecd7b-3db1-4708-aaf6-81eeb2653a37`
 
 Symptom: a live `enrich` run logged reconciliation "corrections" such as `[[people/eleni-karahalios|Eleni Karahalios]] -> [[people/eleni-karahalios.md|Eleni Karahalios]]` even though the original link already pointed at the right note. Root cause: reconciliation compared the extraction-written link path directly against entity-resolution's `target_note_path` (always `.md`-suffixed, matching `Note.path`) and rewrote any link whose extension didn't match — but this KB genuinely mixes both the `[[people/x]]` and `[[sources/y.md]]` conventions, so a trailing-`.md` mismatch alone doesn't mean the link is wrong. Fix: added `_normalize_link_path()` to strip a trailing `.md` before comparing paths, so a link is only rewritten when it targets a genuinely different entity, not just a different extension style. Watch for this same pitfall anywhere else in the codebase that compares a stored `target_note_path`/`Note.path` against a raw wikilink path without normalizing the `.md` suffix first.
@@ -77,6 +95,7 @@ Symptom: a live `enrich` run logged reconciliation "corrections" such as `[[peop
 Non-transcript raw captures written by `_build_raw_file` come out with frontmatter fields (`type: source`, `source_type:`, `origin:`, `title:`, `retrieved:`) that are hardcoded in the function rather than derived from the target vault's actual `source` schema. In at least one real vault, the schema uses `captured:` for the same concept, not `retrieved:`, so every non-transcript ingest silently writes non-conformant frontmatter into `sources/`. This isn't visible from reading `ingest_service.py` alone — it only surfaces by diffing the hardcoded keys against the vault's own `schema.md`. Fix by sourcing these field names from the vault's schema/skill definitions (as the transcript branch and `_KNOWN_FIELD_VALUES` mapping already do) instead of hardcoding them in `_build_raw_file`.
 
 ### `frontmatter.dumps()` alphabetizes keys unless `sort_keys=False` is passed explicitly
+
 **Date:** 2026-07-21 · **Source:** `src/wakil/app/ingest_service.py` (`apply_abstract_backfill`)
 
 **Symptom:** A metadata-only rewrite (`frontmatter.loads(raw)` → mutate a couple of keys → `frontmatter.dumps(post)`) was meant to change only the touched keys, but the round trip silently reordered every other frontmatter field alphabetically, producing a large, misleading diff for what should have been a two-line change.
@@ -372,11 +391,3 @@ Fixed with a `git-cliff` `postprocessors` regex (`cliff.toml`) that wraps any `@
 `pyproject.toml` declared `mcp>=1.2` with no upper bound. The dev checkout's own `uv.lock` (from when the dependency was added) resolved and stayed pinned at `mcp==1.28.1`, so `uv run --project ~/Projects/wakil ...` kept working throughout this session. But a separately `uv tool install`-managed `wakil` (its own isolated venv under `~/.local/share/uv/tools/wakil/`, editable against the same source checkout) does its own fresh dependency resolution against the *current* package index rather than reusing that lockfile — and by the time it was (re)installed, `mcp` had published a `2.0.0` that restructures `mcp.server.fastmcp` to `mcp.server.mcpserver`, a breaking change under SemVer's own major-version contract. The tool venv resolved straight to `2.0.0`, and every `wakil mcp serve` invocation through it failed at import time, even though `src/wakil/mcp/server.py` itself hadn't changed and `uv run --project` (using the lockfile) worked fine the whole time — the two invocation paths were silently running against different `mcp` major versions.
 
 Fixed by pinning `mcp>=1.2,<2` in `pyproject.toml`, matching the API surface the code actually targets, then re-locking (`uv lock`, still resolves to `1.28.1`) and refreshing the tool install (`uv tool install --editable . --force`) so its venv picks up the corrected constraint. The general lesson: any dependency added without an upper bound is a live risk for exactly this failure mode the moment that dependency ships a breaking major release — and `uv run --project`/CI passing is not evidence against it, since those paths pin via a committed `uv.lock` that a separate `uv tool install` never consults. Pin an upper bound on any dependency whose import surface the code touches directly (not just transitively), not only after it breaks.
-
-### A 29.5-minute `wakil enrich` run was lost entirely to a `validate_proposal` schema gap unrelated to any of its 4 model calls
-
-**Date:** 2026-08-02 · **Source:** Claude Code session `d821aebf-363d-4efc-a74d-6a77ff0e3ed8`, `kb-professional` workspace, `wakil -w professional enrich 11 --yes`; see `docs/adr/0020-enrich-progress-visibility-concurrency-and-checkpointing.md` for the fix
-
-A 21-entity email source ran 22:03:27 → 22:32:55 (~29.5 minutes, exceeding the CLI's own 300-second foreground timeout and continuing in the background) with `prepare_enrichment`'s single static spinner as its only output for the entire duration — no phase-level feedback existed at all. The run completed all 4 DAG calls successfully (extraction, entity resolution, 4 new pages + 12 update candidates + 1 sensitive proposed-note draft), then hit `validate_proposal`'s all-or-nothing gate: 8 of the 12 updates failed on an *identical* cause — `relationship: 'contact' is not one of: coworker, report, manager, ...`, a schema-enum gap unrelated to anything any of the 4 model calls had actually produced (the model's output was schema-valid against its own contract; the gap was in a downstream frontmatter-field enum the entity schema hadn't caught up to). Nothing was written — `apply_enrichment` raises before any file or DB write on a validation issue — so all ~29.5 minutes of extraction, resolution, revision, and synthesis work had to be redone from scratch on any retry, even though none of the 4 model calls' actual output was at fault. The schema gap itself was fixed separately by commit `1be685e` (PR #169, adding `contact` to the allowed `relationship` enum values).
-
-This incident, plus the complete lack of progress feedback during the 29.5 minutes, motivated `docs/adr/0020`'s three-part fix: phase-level progress messages so a run like this isn't silent, concurrent revision/synthesis calls to cut the wall-clock this kind of run spends in that portion, and — the part that directly addresses *this* incident — per-phase checkpointing, so a retry after picking up a fix like `1be685e` (or any other post-hoc fix that doesn't change the source content/context/model) skips straight past all 4 already-completed phases to `validate_proposal`/`apply_enrichment`, turning a 29.5-minute redo into a near-instant one. When a `wakil enrich` run fails at `validate_proposal` after a long run, check `enrichment_checkpoints` for that source before assuming a retry means starting over.

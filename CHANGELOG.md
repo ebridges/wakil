@@ -1,9 +1,11 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
+
 ## [0.2.1] - 2026-07-30
 
 ### 📝 Documentation
+
 - 📝 docs(readme): rewrite with upfront use cases, full command reference, mcp-coordinator walkthrough
 - 📝 docs(claude): add repo map, dev workflow, and mandatory dev-docs guidance
 - 📝 docs: preserve KB directory/routing conventions from PROMPT.md
@@ -12,6 +14,7 @@ All notable changes to this project are documented in this file.
 ## [0.2.0] - 2026-07-30
 
 ### ♻️ Refactoring
+
 - ♻️ refactor(ingest): split apply_enrichment into write/update/persist helpers (#109)
 - ♻️ refactor(ingest): extract duplicate/stub-build branches from _build_stub_entities (#110)
 - ♻️ refactor(ingest): split validate_proposal into per-collection validators (#111)
@@ -23,15 +26,18 @@ All notable changes to this project are documented in this file.
 
 
 ### ✨ Features
+
 - ✨ feat(cli): add --version flag alongside the version subcommand (#107)
 
 
 ### 🐛 Bug Fixes
+
 - 🐛 fix(release): the publish job's gh release create had no repo context
 - 🐛 fix(release): escape `@mentions` in generated changelog/release notes
 
 
 ### 📝 Documentation
+
 - 📝 docs(troubleshooting): record the gh release create missing-repo-context gotcha
 - 📝 docs(troubleshooting): record the `@mention-parsing` release-page gotcha
 - 📝 docs(readme): add CI, release, and license status badges
@@ -41,6 +47,7 @@ All notable changes to this project are documented in this file.
 ## [0.1.0] - 2026-07-28
 
 ### ♻️ Refactoring
+
 - ♻️ refactor(workspace): handle Optional scalar() return in count helper
 - ♻️ refactor: drop unneeded __future__ annotations imports
 - ♻️ refactor(ingest)!: split ingest into capture and enrichment steps
@@ -48,6 +55,7 @@ All notable changes to this project are documented in this file.
 
 
 ### ✨ Features
+
 - ✨ feat(phase-1): scaffold wakil CLI with init, status, and note indexing
 - ✨ feat(storage): add FTS5 indexes and QMD search wrapper
 - ✨ feat(query): add search and query commands with model client
@@ -95,6 +103,7 @@ All notable changes to this project are documented in this file.
 
 
 ### 🐛 Bug Fixes
+
 - 🐛 fix(ci): pin setup-uv to v8 so python-version is actually honored
 - 🐛 fix(ci): pin setup-uv to the exact v8.3.2 tag
 - 🐛 fix(tests): update test_skills_list for the now-populated builtin catalog
@@ -128,6 +137,7 @@ All notable changes to this project are documented in this file.
 
 
 ### 📝 Documentation
+
 - 📃 docs(spec): add specs for memory, ingestion skills, and entity model
 - 📝 docs(spec): add entity-resolution.md, a critical read of RESOLVER.md
 - 📝 docs(spec): add entity-metadata.md, a critical read of schema.md §4

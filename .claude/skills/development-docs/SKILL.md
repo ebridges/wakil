@@ -35,7 +35,7 @@ to show" is a violation of their purpose.
   time, (b) wasn't obvious from reading the code, and (c) would plausibly recur or
   mislead someone again.
 - **`docs/DEVELOPMENT.md`** — a pattern that was established or reinforced that
-  should generalize to *future, different* work — not a one-off fix specific to
+  should generalize to _future, different_ work — not a one-off fix specific to
   this change.
 - **Default: no entry.**
 
@@ -45,6 +45,7 @@ to show" is a violation of their purpose.
 
 ```markdown
 ### <short, specific title>
+
 **Date:** YYYY-MM-DD · **Source:** <commit SHA / PR # / brief pointer>
 
 <2-5 sentences: symptom, root cause, fix or workaround.>
@@ -54,6 +55,7 @@ to show" is a violation of their purpose.
 
 ```markdown
 ### <pattern name>
+
 **Established:** YYYY-MM-DD · **Source:** <commit SHA / PR # / brief pointer>
 
 <2-5 sentences: what the pattern is, when to apply it, where else it's used.>
