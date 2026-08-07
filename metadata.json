@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZFA0B7J0V0JC2Y2GEP6EHJN",
+  "strategy": "manual-commit",
+  "branch": "fix/enrichment-proposal-routing",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/wakil/app/ingest_service.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 44,
+    "cache_creation_tokens": 32075,
+    "cache_read_tokens": 9422083,
+    "output_tokens": 24171,
+    "api_call_count": 22
+  }
+}
