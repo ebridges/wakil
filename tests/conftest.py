@@ -1,8 +1,18 @@
 import os
 import shutil
+import time
 from pathlib import Path
 
 import pytest
+
+# User-visible dates are now derived from the local timezone rather than UTC
+# (see `workspace_today`, issue #174), so any test asserting a date in a
+# filename or in frontmatter would otherwise depend on the developer's own
+# TZ — passing in a UTC CI runner and failing on a US-Eastern laptop, or vice
+# versa. Pin it. Tests that exercise timezone behavior set their own.
+os.environ["TZ"] = "UTC"
+if hasattr(time, "tzset"):
+    time.tzset()
 
 # Rich's Console (constructed at import time in wakil.ui.console) picks up
 # ambient color-forcing env vars from the invoking shell. An inherited
