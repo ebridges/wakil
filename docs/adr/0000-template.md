@@ -5,6 +5,8 @@ date: YYYY-MM-DD
 audience: wakil design
 ---
 
+# 0000-template
+
 <!--
   Derived from the structure of docs/adr/0001-0020. Copy this file to
   docs/adr/<NNNN>-<slug>.md (next sequential number, zero-padded to 4
@@ -25,7 +27,8 @@ audience: wakil design
     named options, but most titles aren't comparative and shouldn't be
     forced into it.
   - Sentence case for the title, which is where recent ADRs (0018-0020)
-    have landed; the older half of the corpus uses Title Case.
+    have landed; Title Case was used in the past, but sentence case is
+    preferred going forward.
 
   House style, beyond structure:
   - No H1 heading duplicating the frontmatter title — Context is the first
@@ -40,6 +43,10 @@ audience: wakil design
   - Consequences includes real costs and known gaps, not just benefits —
     see the "drift risk" bullet in 0018 (line 86) or the "known, accepted
     gap" sentence in 0015 (line 332) for the register to aim for.
+  - In past docs (e.g. 0015-0017) there is content between the H1 header
+    and the `## Context` section. Sometimes, it may be helpful to but a
+    brief abstract or TLDR passage in this location (for example if it's
+    a long/verbose ADR).
 -->
 
 ## Context
@@ -120,6 +127,9 @@ audience: wakil design
   implemented") from biting the next reader: a decision whose consequences
   never landed in code looks identical to a shipped one from the
   frontmatter alone.
+
+  When this section is added, update the status to either `accepted(implemented)` or
+  just `implemented`.
 -->
 
 ## Sources
