@@ -1361,6 +1361,37 @@ def _run_entity_resolution(
     _reconcile_entity_links(config, proposal)
 
 
+def _file_identity(proposed: ProposedFile) -> tuple[str | None, str | None]:
+    """What entity a proposed file claims to be about: `(type, name-slug)`
+    from its own frontmatter. This is a page's identity; its path is not."""
+    try:
+        metadata = frontmatter_lib.loads(proposed.content).metadata
+    except Exception:
+        return (None, None)
+    if not isinstance(metadata, dict):
+        return (None, None)
+    subject = metadata.get("name") or metadata.get("title")
+    slug = slugify(subject) if isinstance(subject, str) and subject.strip() else None
+    return (_entity_type_of(metadata), slug)
+
+
+def _duplicate_of_proposed_note(
+    proposal: "EnrichmentProposal", candidate: ProposedFile
+) -> str | None:
+    """The proposed note's path when `candidate` describes the same entity.
+
+    Path/slug comparison isn't enough: the whole point of #186 is that a
+    filename correction can leave two paths that differ while the pages they
+    name are the same entity, with byte-identical `type:` and `name:`."""
+    note = proposal.proposed_note
+    if note is None:
+        return None
+    identity = _file_identity(candidate)
+    if identity == (None, None) or identity[1] is None:
+        return None
+    return note.path if _file_identity(note) == identity else None
+
+
 def _proposed_note_subject_slug(proposed_note: ProposedFile | None) -> str | None:
     """The slugified name/title a proposed_note's own frontmatter claims —
     its identity, for comparison against entity-resolution's create
@@ -1570,15 +1601,31 @@ def _build_stub_or_skip(
         return None
     if path in taken:
         return None
-    taken.add(path)
     metadata = _populate_type_frontmatter(
         schema, resolution.entity_type, resolution.proposed_frontmatter, resolution.name, today
     )
-    return ProposedFile(
+    stub = ProposedFile(
         path=path,
         content=_stub_content(metadata, resolution.name),
         confidence=resolution.proposed_frontmatter_confidence,
     )
+    # Identity is (type, name) as actually written, not the path and not
+    # `resolution.name` as passed in. `_reslug_proposed_note` can rewrite the
+    # proposed note's *filename* into a near-neighbour of this stub's, at
+    # which point two files describing one entity -- with byte-identical
+    # `type:` and `name:` frontmatter -- both pass the path-uniqueness check
+    # and both get written (#186). Comparing the built content catches that
+    # however the two names were derived upstream.
+    duplicate = _duplicate_of_proposed_note(proposal, stub)
+    if duplicate is not None:
+        proposal.warnings.append(
+            f"{resolution.name}: skipped a stub page that duplicates the proposed note "
+            f"{duplicate} — both are `{_file_identity(stub)[0]}` named "
+            f"'{_file_identity(stub)[1]}'"
+        )
+        return None
+    taken.add(path)
+    return stub
 
 
 def _build_stub_entities(
@@ -3488,10 +3535,16 @@ def _sanitize_note(
     the kind of mechanical drift this codebase already auto-fixes rather
     than bouncing the whole enrichment back to the user for. Every
     correction is still recorded in proposal.warnings, never applied
-    invisibly. Directory placement (is this path even under its type's
-    schema.directory) is a real routing bug, not cosmetic drift, so that
-    stays a hard stop in validate_proposal() instead of being silently
-    moved here.
+    invisibly.
+
+    Directory placement is corrected here too, rather than left as a hard
+    stop. `type: source` -> `sources/` is a pure function of the `type:`
+    field, so treating a mismatch as a fatal routing bug threw away an entire
+    enrichment run -- every model call included -- over something
+    mechanically derivable, while the filename half of the very same path was
+    already being auto-corrected (#187). `validate_proposal` still hard-stops
+    when the type has no schema directory to route to, which is a genuinely
+    unresolvable case.
     """
     root = config.root_path.resolve()
     candidate = Path(note.path)
@@ -3502,12 +3555,60 @@ def _sanitize_note(
         and (root / candidate).resolve().is_relative_to(root)
     )
     if not valid or (root / candidate).exists():
-        # Routing unclear or collision: propose into the drafts directory instead.
-        directory = Path(config.generated_directory)
-        candidate = _unused_path(root, directory, slugify(proposal.title))
+        # Routing unclear or collision: fall back to the note's own type's
+        # canonical directory, and only to `drafts/` when it hasn't got one.
+        # Dumping a typed page into `drafts/` regardless of its `type:` is
+        # what manufactured #187's unwinnable "type 'source' pages belong
+        # under sources/, not drafts/" failure.
+        directory = _schema_directory_for_note(config, note) or config.generated_directory
+        candidate = _unused_path(root, Path(directory), slugify(proposal.title))
         return ProposedFile(path=str(candidate), content=note.content)
 
+    candidate = _route_to_schema_directory(config, candidate, note, proposal)
     return _reslug_proposed_note(candidate, note.content, proposal)
+
+
+def _schema_directory_for_note(config: WorkspaceConfig, note: ProposedFile) -> str | None:
+    """The canonical directory for whatever `type:` a proposed note declares."""
+    try:
+        metadata = frontmatter_lib.loads(note.content).metadata
+    except Exception:
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    entity_type = _entity_type_of(metadata)
+    if entity_type is None:
+        return None
+    schema = load_entity_schemas(config.root_path).get(entity_type)
+    if schema is None or schema.directory is None:
+        return None
+    return schema.directory.rstrip("/")
+
+
+def _route_to_schema_directory(
+    config: WorkspaceConfig,
+    candidate: Path,
+    note: ProposedFile,
+    proposal: "EnrichmentProposal",
+) -> Path:
+    """Move a proposed note under its type's canonical directory, warning.
+
+    Symmetric with `_reslug_proposed_note`'s filename correction: both are
+    single-valued, mechanically derivable fixes, and neither should cost the
+    caller a whole re-run (#187). A subdirectory of the canonical directory
+    is left alone -- `meetings/2026/...` is deliberate."""
+    schema_dir = _schema_directory_for_note(config, note)
+    if schema_dir is None:
+        return candidate
+    current = candidate.parent.as_posix()
+    if current == schema_dir or current.startswith(f"{schema_dir}/"):
+        return candidate
+    corrected = Path(schema_dir) / candidate.name
+    proposal.warnings.append(
+        f"Moved the proposed note from {candidate.as_posix()} to {corrected.as_posix()} "
+        f"to match its own `type:` (pages of that type belong under {schema_dir}/)"
+    )
+    return corrected
 
 
 def _reslug_proposed_note(
