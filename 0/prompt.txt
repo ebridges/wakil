@@ -1,0 +1,5 @@
+commit the open changes in the working copy that are in response to PR feedback.  I've udpated the rule to require an H1 header. Markdownlint expects it, and it MD025 was ignored because it triggers two headings (the frontmatter "title" and the H1).  I've updated the rule to accommodate that. this should address the first two comments in the PR
+
+Re: comment 3: I've simply removed the proposal to add "implemented" or "accepted(implemented)"
+
+All remaining remarks will be addressed in a later PR.
