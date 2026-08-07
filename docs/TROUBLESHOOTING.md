@@ -16,6 +16,23 @@ nothing; see the `development-docs` skill (`.claude/skills/development-docs/SKIL
 the judgment process that maintains this file. Every entry cites a concrete
 source (commit SHA, PR #, or session detail) for traceability.
 
+### `git-cliff`'s `postprocessors` run per release body, and `trim` eats each body's leading newline
+
+**Date:** 2026-08-07 · **Source:** PR #191, `cliff.toml` + `.github/workflows/release.yml`; five generate-and-lint iterations
+
+**Symptom:** Getting `git-cliff` output to satisfy markdownlint took five rounds of trial and error, and two of the fixes that looked obviously correct silently broke something else. Adding a blank line to the body template after `## [{{ version }}]` produced *two* blank lines there (MD012). Moving blank lines to a leading position — a blank before each heading instead of after — rendered the first release correctly and then dropped the blank line between every subsequent pair of releases (MD022/MD032). Adding a `postprocessors` rule to tidy the file's tail (`\n{2,}$`, then `\n{2,}\z`) also removed the blank line separating every release from the next.
+
+**Root cause:** Two undocumented-in-practice behaviors, neither visible from reading the template:
+
+- **`trim = true` strips each *release body's* leading whitespace, including its leading newline.** So a blank line emitted at the start of a body survives for the first release only (where the header's own trailing newline supplies the separator) and is swallowed for every release after it. Blank lines must therefore be emitted *trailing*, never leading.
+- **`postprocessors` are applied to each rendered release body, not to the assembled document.** An end-anchored pattern matches the end of *every release*, not the end of the file — `\z` behaves the same as `$` here, so absolute anchoring is not a workaround.
+
+Together these mean the blank line that separates releases must come from the end of each body, which leaves an unavoidable extra blank at end-of-file that `git-cliff` itself cannot remove.
+
+**Fix:** Trailing blank lines throughout the body template, a trailing blank line in `header` for the header/first-heading gap, and a `printf '%s\n' "$(cat CHANGELOG.md)" > CHANGELOG.md` in the release workflow's generate step to collapse the tail. Also worth knowing: the `\` line-endings in `cliff.toml`'s `"""` strings are **TOML** line-continuations (they swallow the newline *and* the next line's indentation), while `-%}` is Tera's — they are easy to confuse, and only the latter is documented in git-cliff's template docs.
+
+**General lesson:** the same one already recorded below for the `commit.message` full-body gotcha — verify the *rendered output*, not the template, after any `cliff.toml` edit. A hand-edit to `CHANGELOG.md` is never a fix: the release workflow regenerates the whole file with `-o CHANGELOG.md`, so the edit is silently reverted at the next release. (That is exactly how this bug shipped: a blank line hand-added to `CHANGELOG.md:4` was not reproducible from the template.)
+
 ### `anthropics/claude-code-action` fails 3x on OIDC token fetch without `id-token: write`
 
 **Date:** 2026-08-05 · **Source:** `.github/workflows/pr-review.yml`; PR #184, commit 30d8044
