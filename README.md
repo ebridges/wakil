@@ -298,6 +298,13 @@ commit is recorded in the workspace database (`git_changes`). `wakil git
 summary` shows the current branch, pending changes, recent commits, and
 wakil-created branches; `wakil git history <path>` shows one file's history.
 
+If your repository signs commits (SSH signing via a hardware key or 1Password),
+`git commit` blocks on an interactive approval prompt. wakil allows 10 minutes
+for that step; set `WAKIL_GIT_COMMIT_TIMEOUT` (seconds) to change it. If the
+commit does time out, wakil stays on the ingest branch with your changes still
+staged, so you can finish with a plain `git commit` rather than reconstructing
+the message by hand.
+
 ## Entities: compiled pages
 
 An entity page's `## Compiled Truth` section is meant to hold the current,

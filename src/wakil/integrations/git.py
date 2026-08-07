@@ -4,13 +4,36 @@ Read helpers return None/empty on failure (status display must never crash);
 write helpers raise GitError so callers can surface what went wrong.
 """
 
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# `git commit` can block indefinitely on an interactive signing prompt (SSH
+# signing via a hardware key or 1Password pops a GUI approval a human has to
+# click), so it gets its own generous budget rather than the default below.
+# Deliberately not TTY-gated: `sys.stdin.isatty()` is False under
+# `wakil mcp serve` and under pytest's CliRunner, which is exactly where a
+# GUI signing prompt can still appear -- gating on it would shorten the
+# timeout in the case that needs it most.
+COMMIT_TIMEOUT_SECONDS = 600
+_COMMIT_TIMEOUT_ENV = "WAKIL_GIT_COMMIT_TIMEOUT"
+
 
 class GitError(RuntimeError):
     pass
+
+
+def commit_timeout() -> int:
+    """Seconds to allow `git commit`. Override with WAKIL_GIT_COMMIT_TIMEOUT."""
+    raw = os.environ.get(_COMMIT_TIMEOUT_ENV)
+    if not raw:
+        return COMMIT_TIMEOUT_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        return COMMIT_TIMEOUT_SECONDS
+    return value if value > 0 else COMMIT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -51,7 +74,13 @@ def _run_git_checked(root: Path, *args: str, timeout: int = 60) -> str:
             text=True,
             timeout=timeout,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        raise GitError(
+            f"git {args[0]} timed out after {timeout} seconds. If this was waiting on an "
+            f"interactive signing prompt, the staged changes are still in place -- finish "
+            f"with `git -C {root} {args[0]}`, or raise {_COMMIT_TIMEOUT_ENV}."
+        ) from exc
+    except OSError as exc:
         raise GitError(f"git {args[0]} failed: {exc}") from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -138,9 +167,12 @@ def resolve_default_branch(root: Path) -> str | None:
 
 
 def stage_and_commit(root: Path, paths: list[str], message: str) -> str:
-    """Stage exactly `paths`, commit, and return the commit sha."""
+    """Stage exactly `paths`, commit, and return the commit sha.
+
+    The commit gets `commit_timeout()` rather than the default -- it is the
+    one git call in wakil that can legitimately sit waiting on a human."""
     _run_git_checked(root, "add", "--", *paths)
-    _run_git_checked(root, "commit", "-m", message, "--", *paths)
+    _run_git_checked(root, "commit", "-m", message, "--", *paths, timeout=commit_timeout())
     return _run_git_checked(root, "rev-parse", "HEAD")
 
 

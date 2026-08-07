@@ -24,6 +24,8 @@ When a command lands on a branch (`prepare_landing`) before doing risked work (e
 
 Note: as of this writing PR #15 is still an open draft (unmerged into `main`); this pattern applies once/if that branch lands.
 
+**One exception, added for issue #171:** when the *commit itself* fails inside `land_ingestion`, do **not** return to the original branch. `git add` may already have succeeded (the common case is a signing prompt timing out between the `add` and the `commit`), so switching away strands staged work on a branch the caller is no longer on and forces them to reconstruct the commit message by hand — the exact recovery cost #171 reports. Return-to-original still applies to every failure *after* a successful commit, including the PR-landing step. The rule is really "return once the work is durable in git, stay put while it isn't."
+
 ### Run the live eval before treating new SKILL.md guidance as done
 
 **Source:** PR #20 (`docs/skill-guidance-for-linked-context` branch), `src/wakil/skills/entity-enrichment/SKILL.md`

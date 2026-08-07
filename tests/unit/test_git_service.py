@@ -408,3 +408,80 @@ def test_abandon_landing_returns_to_original_branch(git_kb):
     assert _git(git_kb.root_path, "rev-parse", "--abbrev-ref", "HEAD") == landing.branch
     abandon_landing(git_kb, landing)
     assert _git(git_kb.root_path, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+
+
+# --- commit timeout (issue #171) -------------------------------------------
+
+
+def test_commit_timeout_defaults_and_honors_the_env_override(monkeypatch):
+    monkeypatch.delenv("WAKIL_GIT_COMMIT_TIMEOUT", raising=False)
+    assert git.commit_timeout() == git.COMMIT_TIMEOUT_SECONDS
+
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "900")
+    assert git.commit_timeout() == 900
+
+    # Junk and non-positive values fall back rather than disabling the guard.
+    for bad in ("", "abc", "0", "-5"):
+        monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", bad)
+        assert git.commit_timeout() == git.COMMIT_TIMEOUT_SECONDS
+
+
+def test_stage_and_commit_gives_the_commit_its_own_timeout(git_kb, monkeypatch):
+    """`git commit` may sit waiting on an interactive signing prompt; the
+    surrounding add/rev-parse calls may not."""
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "777")
+    seen: list[tuple[str, int | None]] = []
+    real_run = subprocess.run
+
+    def spy(args, **kwargs):
+        seen.append((args[3], kwargs.get("timeout")))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("wakil.integrations.git.subprocess.run", spy)
+
+    (git_kb.root_path / "note.md").write_text("hi\n", encoding="utf-8")
+    git.stage_and_commit(git_kb.root_path, ["note.md"], "test: add note")
+
+    by_verb = dict(seen)
+    assert by_verb["commit"] == 777
+    assert by_verb["add"] == 60
+    assert by_verb["rev-parse"] == 60
+
+
+def test_commit_timeout_leaves_head_on_the_branch_with_work_staged(git_kb, monkeypatch):
+    """On a timed-out commit the caller must be able to finish by hand, so
+    wakil must not switch away from the branch (issue #171)."""
+    root = git_kb.root_path
+    source_id = _insert_source(git_kb, title="Signing Prompt")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Signing Prompt", local=False)
+    assert landing.branch is not None
+    (root / "note.md").write_text("hi\n", encoding="utf-8")
+
+    real_run = subprocess.run
+
+    def timeout_on_commit(args, **kwargs):
+        if args[3] == "commit":
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 0))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("wakil.integrations.git.subprocess.run", timeout_on_commit)
+
+    with pytest.raises(GitServiceError) as excinfo:
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["note.md"],
+            title="Signing Prompt",
+            summary=None,
+            ingest_run_id=None,
+            kind="ingest",
+            phase="capture",
+        )
+
+    message = str(excinfo.value)
+    assert "timed out" in message
+    assert "WAKIL_GIT_COMMIT_TIMEOUT" in message
+    # Still on the ingest branch, with the staged change intact.
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == landing.branch
+    assert "note.md" in _git(root, "diff", "--cached", "--name-only")
