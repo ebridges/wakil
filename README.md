@@ -263,6 +263,11 @@ frontmatter block or H1 is added, the destination filename is derived from the
 note's own title rather than the input's basename, and the timestamp-cleanup
 pass is skipped so markers like `**[00:36]**` survive verbatim.
 
+When enrichment resolves an entity page that exists only on an earlier,
+unmerged ingest branch — normal when you capture a cluster of related sources
+before reviewing any PRs — it now exits non-zero naming that branch, instead
+of reporting success with nothing written.
+
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:
 

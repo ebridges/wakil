@@ -670,6 +670,27 @@ def enrich(
         _refresh_qmd_index(config)
     else:
         abandon_landing(config, landing)
+        if proposal.missing_update_targets:
+            # Not a quiet success: entity resolution found real targets, they
+            # just aren't in this working tree yet (#188). Exiting 0 here let
+            # a whole source's material land nowhere while the batch appeared
+            # to succeed.
+            console.print(
+                "[red]Nothing was written for this source.[/red] Entity resolution "
+                "resolved targets that aren't in the working tree:"
+            )
+            for missing in proposal.missing_update_targets:
+                where = (
+                    f"on [bold]{', '.join(missing.branches)}[/bold]"
+                    if missing.branches
+                    else "nowhere wakil can see"
+                )
+                console.print(f"  - {missing.name} -> {missing.path} ({where})")
+            console.print(
+                "[dim]Merge the branch that holds them, then re-run "
+                f"`wakil enrich {source_id} --force`.[/dim]"
+            )
+            raise typer.Exit(code=1)
         console.print("[dim]No files were written; nothing to land.[/dim]")
 
 
