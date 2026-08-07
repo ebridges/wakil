@@ -748,3 +748,56 @@ def test_capture_overwrite_flag_replaces_the_existing_file(kb_path: Path, monkey
 
     assert result.exit_code == 0
     assert "different conversation" in landed.read_text(encoding="utf-8")
+
+
+# --- update target on an unmerged branch (issue #188) ----------------------
+
+# Extraction that proposes no note of its own, so the run's only possible
+# output is the entity update -- the shape #188 reports.
+NO_NOTE_EXTRACTION_JSON = json.dumps(
+    {
+        "title": "Second Source",
+        "summary": "More on the same topic.",
+        "key_points": ["Author commentary unique to this source"],
+        "memories": [{"type": "insight", "content": "A unique point.", "confidence": 0.9}],
+        "relationships": [],
+        "proposed_note": None,
+    }
+)
+
+UPDATE_ELSEWHERE_RESOLUTION_JSON = json.dumps(
+    {
+        "entities": [
+            {
+                "name": "Compositional Skill Routing",
+                "entity_type": "concept",
+                "action": "update",
+                "target_note_path": "concepts/only-on-another-branch.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+        ]
+    }
+)
+
+
+def test_enrich_exits_non_zero_when_every_target_is_off_this_branch(
+    kb_path: Path, monkeypatch
+):
+    """Issue #188: this reported success with exit 0 while writing nothing,
+    so a second source's unique material silently landed nowhere."""
+    _client_queue(
+        monkeypatch,
+        FakeCaptureClient(),
+        FakeClient((NO_NOTE_EXTRACTION_JSON, UPDATE_ELSEWHERE_RESOLUTION_JSON)),
+    )
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
+
+    assert result.exit_code == 1, result.output
+    assert "Nothing was written for this source" in result.output
+    assert "concepts/only-on-another-branch.md" in result.output
+    # Actionable: says what to do next, not just that it failed.
+    assert "--force" in result.output
