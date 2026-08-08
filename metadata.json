@@ -3,11 +3,18 @@
   "checkpoint_id": "01KZFAW92VDPZ77BM363WK3P8M",
   "strategy": "manual-commit",
   "branch": "feat/source-lifecycle",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
+    "README.md",
     "src/wakil/app/ingest_service.py",
     "src/wakil/app/workspace_service.py",
+    "src/wakil/cli/main.py",
+    "src/wakil/mcp/server.py",
     "src/wakil/mcp/tools.py",
+    "src/wakil/storage/migrations/versions/0008_source_archive.py",
+    "src/wakil/storage/schema.py",
+    "src/wakil/ui/console.py",
+    "tests/unit/test_ingest_service.py",
     "tests/unit/test_migrations.py"
   ],
   "sessions": [
@@ -16,6 +23,13 @@
       "transcript": "/0/full.jsonl",
       "compact_transcript": "/0/transcript.jsonl",
       "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    },
+    {
+      "metadata": "/1/metadata.json",
+      "transcript": "/1/full.jsonl",
+      "compact_transcript": "/1/transcript.jsonl",
+      "content_hash": "/1/content_hash.txt",
       "prompt": ""
     }
   ],
