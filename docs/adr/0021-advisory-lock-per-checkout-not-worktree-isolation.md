@@ -73,12 +73,20 @@ boundary. Not per-session worktree isolation.
   proposal; `enrich_apply` re-acquires and re-runs `prepare_landing`, which is
   already idempotent because it resumes `Source.git_branch`.
 - **Every write path takes it, not just ingest/enrich.** `schema migrate
-  --commit` and `entities compile --commit` also rewrite files in the working
-  tree and commit them; leaving them out would have left the #182 failure
-  shape wide open (terminal B rewriting frontmatter across the vault while
-  terminal A has the tree parked on an ingest branch, landing the migration
-  inside someone else's PR). The lock covers the *write*, not just the commit,
-  since an unlocked write lands on whatever branch the other process parked.
+  --commit`, `entities compile --commit`, and `sources backfill-abstract`
+  also rewrite files in the working tree; leaving them out would have left the
+  #182 failure shape wide open (terminal B rewriting frontmatter across the
+  vault while terminal A has the tree parked on an ingest branch, landing the
+  migration inside someone else's PR). The lock covers the *write*, not just
+  the commit, since an unlocked write lands on whatever branch the other
+  process parked.
+
+  Note the limit precisely: the lock guarantees no *other wakil process* is
+  mid-write, not that the branch is the one the operator expected. These
+  commands are branch-agnostic by design — they commit on the current branch
+  — so if a human left the tree on an ingest branch, they still land there.
+  Only `land_ingestion` asserts a specific branch (#181's
+  `_assert_on_branch`), because only it has an intended branch to assert.
 - **Deliberately out of scope:** cross-machine or network locking, locking
   read-only commands (`search`, `query`, `status`, `sources list`), and any
   attempt to make two processes *cooperate* rather than take turns.
@@ -125,11 +133,13 @@ boundary. Not per-session worktree isolation.
   and says so rather than blaming a leftover server. Take the lock once, at
   the command boundary.
 - **A proposal is held, not consumed, until the write actually begins.**
-  `ingest_apply`/`enrich_apply` `peek` rather than `pop`, and `discard` only
-  once past the point of no return. Consuming first meant a *transient*
-  failure — a contended lock, a tree the human dirtied during review —
-  destroyed an enrichment proposal worth two model calls while advising a
-  retry the client could no longer perform.
+  `ingest_apply`/`enrich_apply` `peek` rather than `pop`, and `claim` only once
+  past the point of no return. Consuming first meant a *transient* failure — a
+  contended lock, a tree the human dirtied during review — destroyed an
+  enrichment proposal worth two model calls while advising a retry the client
+  could no longer perform. `claim` raises when the id is already gone, which
+  is what preserves single-use: two worker threads can both `peek` the same id
+  while queued on the lock, and only one may go on to apply it.
 - **Known gap:** `enrich_prepare` and `enrich_apply` release between calls, so
   the branch can change in the interval. `apply_enrichment`'s existing
   stale-file guard (comparing `update.old_content` against a fresh disk read)

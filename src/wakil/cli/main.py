@@ -904,7 +904,10 @@ def sources_backfill_abstract(
         console.print("Aborted; nothing was written.")
         raise typer.Exit(code=0)
 
-    updated = apply_abstract_backfill(config, items)
+    # A bulk rewrite of frontmatter across every stale source is the same
+    # working-tree write the lock exists for, even though it never commits.
+    with _workspace_git_lock(config, local=False):
+        updated = apply_abstract_backfill(config, items)
     console.print(f"[green]Updated {len(updated)} source(s).[/green]")
 
 

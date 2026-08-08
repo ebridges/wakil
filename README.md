@@ -300,7 +300,7 @@ wakil-created branches; `wakil git history <path>` shows one file's history.
 
 Only one wakil process at a time can write to a given checkout. Every command
 that writes files or commits — `ingest`, `enrich`, `schema migrate`,
-`entities compile` — takes an advisory lock (under `.wakil/locks/`) around the
+`entities compile`, `sources backfill-abstract` — takes an advisory lock (under `.wakil/locks/`) around the
 whole write → commit → return sequence, so two sessions can't interleave their
 checkouts and clobber each other's uncommitted work. Read-only commands
 (`search`, `query`, `status`, `sources list`) don't contend. A second process

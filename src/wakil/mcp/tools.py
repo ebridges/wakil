@@ -422,7 +422,6 @@ def ingest_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str
         except GitServiceError as exc:
             raise ToolError(str(exc)) from exc
 
-        cache.discard(proposal_id)  # past the point of no return
         try:
             assert_landing_intact(config, landing)
         except GitServiceError as exc:
@@ -569,7 +568,6 @@ def enrich_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str
         except GitServiceError as exc:
             raise ToolError(str(exc)) from exc
 
-        cache.discard(proposal_id)  # past the point of no return
         try:
             # The prepare/apply gap is unbounded (ADR 0018), and
             # `apply_enrichment` rewrites existing notes -- check the tree is

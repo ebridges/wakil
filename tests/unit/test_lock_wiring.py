@@ -131,9 +131,22 @@ def test_peek_leaves_the_proposal_for_a_retry():
     pid = cache.put("enrichment", {"payload": 1})
     assert cache.peek("enrichment", pid) == {"payload": 1}
     assert cache.peek("enrichment", pid) == {"payload": 1}  # still there
-    cache.discard(pid)
+    assert cache.claim("enrichment", pid) == {"payload": 1}
     with pytest.raises(ProposalNotFoundError):
         cache.peek("enrichment", pid)
+
+
+def test_claim_is_single_use_even_after_two_peeks():
+    """Two worker threads can both `peek` the same id while queued on the
+    workspace lock. Only one may go on to apply it -- `apply_enrichment`
+    rewrites existing notes, so a second application is not idempotent."""
+    cache = ProposalCache()
+    pid = cache.put("enrichment", {"payload": 1})
+    cache.peek("enrichment", pid)  # thread A
+    cache.peek("enrichment", pid)  # thread B
+    cache.claim("enrichment", pid)  # A wins the lock
+    with pytest.raises(ProposalNotFoundError):
+        cache.claim("enrichment", pid)  # B must not re-apply
 
 
 def test_enrich_apply_keeps_the_proposal_when_the_workspace_is_busy(kb_path, monkeypatch):

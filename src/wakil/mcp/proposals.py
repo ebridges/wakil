@@ -62,14 +62,19 @@ class ProposalCache:
             )
         return entry.payload
 
-    def pop(self, kind: str, proposal_id: str) -> Any:
+    def claim(self, kind: str, proposal_id: str) -> Any:
+        """Consume a peeked proposal, once it is past the point of no return.
+
+        Raises `ProposalNotFoundError` if it is already gone, which is what
+        keeps `peek` single-use under concurrency: two threads can both `peek`
+        the same id while queued on the workspace lock, and without this the
+        second would apply a proposal the first had already applied. (The MCP
+        SDK dispatches sync tools on worker threads, so this is reachable
+        inside one server.)
+        """
         payload = self.peek(kind, proposal_id)
         del self._entries[proposal_id]
         return payload
-
-    def discard(self, proposal_id: str) -> None:
-        """Consume a peeked proposal, once it is past the point of no return."""
-        self._entries.pop(proposal_id, None)
 
     def _evict_expired(self) -> None:
         cutoff = time.monotonic() - self._ttl

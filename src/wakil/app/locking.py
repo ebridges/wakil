@@ -69,7 +69,7 @@ def _lock_path(config: WorkspaceConfig) -> Path:
     return config.wakil_dir / "locks" / f"git-{digest}.lock"
 
 
-def _holder_info(path: Path) -> dict:
+def _holder_info(path: Path) -> dict[str, object]:
     """Whatever the lock file says about its holder. May be stale, and is
     never consulted to decide whether the lock is held — only to describe it.
     Never raises."""
@@ -99,7 +99,7 @@ def git_lock(config: WorkspaceConfig) -> Iterator[None]:
     """
     path = _lock_path(config)
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle = path.open("a+")
+    handle = path.open("a+", encoding="utf-8")
     try:
         _acquire(handle, path, config)
         try:
