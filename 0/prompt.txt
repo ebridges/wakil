@@ -1,0 +1,19 @@
+Does it make sense to merge the existing pull requests before continuing down the plan?  Or would it be better to complete the plan first?
+
+---
+
+Work the review findings, chain by chain, deepest-first within each so rebases cascade once.  Start with the git chain first.
+
+Loop on each chain: fix pr-review feedback, rerun PR-review, and fixing that feedback in a loop until all PR review feedback is successfully addressed 
+
+Once each chain and all significant feedback has been successfully worked, move onto #2.  If there's any outstanding, minor PR feedback that merits following up on then just open an issue for it and we can pick it up later.
+
+---
+
+Work the review findings, chain by chain, deepest-first within each so rebases cascade once.  Start with the git chain first.
+
+Loop on each chain: fix pr-review feedback, rerun PR-review, and fixing that feedback in a loop until all PR review feedback is successfully addressed 
+
+Once each chain and all significant feedback has been successfully worked, move onto #2.  If there's any outstanding, minor PR feedback that merits following up on then just open an issue for it and we can pick it up later.
+
+All of this work should be done on worktrees, as I'm independently using the KB to build a report.
