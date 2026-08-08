@@ -22,9 +22,13 @@ detail) for traceability.
 
 When a command lands on a branch (`prepare_landing`) before doing risked work (e.g. `apply_capture`/`apply_enrichment`), catch the landing call's `GitServiceError` in its own `try` block, separate from the subsequent operation's errors. On any failure in the operation after a successful landing, call `abandon_landing(config, landing)` so the worktree returns to its own branch instead of being left stranded on the throwaway ingest branch. `enrich` established this shape first (commit `f5a4ed1`); `_run_ingest` originally wrapped `prepare_landing` and `apply_capture` in one combined `try` block, and was split to match `enrich` in commit `a14af48`, whose message describes closing the gap this way: "so a race loss returns the session to its original branch via abandon_landing instead of stranding it on the throwaway ingest branch."
 
-Note: as of this writing PR #15 is still an open draft (unmerged into `main`); this pattern applies once/if that branch lands.
-
 **One exception, added for issue #171:** when the *commit itself* fails inside `land_ingestion`, do **not** return to the original branch. `git add` may already have succeeded (the common case is a signing prompt timing out between the `add` and the `commit`), so switching away strands staged work on a branch the caller is no longer on and forces them to reconstruct the commit message by hand — the exact recovery cost #171 reports. Return-to-original still applies to every failure *after* a successful commit, including the PR-landing step. The rule is really "return once the work is durable in git, stay put while it isn't."
+
+Because staying put leaves HEAD somewhere the caller didn't put it, the failure message has to *say so* — both callers name the branch and note that changes may be staged there. Silence was survivable when the session was returned to its own branch; it isn't now.
+
+A killed `git commit` also needs cleaning up after. `subprocess.run` SIGKILLs the child, and git holds `.git/index.lock` for the whole commit — including the signing prompt — so the corpse leaves the lock behind and *every* later git write in the repo fails until someone deletes a file by hand. Recovery advice that assumes the repo is still usable is wrong unless you clear that first; see `_recover_from_killed_commit`.
+
+Note: as of this writing PR #15 is still an open draft (unmerged into `main`); the `abandon_landing` half of this pattern applies once/if that branch lands.
 
 ### Run the live eval before treating new SKILL.md guidance as done
 

@@ -300,10 +300,16 @@ wakil-created branches; `wakil git history <path>` shows one file's history.
 
 If your repository signs commits (SSH signing via a hardware key or 1Password),
 `git commit` blocks on an interactive approval prompt. wakil allows 10 minutes
-for that step; set `WAKIL_GIT_COMMIT_TIMEOUT` (seconds) to change it. If the
-commit does time out, wakil stays on the ingest branch with your changes still
-staged, so you can finish with a plain `git commit` rather than reconstructing
-the message by hand.
+for that step; set `WAKIL_GIT_COMMIT_TIMEOUT` (seconds) to change it.
+
+If the commit does time out, wakil stays on the ingest branch with your changes
+still staged, clears the `.git/index.lock` the killed process leaves behind
+(without which every later git command in the repo fails), and saves the commit
+message it was going to use. The error prints the command to finish by hand:
+
+```bash
+git -C <workspace> commit -F .git/COMMIT_EDITMSG
+```
 
 ## Entities: compiled pages
 
