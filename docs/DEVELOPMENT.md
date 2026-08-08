@@ -139,3 +139,35 @@ The fix draws a line that any new date-producing code needs to stay on the right
 - **An instant used for ordering or arithmetic stays UTC.** `storage/schema.py`'s `utcnow()` still backs every `created_at`/`retrieved_at`/`last_seen_at` column. These are timestamps, not dates: `memory_service.retrieval_rank`'s age computation and every `ORDER BY` depend on a single monotonic reference, and making them local would break both across a DST boundary.
 
 Two practical consequences worth knowing before writing the next date-touching test or helper. First, `tests/conftest.py` now pins `TZ=UTC` (with `time.tzset()`), because otherwise a test asserting a date in a filename passes in a UTC CI runner and fails on a US-Eastern laptop — pin or freeze the clock rather than asserting today's date directly. Second, `workspace_today` needs a `WorkspaceConfig`, and several enrichment helpers deep in `ingest_service.py` don't have one in scope; those take an explicit `today: str` parameter computed by a caller that does, rather than acquiring a config just to read a date. Prefer that over threading `config` through another layer.
+
+### A budget-capped model input must announce the cap in both directions
+
+**Established:** 2026-08-07 · **Source:** issue #176, `_truncate_source` in `src/wakil/app/ingest_service.py`; second instance of the shape recorded at `docs/TROUBLESHOOTING.md`'s "Workspace guide file (RESOLVER.md) is silently truncated at 4,000 chars"
+
+`prepare_enrichment` cut its source at `MAX_SOURCE_CHARS` (24,000) with `text[:MAX_SOURCE_CHARS]` and said nothing to anyone. A ~28-minute transcript exceeded that, so the model wrote that a topic "is not present in the captured transcript here" — a *true* statement about the input it received, which the operator read as a false claim about their own recording and filed as a synthesis-accuracy bug. The model was right and the tool was wrong.
+
+This is the second recorded instance of the same shape (RESOLVER.md's 4,000-char cut was the first), so it is worth stating as a rule rather than a fix: **any place a budget cap trims model input needs two announcements, not one.**
+
+- **Tell the model**, inline in the text it receives, that its view is partial and what it must not conclude from that. A cap that is invisible to the model licenses exactly the reasoning-about-absence that caused this: it cannot distinguish "not in the source" from "not in my slice of the source."
+- **Tell the operator**, on the proposal/result, with the scale of the loss. "Summary of a 28-minute call seems thin" is not diagnosable; "truncated to 24,000 of 61,400 characters" is.
+
+Append the notice rather than substituting it into the budget, and assert in a test that the analyzed prefix is byte-identical to what it was before — otherwise a fix for visibility quietly shrinks the input it was meant to explain.
+
+### Adding SKILL.md guidance has a budget cost that can degrade an unrelated step
+
+**Established:** 2026-08-07 · **Source:** issue #176, `note-revision/SKILL.md`, four measured live-eval runs
+
+Adding three sections and one procedure step to `note-revision/SKILL.md` (197 → 257 lines) made the new pronoun scenario pass and made an **unrelated, pre-existing** scenario fail — `no-existing-note-handoff-to-content-synthesis`, whose failing rubric item is about accurately enumerating the workspace's files during Step 1. Measured, not assumed: 3/3 failures on the edited skill, 1/1 pass on `main`'s version of the same file, same day.
+
+Two rounds of tuning followed, and each fixed one failure by causing the other:
+
+| variant | lines | pronoun scenario | handoff scenario |
+|---|---|---|---|
+| new step + sections mid-file | 257 | pass | **fail** |
+| compressed prose | 233 | pass | **fail** |
+| scan folded into an existing step, sections moved to end | 230 | **fail** | pass |
+| dedicated step restored, sections at end | 231 | pass | (regression stands) |
+
+Two things to take from this. First, **a skill's instruction budget is real** — guidance is not free to add, and the cost lands on whichever step is competing for attention, not necessarily on anything topically related to what you added. Budget an eval run for scenarios you did *not* touch, not just the one you wrote. Second, the third row is the same finding already recorded above under "Check whether a skill's own procedure step order can produce the bug it's trying to prevent": demoting the pronoun scan from its own numbered step to a clause inside another step broke it. A gate needs to be a step.
+
+Stopping after two rounds was deliberate, per this file's own entry on the personal-reflection heuristic: when each round of tuning trades one failure for another, the approach is the problem, not the tuning. The remaining regression is on a picky file-enumeration rubric item and is documented in the PR rather than tuned against.

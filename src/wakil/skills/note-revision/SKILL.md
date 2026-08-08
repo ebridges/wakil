@@ -53,14 +53,17 @@ is the single worst failure mode this skill exists to prevent.
       page from only the new source. See "State vs. Timeline" below. Carry
       forward every attachment/URL reference the same way — see "Attachment
       and raw URL fidelity" below.
-- [ ] Step 5: **Diff your draft against the current page before saving.**
+- [ ] Step 5: **Scan your draft for `he`, `him`, `his`, `she`, `her`.**
+      Rewrite any whose subject's own page doesn't carry a `pronouns:`/
+      `gender:` field. See "Pronouns: don't infer them" below.
+- [ ] Step 6: **Diff your draft against the current page before saving.**
       If the new version is shorter, or drops a fact/frontmatter key that
       was there before, stop — you are very likely clobbering, not
       updating. See "The clobbering bug" below.
-- [ ] Step 6: **Preview, don't auto-apply.** Surface the diff for
+- [ ] Step 7: **Preview, don't auto-apply.** Surface the diff for
       confirmation before writing, the same as every other wakil write
       path. See "Preview before writing" below.
-- [ ] Step 7: **Update provenance**, including the `updated:` frontmatter
+- [ ] Step 8: **Update provenance**, including the `updated:` frontmatter
       field, and hand off to `note-conformance` for a shape check before
       `kb-commit`.
 
@@ -192,6 +195,37 @@ and only write once that's confirmed.
 - Never replace a developed note with a freshly generated summary, even
   when the summary is accurate — a shorter, cleaner-looking page that drops
   prior detail is the clobbering bug wearing a different outfit.
+
+## Don't fill a gap with invented detail
+
+Naming a real gap is useful; making it concrete with specifics you didn't
+read is fabrication that reads as corroboration. A transcript with a genuine
+diarization failure produced prose asserting a tool's internal behaviour,
+verbatim noise tokens, and a call duration wrong by four minutes — none of it
+in the input.
+
+State the gap in the terms the source supports and stop. No illustrative
+examples, sample quotes, or numbers you didn't read there. Precision is taken
+as evidence.
+
+## Never assert what a source does *not* contain
+
+You may be seeing only part of it; when input is truncated you are told so
+explicitly. Describe what the source does say. "Never mentions X" requires
+having seen all of it, and has been wrong in practice about content that was
+present but out of view.
+
+## Pronouns: don't infer them
+
+**A gendered pronoun is a factual claim about a person and needs a source,
+exactly like a date does.** Its source is that person's own page: a
+`pronouns:` or `gender:` field. Not a first name, not a role, not a voice,
+not what reads naturally. Absent that field you don't know, so write as if
+you don't — they/them, or restructure around the name.
+
+Gendered pronouns arrive by reflex mid-sentence rather than by decision,
+which is why Step 5 is an explicit scan rather than an intention. One pass
+propagates a guess through Compiled Truth, Timeline, and every quoting page.
 
 Once the merge is written and confirmed, hand off to `note-conformance` for
 the shape/schema pass, then `kb-commit` to land it.

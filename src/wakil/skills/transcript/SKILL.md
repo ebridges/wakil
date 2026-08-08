@@ -21,6 +21,17 @@ changes.
   foregrounds. A memory or decision that lands the obligation on only one
   side when the transcript used joint-pronoun language is worth a second
   read before writing it down.
+- Never claim something is absent from the transcript. You may be seeing
+  only part of it — long sources are truncated before they reach you, and
+  when that happens you are told so explicitly. A summary that says "the
+  recording's abstract mentions X, but that segment is not present here" is
+  unsupportable and has been wrong in practice about content that was in the
+  file but out of view. Describe what the transcript does cover; if it ends
+  mid-discussion, say that it ends mid-discussion and stop there.
+- Don't invent illustrative detail to make a real gap concrete. Naming a gap
+  ("the other participant's audio failed throughout") is useful; supplying
+  specifics you didn't read — verbatim noise tokens, a call duration, a tool's
+  internal behaviour — is fabrication that reads as corroboration.
 - Separate decisions from open questions. A decision has an owner and a
   next step; anything still contested belongs in a question-type memory, not
   a decision.

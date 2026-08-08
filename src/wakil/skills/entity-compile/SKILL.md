@@ -55,6 +55,18 @@ in the output rather than merging them into one or guessing which is stale.
 A reader can tolerate two similar sentences; they can't recover a fact that
 silently vanished.
 
+## Pronouns and invented detail
+
+Two constraints that apply to every sentence you write about a person:
+
+- **Use the pronouns the page states.** If it has no `pronouns:`/`gender:`
+  field, use they/them or restructure around the person's name. Never infer
+  from a first name, a role, or context — a compiled page is durable prose
+  that a wrong guess propagates through in one pass.
+- **Never add specifics the Timeline doesn't contain.** Compiling means
+  restating what the entries already say more readably. A number, a date, or
+  a quote that isn't in the source entries is not a compression of them.
+
 ## What this does NOT do
 
 - **No lossy "collapse stale detail" compression.** Deciding what's safe to
