@@ -116,10 +116,13 @@ def _run_git(root: Path, *args: str) -> str | None:
     return result.stdout.strip()
 
 
-def _run_git_status(root: Path, *args: str, timeout: int = 60) -> tuple[int, str]:
+def _run_git_probe(root: Path, *args: str, timeout: int = 60) -> tuple[int, str]:
     """Exit code plus output, for probes where a non-zero code is a legitimate
     answer ("no such ref") rather than a failure. Anything git can't run at
-    all still raises -- that is not an answer."""
+    all still raises -- that is not an answer.
+
+    Named "probe", not "status": it has nothing to do with `git status` (see
+    `status_lines` two definitions down), it returns an exit *status*."""
     try:
         result = subprocess.run(
             ["git", "-C", str(root), *args],
@@ -208,7 +211,7 @@ def require_branch_exists(root: Path, name: str) -> bool:
     A false "no" here is expensive: `_resume_source_branch` falls through to
     cutting a *second* branch for a source that already had one, and the DB's
     recorded branch then permanently disagrees with the branch in use."""
-    code, detail = _run_git_status(root, "show-ref", "--verify", "--quiet", f"refs/heads/{name}")
+    code, detail = _run_git_probe(root, "show-ref", "--verify", "--quiet", f"refs/heads/{name}")
     if code == 0:
         return True
     if code == 1:

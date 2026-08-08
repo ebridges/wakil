@@ -18,7 +18,6 @@ session or agent) land on the same branch/PR the capture step started,
 instead of opening a second, disconnected PR.
 """
 
-import contextlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -55,6 +54,16 @@ COMMIT_EMOJI = {
 
 class GitServiceError(RuntimeError):
     pass
+
+
+class BranchDriftError(GitServiceError):
+    """HEAD is not the branch this landing resolved.
+
+    Distinct from other landing failures because the response has to be
+    different: an ordinary push/`gh` failure should return the tree to the
+    default branch, but drift means another process owns this working tree,
+    and switching under it is the clobber we are trying to prevent (#182).
+    """
 
 
 @dataclass
@@ -250,6 +259,10 @@ def land_ingestion(
 
     try:
         pr_url = _land_pr(config, source_id, landed_on, title, summary, files, kind, phase)
+    except BranchDriftError:
+        # Deliberately no _return_to_default here: the whole point of
+        # detecting drift is that someone else owns this tree.
+        raise
     except GitServiceError:
         _return_to_default(config)
         raise
@@ -265,7 +278,7 @@ def land_ingestion(
     )
 
 
-def _assert_on_branch(config: WorkspaceConfig, expected: str, *, what: str) -> str:
+def _assert_on_branch(config: WorkspaceConfig, expected: str, *, what: str, state: str) -> str:
     """HEAD must actually be `expected` before wakil writes history.
 
     `land_ingestion` used to commit to whatever HEAD happened to be and then
@@ -273,21 +286,27 @@ def _assert_on_branch(config: WorkspaceConfig, expected: str, *, what: str) -> s
     label, not an observation, and enrichment output could land silently on
     `main` (#181).
 
-    On a mismatch this raises rather than switching back. HEAD moving between
-    prepare and commit means another process is mid-flight in this working
-    tree (#182), and switching under it would clobber its work. The advisory
-    lock is what prevents the drift; this is what makes it loud.
+    On a mismatch this raises `BranchDriftError` rather than switching back.
+    HEAD moving mid-landing means another process is in this working tree
+    (#182), and switching under it would clobber its work. The advisory lock
+    is what prevents the drift; this is what makes it loud.
+
+    `state` describes what is already durable at this call site. It is a
+    parameter rather than a fixed sentence because the same assertion runs
+    before the commit and again before the push, and telling a user "nothing
+    was committed" after the commit succeeded is the same
+    label-instead-of-observation defect this function exists to fix.
     """
     try:
         observed = git.current_branch(config.root_path)
     except git.GitError as exc:
         raise GitServiceError(f"Refusing to {what}: could not read HEAD ({exc}).") from exc
     if observed != expected:
-        raise GitServiceError(
+        raise BranchDriftError(
             f"Refusing to {what}: expected to be on {expected!r}, but HEAD is on "
             f"{observed!r}. Something moved this working tree since the branch was "
             f"resolved — most likely another wakil process (see `wakil status`). "
-            f"The written files are still on disk; nothing was committed."
+            f"{state}"
         )
     return observed
 
@@ -336,6 +355,14 @@ def _resume_source_branch(config: WorkspaceConfig, state: "_SourceGitState") -> 
         return name
     # Branch is gone entirely -- most likely its PR was merged and GitHub
     # deleted it. Don't error: start a follow-up branch/PR for this source.
+    #
+    # Forget the recorded PR at the same time. It belongs to the branch we are
+    # abandoning, and `_land_pr` trusts a truthy `git_pr_url` unconditionally:
+    # keeping it would flip that (probably merged) PR to ready, comment on it,
+    # and record it against a commit it does not contain -- while the
+    # follow-up branch silently got no PR at all, losing the reviewable-diff
+    # boundary ADR 0003 exists to provide.
+    _forget_source_pr(config, state.id)
     return _create_fresh_branch(config, state.title or f"source-{state.id}", follow_up=True)
 
 
@@ -346,12 +373,21 @@ def _create_fresh_branch(config: WorkspaceConfig, title: str, follow_up: bool = 
     except git.GitError as exc:
         raise GitServiceError(str(exc)) from exc
     branch_title = f"{title} revision" if follow_up else title
-    name = ingest_branch_name(root, branch_title)
     try:
+        name = ingest_branch_name(root, branch_title)
         git.create_branch_from(root, name, base)
     except git.GitError as exc:
         raise GitServiceError(str(exc)) from exc
     return name
+
+
+def _forget_source_pr(config: WorkspaceConfig, source_id: int) -> None:
+    """Clear a recorded PR that no longer corresponds to the source's branch."""
+    with open_session(config) as session:
+        row = session.get(Source, source_id)
+        if row is not None:
+            row.git_pr_url = None
+        session.commit()
 
 
 def _remember_source_branch(config: WorkspaceConfig, source_id: int, branch: str) -> None:
@@ -393,8 +429,10 @@ def _return_to_default(config: WorkspaceConfig) -> str | None:
             git.checkout(root, target)
         return git.current_branch(root)
     except git.GitError:
-        with contextlib.suppress(git.GitError):
-            return git.current_branch(root)
+        pass
+    try:
+        return git.current_branch(root)  # report wherever we actually ended up
+    except git.GitError:
         return None
 
 
@@ -428,7 +466,15 @@ def _land_pr(
         return None
     # `gh` infers the repo from cwd and (without --head) the branch from HEAD,
     # so a drifted HEAD would push/open against someone else's branch (#180).
-    _assert_on_branch(config, branch, what="push and open a PR")
+    _assert_on_branch(
+        config,
+        branch,
+        what="push and open a PR",
+        state=(
+            f"The commit itself succeeded and is on {branch!r} — it just has not been "
+            "pushed and has no PR yet. Re-run once the other process has finished."
+        ),
+    )
     try:
         git.push_branch(config.root_path, branch)
     except git.GitError as exc:
