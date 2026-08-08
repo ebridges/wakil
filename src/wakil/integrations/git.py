@@ -272,12 +272,21 @@ def require_default_branch(root: Path) -> str:
     licence to branch from whatever is checked out."""
     name = resolve_default_branch(root)
     if not name:
+        # Phrased as what was attempted, not as a finding: both underlying
+        # reads are tolerant, so a falsy answer means "no information" rather
+        # than "definitely absent" -- see DEVELOPMENT.md on checked reads.
         raise GitError(
-            "Could not determine the repository's default branch (no origin/HEAD symref "
-            "and no local main/master). Set one with "
+            "Could not determine the repository's default branch: could not read "
+            "origin/HEAD, and no local main/master was found. Set one with "
             "`git remote set-head origin --auto`, or use --local."
         )
     return name
+
+
+def rev_parse(root: Path, ref: str) -> str:
+    """Resolve a ref to its sha. Checked: callers use this to verify where a
+    commit actually landed, so "couldn't tell" must not read as "matches"."""
+    return _run_git_checked(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
 
 
 def stage_and_commit(root: Path, paths: list[str], message: str) -> str:

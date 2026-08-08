@@ -375,13 +375,20 @@ def _land_written_files(
         # about that moved the user's tree silently.
         from rich.markup import escape
 
+        from wakil.app.git_service import BranchDriftError
         from wakil.integrations.git import inspect_git
 
-        branch = inspect_git(config.root_path).branch
-        location = (
-            f"\n[dim]You are on branch {escape(branch or '?')}; "
-            "changes may be staged there.[/dim]"
-        )
+        if isinstance(exc, BranchDriftError):
+            # The exception already names both branches; repeating "you are on
+            # X, changes may be staged there" would contradict it, since X is
+            # the other process's branch and wakil wrote nothing there.
+            location = ""
+        else:
+            branch = inspect_git(config.root_path).branch
+            location = (
+                f"\n[dim]You are on branch {escape(branch or '?')}; "
+                "changes may be staged there.[/dim]"
+            )
         # `exc` carries the hand-finish command, whose commit message is
         # model-generated — `[[wikilinks]]` in it are read as Rich style tags
         # and silently deleted, so the command the user copies is wrong
@@ -395,7 +402,7 @@ def _land_written_files(
     console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]{location}")
     if outcome.pr_url:
         console.print(f"PR: {outcome.pr_url}")
-    if outcome.returned_to:
+    if outcome.returned_to and outcome.returned_to != outcome.branch:
         console.print(f"[dim]Returned to {outcome.returned_to}.[/dim]")
 
 
@@ -478,7 +485,7 @@ def _prepare_enrichment_or_exit(
 def _confirm_and_apply_enrichment(
     config: WorkspaceConfig, *, proposal: "EnrichmentProposal", landing, yes: bool
 ) -> "EnrichmentResult":
-    from wakil.app.git_service import abandon_landing
+    from wakil.app.git_service import GitServiceError, abandon_landing, assert_landing_intact
     from wakil.app.ingest_service import IngestError, apply_enrichment, validate_proposal
 
     print_enrichment_proposal(proposal)
@@ -493,7 +500,13 @@ def _confirm_and_apply_enrichment(
         raise typer.Exit(code=0)
 
     try:
+        # `apply_enrichment` rewrites existing notes, so confirm the tree is
+        # still ours *before* it does, not just before the commit.
+        assert_landing_intact(config, landing)
         result = apply_enrichment(config, proposal)
+    except GitServiceError as exc:
+        console.print(f"[red]Enrichment failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
     except IngestError as exc:
         console.print(f"[red]Enrichment failed:[/red] {exc}")
         abandon_landing(config, landing)
@@ -519,7 +532,12 @@ def _run_ingest(
     Branches, commits, and opens a draft PR by default; --local writes the
     raw file only, with no git operations.
     """
-    from wakil.app.git_service import GitServiceError, abandon_landing, prepare_landing
+    from wakil.app.git_service import (
+        GitServiceError,
+        abandon_landing,
+        assert_landing_intact,
+        prepare_landing,
+    )
     from wakil.app.ingest_service import IngestError, apply_capture, prepare_capture
     from wakil.llm.client import ModelError, resolve_client
 
@@ -572,7 +590,11 @@ def _run_ingest(
         raise typer.Exit(code=1) from exc
 
     try:
+        assert_landing_intact(config, landing)
         result = apply_capture(config, proposal)
+    except GitServiceError as exc:
+        console.print(f"[red]Ingest failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
     except IngestError as exc:
         console.print(f"[red]Ingest failed:[/red] {exc}")
         abandon_landing(config, landing)

@@ -10,6 +10,7 @@ from wakil.app.git_service import (
     BranchDriftError,
     GitServiceError,
     abandon_landing,
+    assert_landing_intact,
     commit_message,
     ensure_clean_for_branch,
     ingest_branch_name,
@@ -931,3 +932,130 @@ def test_a_follow_up_branch_forgets_the_merged_prs_url(git_kb, monkeypatch):
         assert row is not None
         assert row.git_pr_url is None  # so _land_pr opens one for the new branch
         assert row.git_branch == landing.branch
+
+
+# --- round-2 review: gate the write, verify the commit, record it early ----
+
+
+def test_assert_landing_intact_refuses_before_anything_is_written(git_kb):
+    """The commit-time assertion fired after `apply_enrichment` had already
+    rewritten the user's existing notes into another process's tree."""
+    root = git_kb.root_path
+    source_id = _insert_source(git_kb, "Pre-Write Gate")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Pre-Write Gate", local=False)
+    _git(root, "switch", "-q", "main")  # the other process
+
+    with pytest.raises(BranchDriftError) as excinfo:
+        assert_landing_intact(git_kb, landing)
+    assert "Nothing has been written yet." in str(excinfo.value)
+
+
+def test_assert_landing_intact_is_a_no_op_for_local(git_kb):
+    landing = prepare_landing(git_kb, source_id=None, title="Local", local=True)
+    assert_landing_intact(git_kb, landing)  # must not raise
+
+
+def test_drift_during_the_commit_is_caught_after_the_fact(git_kb, monkeypatch):
+    """The pre-commit assertion only narrows the window. If HEAD moves between
+    it and the commit, the commit lands elsewhere and the reported branch is a
+    label again -- verbatim the #181 report through a smaller window."""
+    root = git_kb.root_path
+    source_id = _insert_source(git_kb, "Race The Commit")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Race The Commit", local=False)
+    assert landing.branch is not None
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "r.md").write_text("x\n")
+
+    real_commit = git.stage_and_commit
+
+    def drift_then_commit(r, paths, message):
+        # Slip in between the assertion and the commit.
+        _git(root, "switch", "-q", "main")
+        return real_commit(r, paths, message)
+
+    monkeypatch.setattr("wakil.app.git_service.git.stage_and_commit", drift_then_commit)
+
+    with pytest.raises(BranchDriftError, match="did not land on"):
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["drafts/r.md"],
+            title="Race The Commit",
+            summary=None,
+            ingest_run_id=None,
+            kind="source",
+            phase="capture",
+        )
+
+
+def test_a_commit_is_recorded_even_when_the_pr_step_fails(git_kb, monkeypatch):
+    """A durable commit with no `git_changes` row was invisible to wakil, and
+    re-running could not recover: `stage_and_commit` fails outright once there
+    is nothing left to commit."""
+    root = git_kb.root_path
+    _add_local_origin(root)
+    source_id = _insert_source(git_kb, "PR Fails")
+    landing = prepare_landing(git_kb, source_id=source_id, title="PR Fails", local=False)
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "q.md").write_text("x\n")
+
+    monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: True)
+    monkeypatch.setattr(
+        "wakil.app.git_service.git.push_branch",
+        lambda r, name: (_ for _ in ()).throw(git.GitError("push rejected")),
+    )
+
+    with pytest.raises(GitServiceError, match="push rejected"):
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["drafts/q.md"],
+            title="PR Fails",
+            summary=None,
+            ingest_run_id=None,
+            kind="source",
+            phase="capture",
+        )
+
+    with open_session(git_kb) as session:
+        change = session.scalar(select(GitChange))
+        assert change is not None, "the durable commit must be visible to wakil"
+        assert change.branch_name == landing.branch
+        assert change.pr_url is None  # honest: there is no PR
+
+
+def test_the_pr_url_is_attached_to_the_existing_change_row(git_kb, monkeypatch):
+    """Recording early must not produce two rows for one commit."""
+    root = git_kb.root_path
+    _add_local_origin(root)
+    source_id = _insert_source(git_kb, "PR OK")
+    landing = prepare_landing(git_kb, source_id=source_id, title="PR OK", local=False)
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "o.md").write_text("x\n")
+
+    monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: True)
+    monkeypatch.setattr("wakil.app.git_service.git.push_branch", lambda r, name: None)
+    monkeypatch.setattr("wakil.app.git_service.find_pull_request", lambda r, head: None)
+    monkeypatch.setattr(
+        "wakil.app.git_service.create_pull_request",
+        lambda r, title, body, *, head, base, draft=False: "https://pr.url/7",
+    )
+
+    outcome = land_ingestion(
+        git_kb,
+        landing,
+        source_id=source_id,
+        files=["drafts/o.md"],
+        title="PR OK",
+        summary=None,
+        ingest_run_id=None,
+        kind="source",
+        phase="capture",
+    )
+    assert outcome.pr_url == "https://pr.url/7"
+    with open_session(git_kb) as session:
+        changes = list(session.scalars(select(GitChange)))
+        assert len(changes) == 1
+        assert changes[0].pr_url == "https://pr.url/7"

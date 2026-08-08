@@ -257,6 +257,18 @@ def land_ingestion(
         # cost reported in issue #171.
         raise GitServiceError(str(exc)) from exc
 
+    # The pre-commit assertion only narrows the window; HEAD can still move
+    # between it and the commit itself. Verifying the sha actually landed on
+    # the branch we claim is what makes `landed_on` an observation rather than
+    # a label -- which is the whole thesis of this change (#181).
+    _assert_commit_landed(config, landed_on, sha)
+
+    # Record the commit now, not after the PR. It is durable in git from this
+    # point; a push/`gh` failure used to leave a real commit with no
+    # `git_changes` row at all, and re-running could not recover because
+    # `stage_and_commit` fails outright when there is nothing left to commit.
+    _record_change(config, files, sha, landed_on, None, title, ingest_run_id, kind)
+
     try:
         pr_url = _land_pr(config, source_id, landed_on, title, summary, files, kind, phase)
     except BranchDriftError:
@@ -267,7 +279,8 @@ def land_ingestion(
         _return_to_default(config)
         raise
 
-    _record_change(config, files, sha, landed_on, pr_url, title, ingest_run_id, kind)
+    if pr_url:
+        _attach_pr_to_change(config, sha, pr_url, ingest_run_id)
     returned_to = _return_to_default(config)
     return CommitOutcome(
         branch=landed_on,
@@ -275,6 +288,29 @@ def land_ingestion(
         message=message,
         pr_url=pr_url,
         returned_to=returned_to,
+    )
+
+
+def assert_landing_intact(config: WorkspaceConfig, context: LandingContext) -> None:
+    """Check the tree is still ours *before* writing to it.
+
+    `land_ingestion` asserts HEAD before the commit, but by then
+    `apply_capture`/`apply_enrichment` have already written — and
+    `_apply_entity_updates` rewrites *existing* notes. Under drift that meant
+    wakil edited the user's notes into another process's working tree and only
+    then refused to commit: the refusal was correct and far too late, since
+    the clobber `BranchDriftError` exists to prevent had already happened on
+    disk (working agreement item 12).
+
+    No-op for a local context, which owns no branch.
+    """
+    if context.local or context.branch is None:
+        return
+    _assert_on_branch(
+        config,
+        context.branch,
+        what="write to the knowledge base",
+        state="Nothing has been written yet.",
     )
 
 
@@ -305,8 +341,8 @@ def _assert_on_branch(config: WorkspaceConfig, expected: str, *, what: str, stat
         raise BranchDriftError(
             f"Refusing to {what}: expected to be on {expected!r}, but HEAD is on "
             f"{observed!r}. Something moved this working tree since the branch was "
-            f"resolved — most likely another wakil process (see `wakil status`). "
-            f"{state}"
+            f"resolved — most likely another wakil process (check with "
+            f"`ps ax | grep 'wakil'`). {state}"
         )
     return observed
 
@@ -379,6 +415,47 @@ def _create_fresh_branch(config: WorkspaceConfig, title: str, follow_up: bool = 
     except git.GitError as exc:
         raise GitServiceError(str(exc)) from exc
     return name
+
+
+def _assert_commit_landed(config: WorkspaceConfig, branch: str, sha: str) -> None:
+    """The commit must actually be on `branch`.
+
+    Closes the window between the pre-commit HEAD assertion and the commit
+    itself: if HEAD moved in between, the commit landed elsewhere and every
+    downstream use of the branch name -- the `git_changes` row,
+    `CommitOutcome.branch`, the CLI's "Committed <sha> on <branch>" -- would
+    be a label again, which is verbatim the #181 report through a smaller
+    window.
+    """
+    try:
+        tip = git.rev_parse(config.root_path, branch)
+    except git.GitError as exc:
+        raise GitServiceError(
+            f"Committed {sha[:10]} but could not verify which branch it landed on ({exc}). "
+            f"Check `git branch --contains {sha[:10]}` before pushing."
+        ) from exc
+    if tip != sha:
+        raise BranchDriftError(
+            f"Commit {sha[:10]} did not land on {branch!r} — that branch is at "
+            f"{tip[:10]}. Something moved this working tree during the commit, most "
+            f"likely another wakil process. The commit is durable; find it with "
+            f"`git branch --contains {sha[:10]}` and move it where it belongs."
+        )
+
+
+def _attach_pr_to_change(
+    config: WorkspaceConfig, sha: str, pr_url: str, ingest_run_id: int | None
+) -> None:
+    """Fill in the PR URL on the `git_changes` row recorded at commit time."""
+    with open_session(config) as session:
+        change = session.scalar(select(GitChange).where(GitChange.commit_sha == sha))
+        if change is not None:
+            change.pr_url = pr_url
+        if ingest_run_id is not None:
+            run = session.get(IngestRun, ingest_run_id)
+            if run is not None:
+                run.created_pr_url = pr_url
+        session.commit()
 
 
 def _forget_source_pr(config: WorkspaceConfig, source_id: int) -> None:

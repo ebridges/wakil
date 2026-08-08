@@ -114,11 +114,12 @@ def test_ingest_local_skips_git_entirely(git_kb, monkeypatch):
     assert _git(git_kb, "status", "--porcelain") != ""  # captured file left uncommitted
 
 
-def test_ingest_returns_to_original_branch_when_apply_fails(git_kb, monkeypatch):
+def test_ingest_returns_to_the_default_branch_when_apply_fails(git_kb, monkeypatch):
     """If apply_capture fails after prepare_landing already switched onto
     the throwaway ingest branch -- e.g. it lost the content-hash dedup
     race with a concurrent identical capture -- the session must return to
-    its original branch rather than being left stranded."""
+    the repository's default branch rather than being left stranded on the
+    throwaway branch."""
     from wakil.app.ingest_service import IngestError
 
     _client_queue(monkeypatch, FakeCaptureClient())
@@ -247,7 +248,7 @@ def test_landing_failure_prints_the_recovery_command_verbatim(git_kb, monkeypatc
     with pytest.raises(typer.Exit):
         cli_main._land_written_files(
             cli_main.WorkspaceConfig.load(git_kb),
-            LandingContext(branch="wakil/ingest/x", original_branch="main", local=False),
+            LandingContext(branch="wakil/ingest/x", local=False),
             source_id=1,
             files=["notes/a.md"],
             title="Notes",
