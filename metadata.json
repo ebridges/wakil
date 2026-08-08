@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZFCFZBC3HQ3443296WX031H",
+  "strategy": "manual-commit",
+  "branch": "fix/synthesis-accuracy",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/DEVELOPMENT.md",
+    "src/wakil/app/ingest_service.py",
+    "src/wakil/skills/entity-compile/SKILL.md",
+    "src/wakil/skills/note-revision/SKILL.md",
+    "src/wakil/skills/note-revision/eval.json",
+    "src/wakil/skills/transcript/SKILL.md",
+    "src/wakil/skills/transcript/eval.json",
+    "tests/unit/test_ingest_service.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 64,
+    "cache_creation_tokens": 552337,
+    "cache_read_tokens": 16354843,
+    "output_tokens": 23247,
+    "api_call_count": 32
+  }
+}
