@@ -347,6 +347,7 @@ def _land_written_files(
     if landing.local:
         console.print("[dim]--local: files written, not committed.[/dim]")
         return
+    console.print("[dim]Committing… approve the signing prompt if one appears.[/dim]")
     try:
         outcome = land_ingestion(
             config,
@@ -360,9 +361,16 @@ def _land_written_files(
             phase=phase,
         )
     except GitServiceError as exc:
+        # Name the branch: a failed landing deliberately leaves HEAD on the
+        # ingest branch (so staged work isn't stranded), and saying nothing
+        # about that moved the user's tree silently.
+        from wakil.integrations.git import inspect_git
+
+        branch = inspect_git(config.root_path).branch
+        location = f"\n[dim]You are on branch {branch}; changes may be staged there.[/dim]"
         console.print(
             f"[red]Landing failed:[/red] {exc}\n"
-            "[dim]The written files are still on disk for manual review.[/dim]"
+            f"[dim]The written files are still on disk for manual review.[/dim]{location}"
         )
         raise typer.Exit(code=1) from exc
     location = f" on [bold]{outcome.branch}[/bold]" if outcome.branch else ""

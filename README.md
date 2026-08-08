@@ -298,6 +298,19 @@ commit is recorded in the workspace database (`git_changes`). `wakil git
 summary` shows the current branch, pending changes, recent commits, and
 wakil-created branches; `wakil git history <path>` shows one file's history.
 
+If your repository signs commits (SSH signing via a hardware key or 1Password),
+`git commit` blocks on an interactive approval prompt. wakil allows 10 minutes
+for that step; set `WAKIL_GIT_COMMIT_TIMEOUT` (seconds) to change it.
+
+If the commit does time out, wakil stays on the ingest branch with your changes
+still staged, clears the `.git/index.lock` the killed process leaves behind
+(without which every later git command in the repo fails), and saves the commit
+message it was going to use. The error prints the command to finish by hand:
+
+```bash
+git -C <workspace> commit -F .git/COMMIT_EDITMSG
+```
+
 ## Entities: compiled pages
 
 An entity page's `## Compiled Truth` section is meant to hold the current,

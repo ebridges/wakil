@@ -206,7 +206,11 @@ def land_ingestion(
     try:
         sha = git.stage_and_commit(config.root_path, files, message)
     except git.GitError as exc:
-        _return_to_branch(config.root_path, context.original_branch)
+        # Deliberately stay put. `git add` may have succeeded and only the
+        # commit failed (e.g. a signing prompt timed out), so switching away
+        # now would strand staged work on a branch the caller is no longer on
+        # and force them to reconstruct the commit by hand -- the recovery
+        # cost reported in issue #171.
         raise GitServiceError(str(exc)) from exc
 
     _remember_source_branch(config, source_id, context.branch)

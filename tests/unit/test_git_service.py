@@ -1,3 +1,4 @@
+import inspect
 import subprocess
 from pathlib import Path
 
@@ -408,3 +409,137 @@ def test_abandon_landing_returns_to_original_branch(git_kb):
     assert _git(git_kb.root_path, "rev-parse", "--abbrev-ref", "HEAD") == landing.branch
     abandon_landing(git_kb, landing)
     assert _git(git_kb.root_path, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+
+
+# --- commit timeout (issue #171) -------------------------------------------
+
+
+def test_commit_timeout_defaults_and_honors_the_env_override(monkeypatch):
+    monkeypatch.delenv("WAKIL_GIT_COMMIT_TIMEOUT", raising=False)
+    assert git.commit_timeout() == git.COMMIT_TIMEOUT_SECONDS
+
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "900")
+    assert git.commit_timeout() == 900
+
+    # Junk and non-positive values fall back rather than disabling the guard.
+    for bad in ("", "abc", "0", "-5"):
+        monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", bad)
+        assert git.commit_timeout() == git.COMMIT_TIMEOUT_SECONDS
+
+
+def test_stage_and_commit_gives_the_commit_its_own_timeout(git_kb, monkeypatch):
+    """`git commit` may sit waiting on an interactive signing prompt; the
+    surrounding add/rev-parse calls may not."""
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "777")
+    seen: list[tuple[str, int | None]] = []
+    real_run = subprocess.run
+
+    def spy(args, **kwargs):
+        seen.append((args[3], kwargs.get("timeout")))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("wakil.integrations.git.subprocess.run", spy)
+
+    (git_kb.root_path / "note.md").write_text("hi\n", encoding="utf-8")
+    git.stage_and_commit(git_kb.root_path, ["note.md"], "test: add note")
+
+    # Compare the neighbours against the default rather than a literal, so a
+    # future change to `_run_git_checked`'s default doesn't fail this test for
+    # the wrong reason -- what matters is that only `commit` differs.
+    default = inspect.signature(git._run_git_checked).parameters["timeout"].default
+    by_verb = dict(seen)
+    assert by_verb["commit"] == 777
+    assert by_verb["add"] == default
+    assert by_verb["rev-parse"] == default
+
+
+def test_commit_timeout_leaves_head_on_the_branch_with_work_staged(git_kb, monkeypatch):
+    """On a timed-out commit the caller must be able to finish by hand, so
+    wakil must not switch away from the branch (issue #171)."""
+    root = git_kb.root_path
+    source_id = _insert_source(git_kb, title="Signing Prompt")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Signing Prompt", local=False)
+    assert landing.branch is not None
+    (root / "note.md").write_text("hi\n", encoding="utf-8")
+
+    real_run = subprocess.run
+
+    def timeout_on_commit(args, **kwargs):
+        if args[3] == "commit":
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 0))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("wakil.integrations.git.subprocess.run", timeout_on_commit)
+
+    with pytest.raises(GitServiceError) as excinfo:
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["note.md"],
+            title="Signing Prompt",
+            summary=None,
+            ingest_run_id=None,
+            kind="ingest",
+            phase="capture",
+        )
+
+    message = str(excinfo.value)
+    assert "timed out" in message
+    assert "WAKIL_GIT_COMMIT_TIMEOUT" in message
+    # Still on the ingest branch, with the staged change intact.
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == landing.branch
+    assert "note.md" in _git(root, "diff", "--cached", "--name-only")
+
+
+def test_a_killed_commit_leaves_the_repo_usable(git_kb, monkeypatch):
+    """Causes a real timeout instead of simulating one.
+
+    `subprocess.run` SIGKILLs the child, and git holds `.git/index.lock`
+    across the whole commit, so the killed process used to leave the lock
+    behind — wedging every later git write and making the recovery the error
+    message advertised fail outright. A slow pre-commit hook stands in for an
+    interactive signing prompt: git has already taken the lock by the time it
+    runs.
+    """
+    root = git_kb.root_path
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nsleep 30\n")
+    hook.chmod(0o755)
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "2")
+    (root / "note.md").write_text("hi\n")
+
+    with pytest.raises(git.GitError) as excinfo:
+        git.stage_and_commit(root, ["note.md"], "test: a wakil message\n\nWith a body.")
+
+    message = str(excinfo.value)
+    assert "timed out" in message
+    # No stale locks: the repo is still writable by git.
+    assert list((root / ".git").glob("*.lock")) == []
+    # And the message the commit would have had is recoverable.
+    assert "a wakil message" in (root / ".git" / "COMMIT_EDITMSG").read_text()
+    assert "commit -F .git/COMMIT_EDITMSG" in message
+
+    # The advertised recovery actually runs, once the human-paced step is done.
+    hook.unlink()
+    _git(root, "commit", "-F", ".git/COMMIT_EDITMSG")
+    assert "a wakil message" in _git(root, "log", "-1", "--format=%s%n%b")
+
+
+def test_a_timed_out_push_is_not_described_as_a_signing_prompt(git_kb, monkeypatch):
+    """The signing framing belongs to `commit`; `_run_git_checked` is also how
+    push/add/switch run, and every clause of it is wrong for those."""
+    real_run = subprocess.run
+
+    def timeout_on_push(args, **kwargs):
+        if args[3] == "push":
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 0))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("wakil.integrations.git.subprocess.run", timeout_on_push)
+    with pytest.raises(git.GitError) as excinfo:
+        git.push_branch(git_kb.root_path, "some-branch")
+    message = str(excinfo.value)
+    assert message == "git push timed out after 120 seconds."
+    assert "signing" not in message
+    assert "WAKIL_GIT_COMMIT_TIMEOUT" not in message
