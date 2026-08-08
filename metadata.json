@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZGG6MBASYYR543D6ATNMTHT",
+  "strategy": "manual-commit",
+  "branch": "feat/session-lock",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "docs/adr/0021-advisory-lock-per-checkout-not-worktree-isolation.md",
+    "src/wakil/app/locking.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 18,
+    "cache_creation_tokens": 26457,
+    "cache_read_tokens": 5066588,
+    "output_tokens": 17712,
+    "api_call_count": 9
+  }
+}
