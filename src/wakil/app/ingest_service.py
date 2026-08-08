@@ -1183,6 +1183,39 @@ def _apply_extraction_checkpoint(proposal: "EnrichmentProposal", payload: dict) 
     )
 
 
+# Marker appended to a truncated source before it reaches the model. Without
+# it, a long transcript was silently cut and the model then correctly reported
+# that content was "not present in the transcript" -- a true statement about
+# the input it received, read by the operator as a false claim about their
+# recording (#176). Absence can only be asserted about what was actually seen.
+_TRUNCATION_NOTICE = (
+    "\n\n[SOURCE TRUNCATED: you have been given the first {shown:,} of {total:,} "
+    "characters. The remainder was not included. Do not state or imply that "
+    "anything is absent from this source -- you cannot see all of it.]"
+)
+
+
+def _truncate_source(text: str, proposal: "EnrichmentProposal") -> str:
+    """Cut the source to the prompt budget, saying so in both directions.
+
+    The cut itself is unchanged; what's new is that it stops being silent.
+    The model is told its view is partial so it doesn't reason about absence,
+    and the operator gets a warning on the proposal so a short summary of a
+    long recording is explicable rather than mysterious.
+    """
+    if len(text) <= MAX_SOURCE_CHARS:
+        return text
+    proposal.warnings.append(
+        f"Source truncated to {MAX_SOURCE_CHARS:,} of {len(text):,} characters for the "
+        f"model — roughly the last {100 - int(100 * MAX_SOURCE_CHARS / len(text))}% of it "
+        f"was not analyzed. Anything the enrichment says about the end of this source is "
+        f"unsupported."
+    )
+    return text[:MAX_SOURCE_CHARS] + _TRUNCATION_NOTICE.format(
+        shown=MAX_SOURCE_CHARS, total=len(text)
+    )
+
+
 def _populate_proposal_from_models(
     config: WorkspaceConfig,
     client: ModelClient,
@@ -1200,7 +1233,7 @@ def _populate_proposal_from_models(
     `_run_extraction`/`_run_entity_resolution` mutate-in-place convention."""
     guides = load_workspace_guides(config)
     related_pairs = [(hit.ref, hit.title) for hit in related_notes]
-    source_text = text[:MAX_SOURCE_CHARS]
+    source_text = _truncate_source(text, proposal)
 
     # DAG node 1: extraction judgment (the <kind> skill + ExtractionOutput).
     # The raw *capture* path (sources/transcripts/...), not source.origin's
