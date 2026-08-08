@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from wakil.app.git_service import (
+    BranchDriftError,
     GitServiceError,
     abandon_landing,
     commit_message,
@@ -716,3 +717,117 @@ def test_land_pr_adopts_an_existing_pr_found_by_head(git_kb, monkeypatch):
         source = session.get(Source, source_id)
         assert source is not None
         assert source.git_pr_url == "https://pr.url/99"  # backfilled
+
+
+# --- drift at the push step (issue #195 review, findings 1-3) --------------
+
+
+def _drift_setup(git_kb, monkeypatch, *, title: str):
+    """Land far enough to have a real commit, then move HEAD out from under
+    the landing before the push -- the "another process owns this tree" case."""
+    root = git_kb.root_path
+    _add_local_origin(root)
+    source_id = _insert_source(git_kb, title)
+    landing = prepare_landing(git_kb, source_id=source_id, title=title, local=False)
+    assert landing.branch is not None
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "d.md").write_text("written\n")
+
+    _git(root, "branch", "other-process-branch")
+    real_commit = git.stage_and_commit
+
+    def commit_then_drift(r, paths, message):
+        sha = real_commit(r, paths, message)
+        _git(root, "switch", "-q", "other-process-branch")  # the other process
+        return sha
+
+    monkeypatch.setattr("wakil.app.git_service.git.stage_and_commit", commit_then_drift)
+    monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: True)
+    return source_id, landing
+
+
+def test_drift_at_the_push_step_does_not_yank_the_other_branch(git_kb, monkeypatch):
+    """The pre-commit path refuses politely; the post-commit path used to
+    detect the same condition and then `git switch` anyway, which is strictly
+    worse than the bug being fixed."""
+    root = git_kb.root_path
+    source_id, landing = _drift_setup(git_kb, monkeypatch, title="Drift Push")
+
+    with pytest.raises(BranchDriftError) as excinfo:
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["drafts/d.md"],
+            title="Drift Push",
+            summary=None,
+            ingest_run_id=None,
+            kind="source",
+            phase="capture",
+        )
+
+    # The other process still owns the tree.
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == "other-process-branch"
+    message = str(excinfo.value)
+    # And the message reports what is actually durable, not a fixed sentence.
+    assert "nothing was committed" not in message
+    assert "commit itself succeeded" in message
+    assert landing.branch is not None
+    # The commit really is durable on the ingest branch, as the message says.
+    assert _git(root, "rev-parse", landing.branch) == _git(
+        root, "log", "-1", "--format=%H", landing.branch
+    )
+
+
+def test_an_ordinary_push_failure_still_returns_to_default(git_kb, monkeypatch):
+    """Only *drift* skips the return; a plain gh/push failure must not."""
+    root = git_kb.root_path
+    _add_local_origin(root)
+    source_id = _insert_source(git_kb, "Push Fail")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Push Fail", local=False)
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "p.md").write_text("x\n")
+
+    monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: True)
+    monkeypatch.setattr(
+        "wakil.app.git_service.git.push_branch",
+        lambda r, name: (_ for _ in ()).throw(git.GitError("push rejected")),
+    )
+
+    with pytest.raises(GitServiceError, match="push rejected"):
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["drafts/p.md"],
+            title="Push Fail",
+            summary=None,
+            ingest_run_id=None,
+            kind="source",
+            phase="capture",
+        )
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+
+
+def test_a_follow_up_branch_forgets_the_merged_prs_url(git_kb, monkeypatch):
+    """The recorded PR belongs to the branch being abandoned. Keeping it
+    flipped a merged PR to ready and left the follow-up branch with no PR."""
+    root = git_kb.root_path
+    _add_local_origin(root)
+    source_id = _insert_source(git_kb, "Merged Already")
+    with open_session(git_kb) as session:
+        row = session.get(Source, source_id)
+        assert row is not None
+        row.git_branch = "wakil/ingest/2026-01-01-merged-already"  # deleted after merge
+        row.git_pr_url = "https://github.com/o/r/pull/1"
+        session.commit()
+
+    landing = prepare_landing(git_kb, source_id=source_id, title="Merged Already", local=False)
+
+    assert landing.branch is not None
+    assert "revision" in landing.branch
+    with open_session(git_kb) as session:
+        row = session.get(Source, source_id)
+        assert row is not None
+        assert row.git_pr_url is None  # so _land_pr opens one for the new branch
+        assert row.git_branch == landing.branch

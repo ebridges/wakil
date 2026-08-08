@@ -20,9 +20,16 @@ detail) for traceability.
 
 **Source:** PR #15 (`worktree-git-integration` branch), `src/wakil/cli/main.py`
 
-When a command lands on a branch (`prepare_landing`) before doing risked work (e.g. `apply_capture`/`apply_enrichment`), catch the landing call's `GitServiceError` in its own `try` block, separate from the subsequent operation's errors. On any failure in the operation after a successful landing, call `abandon_landing(config, landing)` so the worktree returns to its own branch instead of being left stranded on the throwaway ingest branch. `enrich` established this shape first (commit `f5a4ed1`); `_run_ingest` originally wrapped `prepare_landing` and `apply_capture` in one combined `try` block, and was split to match `enrich` in commit `a14af48`, whose message describes closing the gap this way: "so a race loss returns the session to its original branch via abandon_landing instead of stranding it on the throwaway ingest branch."
+When a command lands on a branch (`prepare_landing`) before doing risked work (e.g. `apply_capture`/`apply_enrichment`), catch the landing call's `GitServiceError` in its own `try` block, separate from the subsequent operation's errors. On any failure in the operation after a successful landing, call `abandon_landing(config, landing)` so the session doesn't sit on the throwaway ingest branch. `enrich` established this shape first (commit `f5a4ed1`); `_run_ingest` originally wrapped `prepare_landing` and `apply_capture` in one combined `try` block, and was split to match `enrich` in commit `a14af48`.
 
-**One exception, added for issue #171:** when the *commit itself* fails inside `land_ingestion`, do **not** return to the original branch. `git add` may already have succeeded (the common case is a signing prompt timing out between the `add` and the `commit`), so switching away strands staged work on a branch the caller is no longer on and forces them to reconstruct the commit message by hand — the exact recovery cost #171 reports. Return-to-original still applies to every failure *after* a successful commit, including the PR-landing step. The rule is really "return once the work is durable in git, stay put while it isn't."
+The destination has since changed: `abandon_landing`/`land_ingestion` return to the repository's **default branch**, not to whatever branch the shell happened to be on when the command started. That value used to be frozen in `LandingContext.original_branch` and replayed minutes later (unbounded, for MCP's prepare/apply split), which is how `enrich` came to "return to" a stale, unrelated branch — issue #181. `ensure_clean_for_branch` already guarantees a clean tree at prepare time, so the incidental branch carries no information worth preserving.
+
+Two exceptions, both cases where returning is the wrong move:
+
+- **The commit itself failed** (#171). `git add` may already have succeeded — the common case is a signing prompt timing out between the `add` and the `commit` — so switching away strands staged work on a branch the caller is no longer on. Stay put.
+- **HEAD drifted** (`BranchDriftError`, #182/#195). Drift means *another process owns this working tree*. Returning would `git switch` out from under it, which is precisely the clobber the drift detection exists to prevent — so the drift case re-raises without returning, while ordinary push/`gh` failures still return.
+
+The rule is "return once the work is durable in git and the tree is still ours; stay put otherwise."
 
 Because staying put leaves HEAD somewhere the caller didn't put it, the failure message has to *say so* — both callers name the branch and note that changes may be staged there. Silence was survivable when the session was returned to its own branch; it isn't now.
 
@@ -132,3 +139,17 @@ FastMCP's `@mcp.tool()` decorator introspects the wrapped function's signature t
 
 Before assuming a killed/crashed `wakil enrich` run — or one that failed `validate_proposal` for a reason unrelated to any of its 4 model calls — always means starting over: check for `EnrichmentCheckpoint` rows for that source first (`sqlite3 <workspace>/wakil.db 'select phase, created_at from enrichment_checkpoints where source_id = N'`). Each of `prepare_enrichment`'s 4 phases (extraction, resolution, revision, synthesis) is checkpointed on clean completion, keyed by `sha256(source.content_hash | context_digest | model)` — a re-invocation with the same key skips straight past any phase with a matching row. Only clean completions are cached, never a model-call failure (extraction/resolution's `ModelContractError` branches skip the save so a transient failure stays retriable), and only `--force` or a successful `apply_enrichment` ever clears them — a declined preview or a failed `validate_proposal` leaves them in place deliberately. `_build_stub_entities` itself is never checkpointed (only its input, `entity_resolutions`, is) — it always re-runs fresh from whatever resolutions end up on the proposal, so it can't drift between a live and a resumed run.
 
+
+### A tolerant read is for display; a decision needs a checked read
+
+**Established:** 2026-08-08 · **Source:** issue #180/#181, the #195 review, `src/wakil/integrations/git.py`'s module docstring
+
+`integrations/git.py` deliberately returns `None`/`[]` when a git read fails, so `wakil status` can never crash on a weird repo. That tolerance is right for rendering and wrong for deciding, and the two had been sharing one helper:
+
+- `changed_files` failing → `ensure_clean_for_branch` reads "tree is clean" → wakil branches and commits **on top of the user's uncommitted work**.
+- `branch_exists` failing → `_resume_source_branch` reads "no such branch" → cuts a **second** branch for a source that already had one, and the DB then disagrees with reality permanently.
+- `resolve_default_branch` failing → `create_branch_from(base=None)` → cuts an "ingest" branch off **whatever unrelated branch is checked out**.
+
+Each of those is a silent wrong action produced by a failed read, not by a wrong answer. The fix is a pair per read: keep the tolerant form for display (`changed_files`, `branch_exists`, `resolve_default_branch`, `inspect_git`) and add a checked sibling that raises (`status_lines`, `require_branch_exists`, `require_default_branch`, `current_branch`). Where a non-zero exit is itself a legitimate answer — "no such ref" — use a tri-state probe (`_run_git_probe`) so "absent" and "couldn't run git" stay distinguishable.
+
+The generalizable rule: **before using a subprocess-wrapper's return value, ask what it returns when the subprocess fails, and whether that value is safe as an answer.** `None`-on-failure is a fine contract, but it means "no information", and code that treats it as "no" will act. This applies equally to `integrations/github.py` (a `gh` auth failure must not read as "there is no PR") and to any future wrapper of an external binary.
