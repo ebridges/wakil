@@ -298,10 +298,12 @@ commit is recorded in the workspace database (`git_changes`). `wakil git
 summary` shows the current branch, pending changes, recent commits, and
 wakil-created branches; `wakil git history <path>` shows one file's history.
 
-Only one wakil process at a time can drive a given checkout. `ingest`/`enrich`
-take an advisory lock (under `.wakil/locks/`) around the whole
-branch → write → commit → return sequence, so two sessions can't interleave
-their checkouts and clobber each other's uncommitted work. A second process
+Only one wakil process at a time can write to a given checkout. Every command
+that writes files or commits — `ingest`, `enrich`, `schema migrate`,
+`entities compile` — takes an advisory lock (under `.wakil/locks/`) around the
+whole write → commit → return sequence, so two sessions can't interleave their
+checkouts and clobber each other's uncommitted work. Read-only commands
+(`search`, `query`, `status`, `sources list`) don't contend. A second process
 fails immediately with the holder's pid rather than waiting; set
 `WAKIL_GIT_LOCK_TIMEOUT=<seconds>` to make it wait instead. Separate
 `git worktree` checkouts of the same repository lock independently, so they
