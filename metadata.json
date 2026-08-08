@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZFAW92VDPZ77BM363WK3P8M",
+  "strategy": "manual-commit",
+  "branch": "feat/source-lifecycle",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/wakil/app/ingest_service.py",
+    "src/wakil/app/workspace_service.py",
+    "src/wakil/mcp/tools.py",
+    "tests/unit/test_migrations.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 58,
+    "cache_creation_tokens": 40736,
+    "cache_read_tokens": 14129989,
+    "output_tokens": 17941,
+    "api_call_count": 29
+  }
+}
