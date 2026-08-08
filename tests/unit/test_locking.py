@@ -20,8 +20,9 @@ def locked_kb(kb_path: Path) -> WorkspaceConfig:
 
 
 def _hold_lock_script(root: Path, ready: Path, release: Path, hard_exit: bool) -> str:
-    """A separate *process* -- flock is per-process, so a thread would not
-    contend with the parent."""
+    """A separate *process*, because only a real child can be SIGKILLed to
+    exercise the kernel-releases-the-lock path. (Note a *thread* would also
+    contend -- `flock` is per open file description, not per process.)"""
     return textwrap.dedent(f"""
         import os, time, pathlib
         sys_path = {sys.path!r}
@@ -55,11 +56,13 @@ def _spawn_holder(tmp_path: Path, root: Path, *, hard_exit: bool = False):
     raise AssertionError("lock holder never acquired the lock")
 
 
-def test_lock_is_reentrant_across_sequential_uses(locked_kb):
+def test_lock_can_be_reacquired_after_clean_release(locked_kb):
+    """Sequential, not reentrant -- `flock` is per open file description, so
+    nesting two `git_lock()` calls in one process denies the inner one."""
     with git_lock(locked_kb):
         pass
     with git_lock(locked_kb):
-        pass  # released cleanly, so a second acquisition just works
+        pass
 
 
 def test_second_process_fails_fast_and_names_the_holder(locked_kb, tmp_path, monkeypatch):
@@ -128,3 +131,41 @@ def test_released_lock_file_does_not_advertise_a_stale_pid(locked_kb):
         path = next((locked_kb.wakil_dir / "locks").glob("git-*.lock"))
         assert str(os.getpid()) in path.read_text(encoding="utf-8")
     assert path.read_text(encoding="utf-8") == ""
+
+
+# --- the wiring, not just the primitive -----------------------------------
+
+
+def test_nesting_denies_itself_and_says_so(locked_kb, monkeypatch):
+    """`flock` is per open file description, so a second acquisition in the
+    same process is denied. The message must not blame 'a leftover
+    wakil mcp serve' -- under `mcp serve` that is the server talking."""
+    monkeypatch.delenv("WAKIL_GIT_LOCK_TIMEOUT", raising=False)
+    with pytest.raises(WorkspaceBusyError) as excinfo, git_lock(locked_kb), git_lock(locked_kb):
+        pytest.fail("git_lock is not reentrant")
+    message = str(excinfo.value)
+    assert "same process" in message
+    assert "mcp serve" not in message
+
+
+def test_an_unusable_timeout_value_is_reported_not_swallowed(locked_kb, tmp_path, monkeypatch):
+    monkeypatch.setenv("WAKIL_GIT_LOCK_TIMEOUT", "30s")
+    proc, release = _spawn_holder(tmp_path, locked_kb.root_path)
+    try:
+        with pytest.raises(WorkspaceBusyError) as excinfo, git_lock(locked_kb):
+            pytest.fail("acquired a lock another process is holding")
+        assert "30s" in str(excinfo.value)
+    finally:
+        release.write_text("go")
+        proc.wait(timeout=10)
+
+
+def test_lock_key_is_independent_of_how_the_path_was_spelled(locked_kb, tmp_path):
+    """Two spellings of one checkout must not hash to two lock files -- that
+    would silently provide no mutual exclusion at all."""
+    from wakil.app.locking import _lock_path
+    from wakil.config.settings import WorkspaceConfig
+
+    unresolved = WorkspaceConfig.load(locked_kb.root_path)
+    unresolved.root_path = Path(str(locked_kb.root_path) + "/./")
+    assert _lock_path(unresolved) == _lock_path(locked_kb)

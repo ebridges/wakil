@@ -14,6 +14,7 @@ CLI's preview-then-confirm gate (docs/adr/0019).
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 
 from wakil.app.git_service import (
@@ -302,7 +303,7 @@ def skills_list(config: WorkspaceConfig) -> list[dict]:
 
 
 @contextlib.contextmanager
-def _git_lock_or_tool_error(config: WorkspaceConfig):
+def _git_lock_or_tool_error(config: WorkspaceConfig) -> Iterator[None]:
     """Serialize the git-owning part of a tool call, reporting a lost race as
     a ToolError the coordinating agent can act on."""
     try:
@@ -421,6 +422,7 @@ def ingest_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str
         except GitServiceError as exc:
             raise ToolError(str(exc)) from exc
 
+        cache.discard(proposal_id)  # past the point of no return
         try:
             assert_landing_intact(config, landing)
         except GitServiceError as exc:
@@ -545,6 +547,9 @@ def enrich_prepare(
 
 
 def enrich_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str) -> dict:
+    # peek, not pop -- see ingest_apply. This proposal cost two model calls
+    # (extraction + resolution), so discarding it on a transient lock failure
+    # is expensive as well as wrong.
     try:
         proposal = cache.peek("enrichment", proposal_id)
     except ProposalNotFoundError as exc:
@@ -564,6 +569,7 @@ def enrich_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str
         except GitServiceError as exc:
             raise ToolError(str(exc)) from exc
 
+        cache.discard(proposal_id)  # past the point of no return
         try:
             # The prepare/apply gap is unbounded (ADR 0018), and
             # `apply_enrichment` rewrites existing notes -- check the tree is

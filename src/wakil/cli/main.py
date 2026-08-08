@@ -1,6 +1,7 @@
 """wakil CLI entry point."""
 
 import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -332,7 +333,7 @@ def query(
 
 
 @contextlib.contextmanager
-def _workspace_git_lock(config: WorkspaceConfig, *, local: bool):
+def _workspace_git_lock(config: WorkspaceConfig, *, local: bool) -> Iterator[None]:
     """Serialize the git-owning part of a command, and turn a lost race into
     a clear message rather than an interleaved checkout. `--local` touches no
     git state, so it doesn't contend."""
@@ -1041,6 +1042,10 @@ def entities_compile(
         raise typer.Exit(code=1)
 
     def _apply_and_commit(target_update: EntityUpdate, commit_label: str) -> None:
+        with _workspace_git_lock(config, local=False):
+            _apply_and_commit_locked(target_update, commit_label)
+
+    def _apply_and_commit_locked(target_update: EntityUpdate, commit_label: str) -> None:
         written = apply_entity_compile(config, target_update)
         if not written:
             console.print(
@@ -1297,19 +1302,20 @@ def schema_migrate(
             if not applied:
                 console.print(f"[dim]Skipped {type_name}.[/dim]")
                 continue
-        written, stale = apply_migrations(config, proposals)
-        for message in stale:
-            console.print(f"[yellow]{message}[/yellow]")
-        console.print(f"Rewrote [bold]{len(written)}[/bold] {type_name} file(s).")
-        if commit and written:
-            try:
-                outcome = commit_change(
-                    config, written, "chore", f"normalize {type_name} frontmatter"
-                )
-            except GitServiceError as exc:
-                console.print(f"[red]Commit failed:[/red] {exc}")
-                raise typer.Exit(code=1) from exc
-            console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]")
+        with _workspace_git_lock(config, local=False):
+            written, stale = apply_migrations(config, proposals)
+            for message in stale:
+                console.print(f"[yellow]{message}[/yellow]")
+            console.print(f"Rewrote [bold]{len(written)}[/bold] {type_name} file(s).")
+            if commit and written:
+                try:
+                    outcome = commit_change(
+                        config, written, "chore", f"normalize {type_name} frontmatter"
+                    )
+                except GitServiceError as exc:
+                    console.print(f"[red]Commit failed:[/red] {exc}")
+                    raise typer.Exit(code=1) from exc
+                console.print(f"Committed [bold]{outcome.commit_sha[:10]}[/bold]")
 
 
 @schema_app.command("validate")
