@@ -602,6 +602,9 @@ class SourceSummary:
     published_at: datetime | None = None
     retrieved_at: datetime | None = None
     content_hash: str | None = None
+    archived_at: datetime | None = None
+    archive_reason: str | None = None
+    superseded_by_id: int | None = None
 
 
 def _summarize_source(row: Source) -> SourceSummary:
@@ -620,11 +623,17 @@ def _summarize_source(row: Source) -> SourceSummary:
         published_at=row.published_at,
         retrieved_at=row.retrieved_at,
         content_hash=row.content_hash,
+        archived_at=row.archived_at,
+        archive_reason=row.archive_reason,
+        superseded_by_id=row.superseded_by_id,
     )
 
 
 def list_sources(
-    config: WorkspaceConfig, status: str | None = None, limit: int | None = 50
+    config: WorkspaceConfig,
+    status: str | None = None,
+    limit: int | None = 50,
+    include_archived: bool = False,
 ) -> list[SourceSummary]:
     """Sources for this workspace, most recent first. `limit=None` returns
     every row -- used for the post-batch audit pass before opening a
@@ -637,6 +646,8 @@ def list_sources(
             .where(Source.workspace_id == workspace_id)
             .order_by(Source.created_at.desc(), Source.id.desc())
         )
+        if not include_archived:
+            stmt = stmt.where(Source.archived_at.is_(None))
         if status is not None:
             stmt = stmt.where(Source.status == status)
         if limit is not None:
@@ -650,6 +661,72 @@ def get_source(config: WorkspaceConfig, source_id: int) -> SourceSummary:
         row = session.get(Source, source_id)
         if row is None or row.workspace_id != workspace_id:
             raise IngestError(f"No source with id {source_id} in this workspace.")
+        return _summarize_source(row)
+
+
+def relink_source(config: WorkspaceConfig, source_id: int, new_path: str) -> SourceSummary:
+    """Point a source at its raw capture's current path.
+
+    `wakil index` notices when a markdown file moves and updates the `notes`
+    table, but nothing propagated that to `sources.raw_text_path`, so a
+    renamed capture left `enrich` failing with "Could not read raw capture
+    <old path>" and no supported way to fix it (#178).
+    """
+    target = config.root_path / new_path
+    if not target.is_file():
+        raise IngestError(f"No file at {new_path} — nothing to relink to.")
+    with open_session(config) as session:
+        workspace_id, _ = _require_workspace_ids(session, config)
+        row = session.get(Source, source_id)
+        if row is None or row.workspace_id != workspace_id:
+            raise IngestError(f"No source with id {source_id} in this workspace.")
+        row.raw_text_path = new_path
+        session.commit()
+        return _summarize_source(row)
+
+
+def archive_source(
+    config: WorkspaceConfig,
+    source_id: int,
+    reason: str | None = None,
+    superseded_by: int | None = None,
+) -> SourceSummary:
+    """Soft-delete a source: keep the row for history, drop it from the
+    default listing (#183).
+
+    Not a real delete -- memories, relationships, and ingest_runs reference
+    it, and "this attempt was abandoned, the redo is source #N" is worth
+    keeping rather than erasing.
+    """
+    with open_session(config) as session:
+        workspace_id, _ = _require_workspace_ids(session, config)
+        row = session.get(Source, source_id)
+        if row is None or row.workspace_id != workspace_id:
+            raise IngestError(f"No source with id {source_id} in this workspace.")
+        if superseded_by is not None:
+            if superseded_by == source_id:
+                raise IngestError("A source cannot supersede itself.")
+            replacement = session.get(Source, superseded_by)
+            if replacement is None or replacement.workspace_id != workspace_id:
+                raise IngestError(f"No source with id {superseded_by} in this workspace.")
+        row.archived_at = utcnow()
+        row.archive_reason = reason
+        row.superseded_by_id = superseded_by
+        session.commit()
+        return _summarize_source(row)
+
+
+def unarchive_source(config: WorkspaceConfig, source_id: int) -> SourceSummary:
+    """Undo `archive_source`. Archiving is a judgement call and reversible."""
+    with open_session(config) as session:
+        workspace_id, _ = _require_workspace_ids(session, config)
+        row = session.get(Source, source_id)
+        if row is None or row.workspace_id != workspace_id:
+            raise IngestError(f"No source with id {source_id} in this workspace.")
+        row.archived_at = None
+        row.archive_reason = None
+        row.superseded_by_id = None
+        session.commit()
         return _summarize_source(row)
 
 

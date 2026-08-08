@@ -32,7 +32,9 @@ from wakil.app.ingest_service import (
     apply_enrichment,
     apply_entity_compile,
     clean_transcript,
+    get_source,
     infer_meeting_date,
+    list_sources,
     parse_json_transcript,
     parse_whisper_transcript,
     plan_abstract_backfill,
@@ -4325,3 +4327,107 @@ def test_a_missing_update_target_is_recorded_not_just_warned(workspace):
         "concepts/only-on-another-branch.md"
     ]
     assert any("skipped" in w for w in proposal.warnings)
+
+
+# --------------------------------------------------------------------------
+# Source lifecycle: relink and archive (issues #178, #183)
+
+
+def test_index_follows_a_renamed_raw_capture(workspace, kb_path, transcript):
+    """Issue #178: `index` noticed the move for the notes table but nothing
+    propagated it to sources.raw_text_path, so `enrich` kept failing with
+    'Could not read raw capture <old path>' and there was no way to fix it."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    old_path = proposal.raw_file.path
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    new_path = "sources/transcripts/2026-07-09-canonical-name.md"
+    (kb_path / new_path).write_bytes((kb_path / old_path).read_bytes())
+    (kb_path / old_path).unlink()
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    assert get_source(workspace, source_id).raw_text_path == new_path
+
+
+def test_index_does_not_guess_when_the_file_was_edited_as_well_as_moved(
+    workspace, kb_path, transcript
+):
+    """Content-identical only: repointing a source at a file that merely
+    appeared is worse than leaving it stale."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    old_path = proposal.raw_file.path
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    new_path = "sources/transcripts/2026-07-09-edited.md"
+    (kb_path / new_path).write_text(
+        (kb_path / old_path).read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8"
+    )
+    (kb_path / old_path).unlink()
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    assert get_source(workspace, source_id).raw_text_path == old_path  # unchanged, not guessed
+
+
+def test_relink_points_a_source_at_its_current_path(workspace, kb_path, transcript):
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+
+    moved = "sources/transcripts/2026-07-09-hand-fixed.md"
+    (kb_path / moved).write_text("---\ntype: source\n---\n\n# Fixed\n", encoding="utf-8")
+
+    assert relink_source(workspace, source_id, moved).raw_text_path == moved
+    with pytest.raises(IngestError, match="No file at"):
+        relink_source(workspace, source_id, "sources/transcripts/nope.md")
+
+
+def test_archive_hides_a_source_from_the_default_listing(workspace, transcript, kb_path):
+    from wakil.app.ingest_service import archive_source, unarchive_source
+
+    first = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    dead_id = apply_capture(workspace, first).source_id
+    other = kb_path / "second.txt"
+    other.write_text("A different conversation.\n", encoding="utf-8")
+    second = prepare_capture(workspace, "transcript", _capture_client(), file=other)
+    live_id = apply_capture(workspace, second).source_id
+
+    archived = archive_source(
+        workspace, dead_id, reason="corrupted content committed", superseded_by=live_id
+    )
+    assert archived.archived_at is not None
+    assert archived.superseded_by_id == live_id
+
+    assert [s.id for s in list_sources(workspace)] == [live_id]
+    assert dead_id in [s.id for s in list_sources(workspace, include_archived=True)]
+    # `show` still works -- the row is history, not deleted.
+    assert get_source(workspace, dead_id).archive_reason == "corrupted content committed"
+
+    assert unarchive_source(workspace, dead_id).archived_at is None
+    assert dead_id in [s.id for s in list_sources(workspace)]
+
+
+def test_archive_rejects_a_self_reference_and_an_unknown_superseder(workspace, transcript):
+    from wakil.app.ingest_service import archive_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+
+    with pytest.raises(IngestError, match="cannot supersede itself"):
+        archive_source(workspace, source_id, superseded_by=source_id)
+    with pytest.raises(IngestError, match="No source with id"):
+        archive_source(workspace, source_id, superseded_by=9999)

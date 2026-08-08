@@ -790,6 +790,10 @@ def sources_list(
         int | None,
         typer.Option("--limit", help="Max rows to show (default 50; pass 0 for no limit)."),
     ] = 50,
+    include_archived: Annotated[
+        bool,
+        typer.Option("--include-archived", help="Also show archived sources."),
+    ] = False,
 ) -> None:
     """List captured sources for this workspace, most recent first."""
     from wakil.app.ingest_service import IngestError, list_sources
@@ -798,7 +802,9 @@ def sources_list(
     config = WorkspaceConfig.load(root)
     effective_limit = None if limit is not None and limit <= 0 else limit
     try:
-        sources = list_sources(config, status=status, limit=effective_limit)
+        sources = list_sources(
+            config, status=status, limit=effective_limit, include_archived=include_archived
+        )
     except IngestError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
@@ -821,6 +827,76 @@ def sources_show(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
     print_source_detail(source)
+
+
+@sources_app.command("relink")
+def sources_relink(
+    ctx: typer.Context,
+    source_id: Annotated[int, typer.Argument(help="Source id to relink.")],
+    path: Annotated[str, typer.Argument(help="New workspace-relative path of the raw capture.")],
+) -> None:
+    """Point a source at its raw capture's current path after a rename.
+
+    `wakil index` follows a plain move automatically; this is the escape
+    hatch for when the file was edited as well as moved, so the content hash
+    no longer matches and the move can't be inferred safely.
+    """
+    from wakil.app.ingest_service import IngestError, relink_source
+
+    config = WorkspaceConfig.load(_resolve_workspace(ctx))
+    try:
+        source = relink_source(config, source_id, path)
+    except IngestError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print(f"Source [bold]#{source.id}[/bold] now points at {source.raw_text_path}")
+
+
+@sources_app.command("archive")
+def sources_archive(
+    ctx: typer.Context,
+    source_id: Annotated[int, typer.Argument(help="Source id to archive.")],
+    reason: Annotated[
+        str | None, typer.Option("--reason", help="Why this source is being retired.")
+    ] = None,
+    superseded_by: Annotated[
+        int | None,
+        typer.Option("--superseded-by", help="Source id that replaces this one."),
+    ] = None,
+) -> None:
+    """Retire a source without deleting it.
+
+    The row stays (memories, relationships, and ingest runs reference it) but
+    drops out of `wakil sources list`, so an abandoned capture stops looking
+    like one that still needs attention.
+    """
+    from wakil.app.ingest_service import IngestError, archive_source
+
+    config = WorkspaceConfig.load(_resolve_workspace(ctx))
+    try:
+        source = archive_source(config, source_id, reason=reason, superseded_by=superseded_by)
+    except IngestError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    detail = f", superseded by #{source.superseded_by_id}" if source.superseded_by_id else ""
+    console.print(f"Archived source [bold]#{source.id}[/bold]{detail}.")
+
+
+@sources_app.command("unarchive")
+def sources_unarchive(
+    ctx: typer.Context,
+    source_id: Annotated[int, typer.Argument(help="Source id to restore.")],
+) -> None:
+    """Undo `wakil sources archive`."""
+    from wakil.app.ingest_service import IngestError, unarchive_source
+
+    config = WorkspaceConfig.load(_resolve_workspace(ctx))
+    try:
+        source = unarchive_source(config, source_id)
+    except IngestError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print(f"Restored source [bold]#{source.id}[/bold].")
 
 
 @sources_app.command("backfill-abstract")

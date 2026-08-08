@@ -28,10 +28,13 @@ from wakil.app.ingest_service import (
     IngestError,
     apply_capture,
     apply_enrichment,
+    archive_source,
     get_source,
     list_sources,
     prepare_capture,
     prepare_enrichment,
+    relink_source,
+    unarchive_source,
     validate_proposal,
 )
 from wakil.app.memory_service import MemoryError, get_memory, list_memories
@@ -227,6 +230,9 @@ def relationships(
 def _source_dict(source) -> dict:
     return {
         "id": source.id,
+        "archived_at": source.archived_at.isoformat() if source.archived_at else None,
+        "archive_reason": source.archive_reason,
+        "superseded_by_id": source.superseded_by_id,
         "source_type": source.source_type,
         "title": source.title,
         "origin": source.origin,
@@ -239,9 +245,12 @@ def _source_dict(source) -> dict:
 
 
 def sources_list(
-    config: WorkspaceConfig, status: str | None = None, limit: int | None = 50
+    config: WorkspaceConfig,
+    status: str | None = None,
+    limit: int | None = 50,
+    include_archived: bool = False,
 ) -> list[dict]:
-    rows = list_sources(config, status=status, limit=limit)
+    rows = list_sources(config, status=status, limit=limit, include_archived=include_archived)
     return [_source_dict(row) for row in rows]
 
 
@@ -338,6 +347,37 @@ def _refresh_qmd(config: WorkspaceConfig) -> None:
     for result in refresh_index(config):
         if not result.success:
             return
+
+
+def sources_relink(config: WorkspaceConfig, source_id: int, path: str) -> dict:
+    """Point a source at its raw capture's current path after a rename."""
+    try:
+        return _source_dict(relink_source(config, source_id, path))
+    except IngestError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+def sources_archive(
+    config: WorkspaceConfig,
+    source_id: int,
+    reason: str | None = None,
+    superseded_by: int | None = None,
+) -> dict:
+    """Retire a source without deleting it (soft delete)."""
+    try:
+        return _source_dict(
+            archive_source(config, source_id, reason=reason, superseded_by=superseded_by)
+        )
+    except IngestError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+def sources_unarchive(config: WorkspaceConfig, source_id: int) -> dict:
+    """Undo `sources_archive`."""
+    try:
+        return _source_dict(unarchive_source(config, source_id))
+    except IngestError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def ingest_prepare(

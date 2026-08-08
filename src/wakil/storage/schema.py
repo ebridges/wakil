@@ -60,6 +60,11 @@ class Source(Base):
     metadata_json: Mapped[str | None] = mapped_column(Text, default=None)
     git_branch: Mapped[str | None] = mapped_column(Text, default=None)
     git_pr_url: Mapped[str | None] = mapped_column(Text, default=None)
+    # Soft delete (#183). The row stays -- memories, relationships, and
+    # ingest_runs reference it -- but it drops out of the default listing.
+    archived_at: Mapped[datetime | None] = mapped_column(default=None)
+    archive_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    superseded_by_id: Mapped[int | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
