@@ -540,6 +540,18 @@ def print_sources(sources: list[SourceSummary]) -> None:
 
 
 def print_source_detail(source: SourceSummary) -> None:
+    if source.archived_at:
+        # A banner rather than a table row: an archived source is not a
+        # normal one, and the point of #183 is that this must be impossible
+        # to miss when you go looking at a row that stopped making sense.
+        detail = f", superseded by #{source.superseded_by_id}" if source.superseded_by_id else ""
+        reason = f"\n{source.archive_reason}" if source.archive_reason else ""
+        console.print(
+            Panel(
+                f"[bold]Archived[/bold] {source.archived_at:%Y-%m-%d}{detail}{reason}",
+                border_style="yellow",
+            )
+        )
     table = Table(title=f"Source #{source.id}", show_header=False)
     table.add_column("Field", style="bold cyan")
     table.add_column("Value")

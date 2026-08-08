@@ -103,7 +103,7 @@ any of them. All commands accept the global `-w`/`--workspace` option; see
 | `wakil query <question>` | [Grounded, cited answer](#query) from a model over search results + memory. |
 | `wakil ingest transcript\|article\|text <path>` | [Step 1: capture](#ingest) a raw source. |
 | `wakil enrich <source-id>` | [Step 2: analyze](#ingest) a capture and link it into the KB. |
-| `wakil sources list\|show\|backfill-abstract` | Inspect captured sources; backfill title/abstract on old ones. |
+| `wakil sources list\|show\|relink\|archive\|unarchive\|backfill-abstract` | Inspect and maintain captured sources. |
 | `wakil entities compile <slug>` | [Re-synthesize](#entities-compiled-pages) an entity page's Compiled Truth from its Timeline. |
 | `wakil schema migrate\|validate\|list\|which` | [Entity frontmatter schema](#schema-tools) tools. |
 | `wakil relationships <note-path>` | Walk the [note/memory relationship graph](#relationships) from an anchor note. |
@@ -322,6 +322,21 @@ Commits follow the wakil conventions (`🧠 wakil ingest: add ...`) and every
 commit is recorded in the workspace database (`git_changes`). `wakil git
 summary` shows the current branch, pending changes, recent commits, and
 wakil-created branches; `wakil git history <path>` shows one file's history.
+
+### Maintaining sources
+
+`wakil index` follows a raw capture that was moved on disk, repointing the
+source at its new path automatically when the content is unchanged. If the
+file was edited as well as moved, the move can't be inferred safely — use
+`wakil sources relink <id> <path>` rather than leaving `enrich` broken.
+
+`wakil sources archive <id> [--reason TEXT] [--superseded-by ID]` retires a
+source without deleting it: the row, its memories, and its history stay, but
+it drops out of `wakil sources list` (pass `--include-archived` to see it) and
+`wakil sources show` renders an "archived, superseded by #N" banner. Use it
+when a capture went wrong and was redone under a new id, so an abandoned
+attempt stops looking like one that still needs attention. `unarchive`
+reverses it.
 
 ## Entities: compiled pages
 

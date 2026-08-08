@@ -101,9 +101,13 @@ def _register_read_tools(mcp: FastMCP, config: WorkspaceConfig) -> None:
         )
 
     @mcp.tool()
-    def sources_list(status: str | None = None, limit: int | None = 50) -> list[dict]:
+    def sources_list(
+        status: str | None = None, limit: int | None = 50, include_archived: bool = False
+    ) -> list[dict]:
         """List captured sources, most recent first."""
-        return tools.sources_list(config, status=status, limit=limit)
+        return tools.sources_list(
+            config, status=status, limit=limit, include_archived=include_archived
+        )
 
     @mcp.tool()
     def sources_show(source_id: int) -> dict:
@@ -129,6 +133,26 @@ def _register_git_tools(mcp: FastMCP, config: WorkspaceConfig) -> None:
 
 
 def _register_write_tools(mcp: FastMCP, config: WorkspaceConfig, cache: ProposalCache) -> None:
+    @mcp.tool()
+    def sources_relink(source_id: int, path: str) -> dict:
+        """Point a source at its raw capture's current path after a rename."""
+        return tools.sources_relink(config, source_id, path)
+
+    @mcp.tool()
+    def sources_archive(
+        source_id: int, reason: str | None = None, superseded_by: int | None = None
+    ) -> dict:
+        """Retire a source without deleting it: it drops out of the default
+        listing but its row, memories, and history are kept."""
+        return tools.sources_archive(
+            config, source_id, reason=reason, superseded_by=superseded_by
+        )
+
+    @mcp.tool()
+    def sources_unarchive(source_id: int) -> dict:
+        """Undo sources_archive."""
+        return tools.sources_unarchive(config, source_id)
+
     @mcp.tool()
     def ingest_prepare(
         kind: str, file_path: str | None = None, url: str | None = None, context: str | None = None
