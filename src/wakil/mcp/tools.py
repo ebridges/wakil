@@ -13,6 +13,8 @@ CLI's preview-then-confirm gate (docs/adr/0019).
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 
 from wakil.app.git_service import (
@@ -34,6 +36,7 @@ from wakil.app.ingest_service import (
     prepare_enrichment,
     validate_proposal,
 )
+from wakil.app.locking import WorkspaceBusyError, git_lock
 from wakil.app.memory_service import MemoryError, get_memory, list_memories
 from wakil.app.qmd_service import refresh_index
 from wakil.app.query_service import run_query as _run_query
@@ -297,6 +300,17 @@ def skills_list(config: WorkspaceConfig) -> list[dict]:
 # Write tools: ingest (prepare/apply)
 
 
+@contextlib.contextmanager
+def _git_lock_or_tool_error(config: WorkspaceConfig) -> Iterator[None]:
+    """Serialize the git-owning part of a tool call, reporting a lost race as
+    a ToolError the coordinating agent can act on."""
+    try:
+        with git_lock(config):
+            yield
+    except WorkspaceBusyError as exc:
+        raise ToolError(str(exc)) from exc
+
+
 def _land(
     config: WorkspaceConfig,
     landing: LandingContext,
@@ -388,33 +402,39 @@ def ingest_prepare(
 
 
 def ingest_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str) -> dict:
+    # peek, not pop: everything up to `apply_capture` below is retryable
+    # (lock contention, a tree the human dirtied during review, branch
+    # resolution), and consuming the proposal before those would leave the
+    # client with retry advice it can no longer act on.
     try:
-        proposal = cache.pop("capture", proposal_id)
+        proposal = cache.peek("capture", proposal_id)
     except ProposalNotFoundError as exc:
         raise ToolError(str(exc)) from exc
 
-    try:
-        landing = prepare_landing(config, source_id=None, title=proposal.title, local=False)
-    except GitServiceError as exc:
-        raise ToolError(str(exc)) from exc
+    with _git_lock_or_tool_error(config):
+        try:
+            landing = prepare_landing(config, source_id=None, title=proposal.title, local=False)
+        except GitServiceError as exc:
+            raise ToolError(str(exc)) from exc
 
-    try:
-        result = apply_capture(config, proposal)
-    except IngestError as exc:
-        abandon_landing(config, landing)
-        raise ToolError(str(exc)) from exc
+        cache.discard(proposal_id)  # past the point of no return
+        try:
+            result = apply_capture(config, proposal)
+        except IngestError as exc:
+            abandon_landing(config, landing)
+            raise ToolError(str(exc)) from exc
 
-    outcome = _land(
-        config,
-        landing,
-        source_id=result.source_id,
-        files=[result.raw_file_path],
-        title=proposal.title,
-        summary=None,
-        ingest_run_id=result.ingest_run_id,
-        kind="source",
-        phase="capture",
-    )
+        outcome = _land(
+            config,
+            landing,
+            source_id=result.source_id,
+            files=[result.raw_file_path],
+            title=proposal.title,
+            summary=None,
+            ingest_run_id=result.ingest_run_id,
+            kind="source",
+            phase="capture",
+        )
     _refresh_qmd(config)
     return {
         "source_id": result.source_id,
@@ -444,22 +464,34 @@ def enrich_prepare(
     force: bool = False,
 ) -> dict:
     client = _require_client()
-    try:
-        landing = prepare_landing(
-            config, source_id=source_id, title=f"source-{source_id}", local=False
-        )
-    except GitServiceError as exc:
-        raise ToolError(str(exc)) from exc
+    # Prepare takes and releases the lock on its own. Holding it until
+    # `enrich_apply` would mean any proposal the client never applies -- a
+    # declined review, a dropped session, the 1h ProposalCache TTL expiring --
+    # wedges the workspace for every other caller. `prepare_landing` is
+    # idempotent (it resumes `Source.git_branch`), so apply can simply
+    # re-acquire and re-resolve.
+    with _git_lock_or_tool_error(config):
+        try:
+            landing = prepare_landing(
+                config, source_id=source_id, title=f"source-{source_id}", local=False
+            )
+        except GitServiceError as exc:
+            raise ToolError(str(exc)) from exc
 
-    try:
-        proposal = prepare_enrichment(config, source_id, client, context=context, force=force)
-    except (IngestError, ModelError) as exc:
+        try:
+            proposal = prepare_enrichment(config, source_id, client, context=context, force=force)
+        except (IngestError, ModelError) as exc:
+            abandon_landing(config, landing)
+            raise ToolError(str(exc)) from exc
+
+        issues = validate_proposal(proposal, kb_root=config.root_path)
+        # Either way the working tree goes back to the default branch before
+        # control returns to the client -- leaving it parked on an ingest
+        # branch across an unbounded gap is what made a later, unrelated
+        # command operate on the wrong branch (#181).
         abandon_landing(config, landing)
-        raise ToolError(str(exc)) from exc
 
-    issues = validate_proposal(proposal, kb_root=config.root_path)
     if issues:
-        abandon_landing(config, landing)
         return {
             "proposal_id": None,
             "issues": [str(issue) for issue in issues],
@@ -472,7 +504,7 @@ def enrich_prepare(
             "warnings": proposal.warnings,
         }
 
-    proposal_id = cache.put("enrichment", (landing, proposal))
+    proposal_id = cache.put("enrichment", proposal)
     return {
         "proposal_id": proposal_id,
         "issues": [],
@@ -497,40 +529,58 @@ def enrich_prepare(
 
 
 def enrich_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str) -> dict:
+    # peek, not pop -- see ingest_apply. This proposal cost two model calls
+    # (extraction + resolution), so discarding it on a transient lock failure
+    # is expensive as well as wrong.
     try:
-        landing, proposal = cache.pop("enrichment", proposal_id)
+        proposal = cache.peek("enrichment", proposal_id)
     except ProposalNotFoundError as exc:
         raise ToolError(str(exc)) from exc
 
-    try:
-        result = apply_enrichment(config, proposal)
-    except IngestError as exc:
-        abandon_landing(config, landing)
-        raise ToolError(str(exc)) from exc
+    with _git_lock_or_tool_error(config):
+        # Re-resolve rather than replaying a LandingContext built in an
+        # earlier tool call: the branch may have been merged and deleted, or
+        # HEAD moved, in the interval.
+        try:
+            landing = prepare_landing(
+                config,
+                source_id=proposal.source_id,
+                title=f"source-{proposal.source_id}",
+                local=False,
+            )
+        except GitServiceError as exc:
+            raise ToolError(str(exc)) from exc
 
-    if not result.files_written:
-        abandon_landing(config, landing)
-        return {
-            "files_written": [],
-            "memories_created": 0,
-            "relationships_created": 0,
-            "stale_updates_skipped": result.stale_updates_skipped,
-            "branch": None,
-            "commit_sha": None,
-            "pr_url": None,
-        }
+        cache.discard(proposal_id)  # past the point of no return
+        try:
+            result = apply_enrichment(config, proposal)
+        except IngestError as exc:
+            abandon_landing(config, landing)
+            raise ToolError(str(exc)) from exc
 
-    outcome = _land(
-        config,
-        landing,
-        source_id=proposal.source_id,
-        files=result.files_written,
-        title=proposal.title,
-        summary=proposal.summary or None,
-        ingest_run_id=result.ingest_run_id,
-        kind="ingest",
-        phase="enrichment",
-    )
+        if not result.files_written:
+            abandon_landing(config, landing)
+            return {
+                "files_written": [],
+                "memories_created": 0,
+                "relationships_created": 0,
+                "stale_updates_skipped": result.stale_updates_skipped,
+                "branch": None,
+                "commit_sha": None,
+                "pr_url": None,
+            }
+
+        outcome = _land(
+            config,
+            landing,
+            source_id=proposal.source_id,
+            files=result.files_written,
+            title=proposal.title,
+            summary=proposal.summary or None,
+            ingest_run_id=result.ingest_run_id,
+            kind="ingest",
+            phase="enrichment",
+        )
     _refresh_qmd(config)
     return {
         "files_written": result.files_written,

@@ -420,3 +420,15 @@ Two things made it hard to see: the call site *looks* correct because it has the
 Fixed by passing `--head`/`--base` explicitly, and by reconciling PR existence with `gh pr list --head <branch>` before creating (a PR can exist on GitHub without being recorded in `sources.git_pr_url`, and discovering that at create time was a hard failure). Related: `create_pull_request` returned `lines[-1]` of stdout, i.e. `""` on empty output — falsy, so it was stored as the source's PR URL and then read back as "no PR yet", opening a second one on the next run; it now requires a URL-shaped line.
 
 This is the same family as the `gh release create` entry above: **every `gh` subcommand fills unspecified context from ambient state (cwd's repo, cwd's branch) rather than erroring.** When wakil already knows the value, pass it explicitly — a `gh` call that "works" in the happy path may be silently reading the environment for the argument you thought you supplied.
+
+### An orphaned `wakil mcp serve` is enough to reproduce "another session is editing my files"
+
+**Date:** 2026-08-07 · **Source:** issue #182 (three corroborating sessions, kb-professional), `src/wakil/app/locking.py`, `docs/adr/0021`
+
+Symptoms reported across three sessions: uncommitted edits coming back as different content than what was just written; `git reflog` showing `checkout: moving from <branch-a> to <branch-b>` for checkouts nobody issued; commits appearing on the current branch with messages describing work the operator was independently in the middle of; and the same source captured twice, onto two branches, eight minutes apart. The natural reading is "a second human/agent session is sharing this working directory" — and that *was* true in the first report.
+
+But the third session found the actual mechanism: `ps aux | grep 'wakil.*mcp serve'` showed **two pairs (four processes) of `wakil mcp serve` already running against that workspace root**, left over from earlier sessions that never shut them down, independent of any command the operator had issued. Killing them stopped the unattributed branch-checkout behaviour for the rest of the session. An MCP server is a long-lived process that drives git on its own — so a single leftover one reproduces the entire "concurrent session" symptom set with no second session involved at all.
+
+Worth knowing because the symptom points somewhere misleading: the operator's first hypothesis (and the issue's original title) was about two *sessions*, which suggests scheduling discipline as the fix. The actual fix was `kill`ing forgotten background servers, and the durable fix is the advisory lock (ADR 0021), which now names the holding pid and argv in its error so this is diagnosable in one step rather than via `ps`.
+
+Two adjacent facts that make this harder to spot: `wakil mcp serve` has no "which workspace am I serving" indicator in `wakil status`, and a stale server's writes look exactly like wakil's own (correct commit conventions, correct branch naming), so nothing about the resulting history reads as foreign.
