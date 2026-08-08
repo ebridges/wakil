@@ -4431,3 +4431,48 @@ def test_archive_rejects_a_self_reference_and_an_unknown_superseder(workspace, t
         archive_source(workspace, source_id, superseded_by=source_id)
     with pytest.raises(IngestError, match="No source with id"):
         archive_source(workspace, source_id, superseded_by=9999)
+
+
+# --------------------------------------------------------------------------
+# Source truncation is no longer silent (issue #176)
+
+
+def test_a_short_source_is_untouched():
+    from wakil.app.ingest_service import _truncate_source
+
+    proposal = EnrichmentProposal(source_id=1, title="Short")
+    assert _truncate_source("brief text", proposal) == "brief text"
+    assert proposal.warnings == []
+
+
+def test_a_truncated_source_warns_the_operator_and_tells_the_model():
+    """Issue #176's root cause: a ~28-minute transcript exceeded
+    MAX_SOURCE_CHARS and was silently cut, so the model correctly reported
+    that content was 'not present in the transcript' -- a true statement
+    about the input it received, read as a false claim about the recording."""
+    from wakil.app.ingest_service import MAX_SOURCE_CHARS, _truncate_source
+
+    proposal = EnrichmentProposal(source_id=1, title="Long")
+    long_text = "x" * (MAX_SOURCE_CHARS * 2)
+
+    result = _truncate_source(long_text, proposal)
+
+    # The model is told its view is partial, so it can't reason about absence.
+    assert "SOURCE TRUNCATED" in result
+    assert "Do not state or imply that anything is absent" in result
+    assert result.startswith("x" * 100)
+    # And the operator can see it happened, with the scale of the loss.
+    assert len(proposal.warnings) == 1
+    assert "truncated" in proposal.warnings[0]
+    assert f"{MAX_SOURCE_CHARS:,}" in proposal.warnings[0]
+
+
+def test_truncation_notice_is_appended_not_substituted():
+    """The budget still has to be respected -- the notice is extra, and the
+    analyzed prefix must be exactly what it was before."""
+    from wakil.app.ingest_service import MAX_SOURCE_CHARS, _truncate_source
+
+    proposal = EnrichmentProposal(source_id=1, title="Long")
+    long_text = "abcdefghij" * (MAX_SOURCE_CHARS // 5)
+    result = _truncate_source(long_text, proposal)
+    assert result[:MAX_SOURCE_CHARS] == long_text[:MAX_SOURCE_CHARS]
