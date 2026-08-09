@@ -5228,3 +5228,38 @@ def test_truncation_notice_is_appended_not_substituted():
     long_text = "abcdefghij" * (MAX_SOURCE_CHARS // 5)
     result = _truncate_source(long_text, proposal)
     assert result[:MAX_SOURCE_CHARS] == long_text[:MAX_SOURCE_CHARS]
+
+
+def test_capture_metadata_truncation_is_not_silent_either(workspace, kb_path, monkeypatch):
+    """The same cut, one call site away, and this one is durable: the abstract
+    the capture-metadata call produces is written into the source file's
+    frontmatter and stays there. #176 fixed only the enrichment path."""
+    from wakil.app.ingest_service import MAX_SOURCE_CHARS
+
+    long_input = kb_path / "2026-07-09-long-meeting.txt"
+    long_input.write_text("Jane: " + "words and more words. " * 3000, encoding="utf-8")
+    assert len(long_input.read_text(encoding="utf-8")) > MAX_SOURCE_CHARS
+
+    seen: list[str] = []
+    real_prompt = ingest_service.build_capture_metadata_prompt
+
+    def _capture_prompt(source_type, origin, text, today, context=None):
+        seen.append(text)
+        return real_prompt(source_type, origin, text, today, context=context)
+
+    monkeypatch.setattr(ingest_service, "build_capture_metadata_prompt", _capture_prompt)
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=long_input)
+
+    # The model is told its view is partial, exactly as on the enrichment path.
+    assert "SOURCE TRUNCATED" in seen[0]
+    assert seen[0][:MAX_SOURCE_CHARS] == long_input.read_text(encoding="utf-8")[:MAX_SOURCE_CHARS]
+    # And the operator sees it before confirming a capture whose frontmatter
+    # abstract describes only part of the file.
+    assert len(proposal.warnings) == 1
+    assert "frontmatter" in proposal.warnings[0]
+    assert f"{MAX_SOURCE_CHARS:,}" in proposal.warnings[0]
+
+
+def test_a_short_capture_produces_no_truncation_warning(workspace, kb_path, transcript):
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    assert proposal.warnings == []

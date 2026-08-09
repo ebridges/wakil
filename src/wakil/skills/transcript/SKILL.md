@@ -21,12 +21,15 @@ changes.
   foregrounds. A memory or decision that lands the obligation on only one
   side when the transcript used joint-pronoun language is worth a second
   read before writing it down.
-- Never claim something is absent from the transcript. You may be seeing
-  only part of it — long sources are truncated before they reach you, and
-  when that happens you are told so explicitly. A summary that says "the
-  recording's abstract mentions X, but that segment is not present here" is
-  unsupportable and has been wrong in practice about content that was in the
-  file but out of view. Describe what the transcript does cover; if it ends
+- Scope absence claims to what you actually read. You may be seeing only part
+  of the transcript — long sources are truncated before they reach you, and
+  when that happens you are told so explicitly. "The recording's abstract
+  mentions X, but that segment is not present here" is unsupportable as
+  written, and has been wrong in practice about content that was in the file
+  but out of view. This does not forbid recording a gap: where a rule below
+  asks you to (an agenda item the transcript didn't settle, an open thread),
+  say it as a limit on what you read — "not addressed in the portion
+  provided" — never as a property of the recording. If the transcript ends
   mid-discussion, say that it ends mid-discussion and stop there.
 - Don't invent illustrative detail to make a real gap concrete. Naming a gap
   ("the other participant's audio failed throughout") is useful; supplying
@@ -56,9 +59,11 @@ changes.
   questions pulled in via `@file:`, walk each item it raises and check it
   against what the transcript actually shows: state plainly whether it was
   addressed — with the outcome, cited the same way as any other claim
-  (`(reported: <speaker>)`, `(self-reported)`) — or say explicitly that it's
-  still open when the transcript never touched it. Silence on an agenda item
-  is not the same as confirming it was addressed. When the document itself
+  (`(reported: <speaker>)`, `(self-reported)`) — or say explicitly that the
+  portion you were given never touched it, so it's still open. Silence on an
+  agenda item is not the same as confirming it was addressed; it is also not
+  proof the recording never covered it, which is why the wording is about what
+  you read (see the absence-claims rule above). When the document itself
   has a page in the existing related notes, link to it with a [[wikilink]]
   the same as any other entity match.
 - Follow the workspace's SCHEMA.md guidance for the proposed note's

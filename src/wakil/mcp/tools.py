@@ -459,6 +459,10 @@ def ingest_prepare(
         # Non-null means the colliding file is another source's raw capture, so
         # apply refuses unconditionally — not something --overwrite would clear.
         "collision_source_id": proposal.collision_source_id,
+        # An authored value wakil declined to use, or a truncation notice: the
+        # abstract about to be written into this file's frontmatter may
+        # describe only the part of the source that was read.
+        "warnings": proposal.warnings,
     }
 
 

@@ -200,6 +200,8 @@ class CaptureProposal:
     # would end up sharing one `raw_text_path` — see `apply_capture`.
     collision_source_id: int | None = None
     overwrite: bool = False
+    # Shown in the capture preview, same as EnrichmentProposal.warnings.
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -227,6 +229,7 @@ class AbstractBackfillItem:
     old_title: str | None
     title: str
     abstract: str
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -471,13 +474,15 @@ def prepare_capture(
     # An authored title/abstract is the user's own, so the model's doesn't
     # replace it (working agreement item 12) -- and when the file supplies
     # both, the capture-time call (ADR 0010) has nothing left to contribute,
-    # so don't pay for it at all.
+    # so don't pay for it at all (and nothing is truncated, so no notice).
     authored_title = _authored_text(proposal.authored_metadata, "title", "name")
     authored_abstract = _authored_text(proposal.authored_metadata, "abstract")
     if authored_title and authored_abstract:
         proposal.title, proposal.abstract = authored_title, authored_abstract
     else:
-        metadata = _generate_capture_metadata(config, client, kind, origin, text, context)
+        metadata = _generate_capture_metadata(
+            config, client, kind, origin, text, context, proposal.warnings
+        )
         proposal.title = authored_title or metadata.title
         # Keep the DB row and the file's frontmatter agreeing: `_build_raw_file`
         # would otherwise write the authored abstract while `Source` kept the
@@ -524,12 +529,30 @@ def _generate_capture_metadata(
     origin: str,
     text: str,
     context: str | None,
+    warnings: list[str],
 ) -> CaptureMetadata:
     """The one model call capture makes (docs/adr/0010): title + abstract,
-    grounded in the captured text itself rather than just the filename."""
+    grounded in the captured text itself rather than just the filename.
+
+    This cut used to be a bare `text[:MAX_SOURCE_CHARS]`, which is #176's bug
+    in a second place — and a worse place, because the abstract this call
+    produces is written into the source file's frontmatter and stays there.
+    An abstract of the first 24k characters of a two-hour transcript, filed as
+    an abstract of the transcript, is wrong in the knowledge base rather than
+    just wrong in one run's output.
+    """
     today = workspace_today(config)
+    source_text, warning = _cut_to_budget(
+        text,
+        unanalyzed=(
+            "The title and abstract written into this capture's frontmatter describe "
+            "only the part that was read."
+        ),
+    )
+    if warning is not None:
+        warnings.append(warning)
     prompt = build_capture_metadata_prompt(
-        source_type, origin, text[:MAX_SOURCE_CHARS], today, context=context
+        source_type, origin, source_text, today, context=context
     )
     try:
         return complete_with_contract(
@@ -674,6 +697,7 @@ def plan_abstract_backfill(
                 text = _load_source_text(config, source)
             except IngestError:
                 continue
+            warnings: list[str] = []
             generated = _generate_capture_metadata(
                 config,
                 client,
@@ -681,6 +705,7 @@ def plan_abstract_backfill(
                 source.origin or "",
                 text,
                 metadata.get("context"),
+                warnings,
             )
             items.append(
                 AbstractBackfillItem(
@@ -689,6 +714,7 @@ def plan_abstract_backfill(
                     old_title=source.title,
                     title=generated.title,
                     abstract=generated.abstract,
+                    warnings=warnings,
                 )
             )
     return items
@@ -1195,25 +1221,36 @@ _TRUNCATION_NOTICE = (
 )
 
 
-def _truncate_source(text: str, proposal: "EnrichmentProposal") -> str:
+def _cut_to_budget(text: str, *, unanalyzed: str) -> tuple[str, str | None]:
     """Cut the source to the prompt budget, saying so in both directions.
 
     The cut itself is unchanged; what's new is that it stops being silent.
     The model is told its view is partial so it doesn't reason about absence,
-    and the operator gets a warning on the proposal so a short summary of a
-    long recording is explicable rather than mysterious.
+    and the caller gets a warning to show the operator so a short summary of a
+    long recording is explicable rather than mysterious. `unanalyzed` names
+    what the operator loses, which differs per call site.
     """
     if len(text) <= MAX_SOURCE_CHARS:
-        return text
-    proposal.warnings.append(
+        return text, None
+    warning = (
         f"Source truncated to {MAX_SOURCE_CHARS:,} of {len(text):,} characters for the "
         f"model — roughly the last {100 - int(100 * MAX_SOURCE_CHARS / len(text))}% of it "
-        f"was not analyzed. Anything the enrichment says about the end of this source is "
-        f"unsupported."
+        f"was not read. {unanalyzed}"
     )
-    return text[:MAX_SOURCE_CHARS] + _TRUNCATION_NOTICE.format(
-        shown=MAX_SOURCE_CHARS, total=len(text)
+    notice = _TRUNCATION_NOTICE.format(shown=MAX_SOURCE_CHARS, total=len(text))
+    return text[:MAX_SOURCE_CHARS] + notice, warning
+
+
+def _truncate_source(text: str, proposal: "EnrichmentProposal") -> str:
+    truncated, warning = _cut_to_budget(
+        text,
+        unanalyzed=(
+            "Anything the enrichment says about the end of this source is unsupported."
+        ),
     )
+    if warning is not None:
+        proposal.warnings.append(warning)
+    return truncated
 
 
 def _populate_proposal_from_models(

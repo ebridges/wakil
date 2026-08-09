@@ -54,8 +54,9 @@ is the single worst failure mode this skill exists to prevent.
       forward every attachment/URL reference the same way — see "Attachment
       and raw URL fidelity" below.
 - [ ] Step 5: **Scan your draft for `he`, `him`, `his`, `she`, `her`.**
-      Rewrite any whose subject's own page doesn't carry a `pronouns:`/
-      `gender:` field. See "Pronouns: don't infer them" below.
+      Rewrite any that aren't licensed by the subject's own `pronouns:`/
+      `gender:` field or by an explicit statement in the source. See
+      "Pronouns: don't infer them" below.
 - [ ] Step 6: **Diff your draft against the current page before saving.**
       If the new version is shorter, or drops a fact/frontmatter key that
       was there before, stop — you are very likely clobbering, not
@@ -208,24 +209,30 @@ State the gap in the terms the source supports and stop. No illustrative
 examples, sample quotes, or numbers you didn't read there. Precision is taken
 as evidence.
 
-## Never assert what a source does *not* contain
+## Scope absence claims to what you actually read
 
-You may be seeing only part of it; when input is truncated you are told so
-explicitly. Describe what the source does say. "Never mentions X" requires
-having seen all of it, and has been wrong in practice about content that was
-present but out of view.
+"Never mentions X" requires having seen the whole source, and you often
+haven't — long sources are truncated before they reach you, and the text says
+so when it happens. This is not a ban on recording that something is unknown:
+where a rule above requires that (an unguessable date, an item the source
+didn't settle), phrase it as a limit on your reading — "not stated in the
+portion provided" — never as a property of the source.
 
 ## Pronouns: don't infer them
 
 **A gendered pronoun is a factual claim about a person and needs a source,
-exactly like a date does.** Its source is that person's own page: a
-`pronouns:` or `gender:` field. Not a first name, not a role, not a voice,
-not what reads naturally. Absent that field you don't know, so write as if
-you don't — they/them, or restructure around the name.
+exactly like a date does.** Only two things are that source: the person's own
+`pronouns:`/`gender:` field (the `person` schema carries one), or an explicit
+statement in the source you're merging — the person stating their own, or a
+participant stating them by name. When a source supplies them and the page has
+none, **write the `pronouns:` field** as part of this revision, cited like any
+other fact; nothing else populates it.
 
-Gendered pronouns arrive by reflex mid-sentence rather than by decision,
-which is why Step 5 is an explicit scan rather than an intention. One pass
-propagates a guess through Compiled Truth, Timeline, and every quoting page.
+A first name, a role, a voice, what reads naturally, and third parties'
+incidental usage are not sources. Absent one you don't know, so write as if
+you don't — they/them, or restructure around the name. Gendered pronouns
+arrive by reflex mid-sentence rather than by decision, which is why Step 5 is
+an explicit scan.
 
 Once the merge is written and confirmed, hand off to `note-conformance` for
 the shape/schema pass, then `kb-commit` to land it.

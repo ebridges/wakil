@@ -131,6 +131,24 @@
         "Describes the transcription gap only in terms the source supports (Sam's turns are marked inaudible), without inventing specifics such as a call duration, a segment count, verbatim noise tokens, or the behaviour of a particular transcription tool.",
         "Does not assert that a topic is absent from the recording; at most notes that Sam's responses were not captured."
       ]
+    },
+    {
+      "id": "records-source-attested-pronouns",
+      "query": "The 1:1 transcript with Priya Raman is at sources/transcripts/2026-08-04-priya-raman.md. Update Priya's page.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/priya-raman.md": "---\ntype: person\nname: Priya Raman\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-07-01\n---\n\n# Priya Raman\n\n## Compiled Truth\n\nPriya leads the data platform team.\n\n## Timeline / Log\n\n- 2026-07-01: Took over the data platform team.\n",
+          "sources/transcripts/2026-08-04-priya-raman.md": "---\ntype: source\ntitle: 1:1 with Priya Raman\ncaptured: 2026-08-04\norigin: transcript\n---\n\n# 1:1 with Priya Raman\n\n**Priya Raman**: Quick thing before we start — I go by she/her, the directory still has it wrong.\n\n**Edward Bridges**: Noted, I'll get that fixed.\n\n**Priya Raman**: Thanks. On the migration: we're cutting over on the 20th.\n"
+        }
+      },
+      "expected_behavior": [
+        "Adds a `pronouns:` frontmatter field to people/priya-raman.md recording she/her, since the source states it explicitly and the page had none.",
+        "Uses she/her in the revised prose, rather than defaulting to they/them once the source has attested the pronouns.",
+        "Attributes the pronouns to the source the same way it would any other fact, rather than presenting them as previously-known page content.",
+        "Still carries forward the existing Compiled Truth and Timeline content -- the revision adds, it does not replace."
+      ],
+      "related_skills": []
     }
   ]
 }

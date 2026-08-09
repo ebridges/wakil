@@ -281,6 +281,9 @@ def print_abstract_backfill_plan(items: list[AbstractBackfillItem]) -> None:
         abstract = item.abstract if len(item.abstract) <= 80 else item.abstract[:77] + "..."
         table.add_row(f"#{item.source_id}", item.raw_text_path, item.title, abstract)
     console.print(table)
+    for item in items:
+        for warning in item.warnings:
+            console.print(f"[yellow]warning:[/yellow] #{item.source_id}: {escape(warning)}")
 
 
 def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:

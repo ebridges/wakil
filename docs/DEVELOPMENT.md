@@ -208,3 +208,11 @@ Two rounds of tuning followed, and each fixed one failure by causing the other:
 Two things to take from this. First, **a skill's instruction budget is real** — guidance is not free to add, and the cost lands on whichever step is competing for attention, not necessarily on anything topically related to what you added. Budget an eval run for scenarios you did *not* touch, not just the one you wrote. Second, the third row is the same finding already recorded above under "Check whether a skill's own procedure step order can produce the bug it's trying to prevent": demoting the pronoun scan from its own numbered step to a clause inside another step broke it. A gate needs to be a step.
 
 Stopping after two rounds was deliberate, per this file's own entry on the personal-reflection heuristic: when each round of tuning trades one failure for another, the approach is the problem, not the tuning. The remaining regression is on a picky file-enumeration rubric item and is documented in the PR rather than tuned against.
+
+### An eval must put a production signal in the channel production puts it in
+
+**Established:** 2026-08-09 · **Source:** the [#202 review](https://github.com/ebridges/wakil/pull/202), `src/wakil/skills/transcript/eval.json`
+
+`transcript`'s new truncation scenario pasted the `[SOURCE TRUNCATED: …]` marker into the scenario's `query`. In production, `_truncate_source` appends that marker to the *source text* — the untrusted content channel the model is asked to analyze, at the end of a long document, where it is easy to miss or to mistake for transcript content. `tests/evals/runner.py` renders `query` as the leading instruction and `workspace.overlay` files as pasted content, so the eval was testing the strictly easier case and would have kept passing if the notice had regressed into the source body.
+
+The rule generalizes past this one scenario: **an eval scenario's `query` is the operator's instruction, and `workspace.overlay` is everything the tool assembles.** Anything the code puts in the prompt on the operator's behalf — a truncation marker, a schema block, a related-notes digest — belongs in the overlay, positioned where the code positions it. A signal moved into the instruction slot tests instruction-following, not the behaviour under test.
