@@ -1,0 +1,47 @@
+Does it make sense to merge the existing pull requests before continuing down the plan?  Or would it be better to complete the plan first?
+
+---
+
+Work the review findings, chain by chain, deepest-first within each so rebases cascade once.  Start with the git chain first.
+
+Loop on each chain: fix pr-review feedback, rerun PR-review, and fixing that feedback in a loop until all PR review feedback is successfully addressed 
+
+Once each chain and all significant feedback has been successfully worked, move onto #2.  If there's any outstanding, minor PR feedback that merits following up on then just open an issue for it and we can pick it up later.
+
+---
+
+Work the review findings, chain by chain, deepest-first within each so rebases cascade once.  Start with the git chain first.
+
+Loop on each chain: fix pr-review feedback, rerun PR-review, and fixing that feedback in a loop until all PR review feedback is successfully addressed 
+
+Once each chain and all significant feedback has been successfully worked, move onto #2.  If there's any outstanding, minor PR feedback that merits following up on then just open an issue for it and we can pick it up later.
+
+All of this work should be done on worktrees, as I'm independently using the KB to build a report.
+
+---
+
+<task-notification>
+<task-id>b1jpefqln</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/31220796-c12c-421a-a517-dfdbfd9db770/tasks/b1jpefqln.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the three re-reviews to finish" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bon0ym5uh</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/31220796-c12c-421a-a517-dfdbfd9db770/tasks/bon0ym5uh.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for round-3 reviews" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Pause here, I'll check the API account
+
+---
+
+source @env.sh to get an updated API key
