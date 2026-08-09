@@ -3987,3 +3987,136 @@ def test_empty_authored_values_do_not_clobber_generated_ones(workspace, kb_path)
     parsed = frontmatter.loads(proposal.raw_file.content)
     assert parsed["title"] == "Real Title"
     assert parsed["abstract"] == "Generated abstract."
+
+
+# --------------------------------------------------------------------------
+# #194 review round 1
+
+
+def test_a_name_keyed_input_does_not_write_both_name_and_title(workspace, kb_path):
+    """`source.yaml` is a document-category schema, so a present `name` is a
+    hard validation error -- every `name:`-keyed capture arrived
+    non-conformant."""
+    path = kb_path / "kickoff.md"
+    path.write_text("---\nname: Kickoff Meeting\nmeeting_date: '2026-08-03'\n---\n\nBody.\n")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    parsed = frontmatter.loads(proposal.raw_file.content)
+    assert "name" not in parsed.metadata
+    assert parsed["title"] == "Kickoff Meeting"
+    assert validate_frontmatter("source", dict(parsed.metadata), workspace.root_path) == []
+
+
+def test_an_unquoted_wikilink_is_not_written_through_as_a_nested_list(workspace, kb_path):
+    """docs/TROUBLESHOOTING.md already records this authoring mistake, and
+    hand-authored files are exactly this feature's input population."""
+    path = kb_path / "linked.md"
+    path.write_text("---\ntitle: [[people/jane]]\ncompany: [[companies/acme.md]]\n---\n\nBody.\n")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    parsed = frontmatter.loads(proposal.raw_file.content)
+    assert validate_frontmatter("source", dict(parsed.metadata), workspace.root_path) == []
+    assert isinstance(parsed["title"], str)
+    # Skipped, not silently dropped.
+    assert any("title" in w for w in proposal.warnings)
+
+
+def test_a_heading_partway_down_does_not_count_as_authored(workspace, kb_path):
+    """`_H1_RE.search` matched anywhere, so an ASR dump with a section heading
+    skipped cleanup and took its slug from that heading."""
+    path = kb_path / "middle.md"
+    path.write_text("Some intro prose here.\n\n# Later Heading\n\n[00:36] hello\n")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    assert "later-heading" not in proposal.raw_file.path
+    assert "[00:36]" not in proposal.raw_file.content  # cleanup still ran
+
+
+def test_wakil_owned_provenance_and_lifecycle_fields_survive(workspace, kb_path):
+    """An authored `status: final` on a brand-new raw capture misrepresents
+    the raw-source/durable-note distinction (working agreement item 9)."""
+    path = kb_path / "clip.md"
+    path.write_text("---\norigin: web\nstatus: final\nsource_type: article\n---\n\nBody.\n")
+    proposal = prepare_capture(workspace, "text", _capture_client(), file=path)
+
+    parsed = frontmatter.loads(proposal.raw_file.content)
+    assert parsed["status"] == "raw"
+    assert parsed["source_type"] == "text"
+    assert parsed["origin"] != "web"
+    assert parsed["type"] == "source"
+
+
+def test_an_authored_date_with_a_time_component_is_still_honoured(workspace, kb_path):
+    """`datetime` subclasses `date`, so isoformat() carried a time component
+    and failed the ISO-date match -- falling back to today, the exact failure
+    this helper exists to prevent."""
+    path = kb_path / "dt.md"
+    path.write_text("---\ndate: 2026-08-03 10:00:00\n---\n\n# Real Title\n\nBody.\n")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    assert proposal.meeting_date == "2026-08-03"
+    assert proposal.raw_file.path.startswith("sources/transcripts/2026-08-03-")
+
+
+def test_a_file_ingested_before_the_frontmatter_fix_still_dedups(workspace, kb_path):
+    """The hash basis changed from the raw file to its body, so without a
+    legacy check every `.md` the affected user already ingested would capture
+    a second time -- and the overwrite guard wouldn't catch it either, since
+    the slug now comes from the authored title."""
+    import hashlib
+
+    body = "---\ntitle: 'Kickoff'\n---\n\n# Kickoff\n\n**[00:36]** — Hello there.\n"
+    path = kb_path / "kickoff.md"
+    path.write_text(body)
+
+    with open_session(workspace) as session:
+        workspace_id, _ = _require_workspace_ids(session, workspace)
+        session.add(
+            Source(
+                workspace_id=workspace_id,
+                source_type="transcript",
+                title="Kickoff",
+                # What the pre-#172 code hashed: the raw file, cleaned.
+                content_hash=hashlib.sha256(clean_transcript(body).encode()).hexdigest(),
+            )
+        )
+        session.commit()
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+    assert proposal.duplicate_of is not None
+
+
+def test_a_fully_authored_file_skips_the_capture_model_call(workspace, kb_path):
+    """ADR 0010's call exists to supply a title and abstract. When the file
+    already has both, paying for it and discarding the result is waste."""
+    path = kb_path / "complete.md"
+    path.write_text(
+        "---\ntitle: Authored Title\nabstract: An authored abstract.\n---\n\nBody.\n"
+    )
+
+    class _NoCallsClient:
+        model = "fake-model"
+
+        def complete(self, *a, **k):
+            raise AssertionError("no capture-metadata call should happen")
+
+    proposal = prepare_capture(workspace, "transcript", _NoCallsClient(), file=path)
+
+    assert proposal.title == "Authored Title"
+    assert proposal.abstract == "An authored abstract."
+    # The DB row and the file's frontmatter must agree.
+    parsed = frontmatter.loads(proposal.raw_file.content)
+    assert parsed["abstract"] == proposal.abstract
+
+
+def test_a_partially_authored_file_still_calls_the_model(workspace, kb_path):
+    path = kb_path / "partial.md"
+    path.write_text("---\ntitle: Authored Title\n---\n\nBody.\n")
+    proposal = prepare_capture(
+        workspace,
+        "transcript",
+        _capture_client({"title": "Model Title", "abstract": "Model abstract."}),
+        file=path,
+    )
+    assert proposal.title == "Authored Title"
+    assert proposal.abstract == "Model abstract."

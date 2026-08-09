@@ -243,13 +243,23 @@ date, create date, origin, url) are filled in, the rest are left as blank
 placeholders. `--context`/`-C` accepts a few lines about the source
 (attendees, company, purpose) and is stored on the source record for step 2.
 
-If the input is a `.md` file that already carries its own YAML frontmatter
-and/or an H1 — a hand-cleaned transcript with a real title, date, and tags —
-that file is treated as authored: its frontmatter wins over wakil's generated
-fields (wakil only fills the gaps, and keeps ownership of `type`), no second
-frontmatter block or H1 is added, the destination filename is derived from the
-note's own title rather than the input's basename, and the timestamp-cleanup
-pass is skipped so markers like `**[00:36]**` survive verbatim.
+If the input is a `.md` file that already carries its own YAML frontmatter, or
+opens with an H1 title — a hand-cleaned transcript with a real title, date, and
+tags — that file is treated as authored:
+
+- its frontmatter wins over wakil's generated fields, except the ones wakil
+  owns for a raw capture (`type`, `source_type`, `status`, and the `origin`/
+  `url` provenance), and except any value the `source` schema rejects, which
+  falls back to the generated one with a warning in the preview;
+- no second frontmatter block or H1 is added, and the destination filename
+  comes from the note's own title rather than the input's basename;
+- the timestamp-cleanup pass is skipped, so markers like `**[00:36]**` survive
+  verbatim;
+- if the file supplies both a title and an abstract, the capture-time model
+  call is skipped entirely.
+
+A heading partway down the file doesn't count — only a leading H1 — so an ASR
+dump with section headings still gets the normal cleanup.
 
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:

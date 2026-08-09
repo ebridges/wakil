@@ -217,6 +217,8 @@ def print_capture_proposal(proposal: CaptureProposal) -> None:
     if proposal.context:
         header += f"\n[dim]Context: {proposal.context}[/dim]"
     console.print(Panel(header, title="Capture preview", border_style="cyan"))
+    for warning in proposal.warnings:
+        console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
     console.print("[bold]Raw capture:[/bold]")
     _print_file_preview(proposal.raw_file)
 
