@@ -473,17 +473,12 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
 
     target = config.root_path / proposal.raw_file.path
     replacing = target.exists()
-    if replacing and not proposal.overwrite:
-        raise IngestError(
-            f"{proposal.raw_file.path} already exists. Re-run with --overwrite to replace "
-            f"it, or point at a different input. (If this is the same recording captured "
-            f"twice, check `wakil sources list` first.)"
-        )
-    # --overwrite replaces the file, but it cannot rehome the Source row that
-    # already points at it. Two rows sharing one `raw_text_path` means
-    # `wakil enrich <old id>` reads the *new* text and files its memories and
-    # timeline entries under the old source — silent misattribution, so this is
-    # refused even with --overwrite (#173).
+    # Owned-path first, deliberately: --overwrite replaces the file but cannot
+    # rehome the Source row that points at it, and two rows sharing one
+    # `raw_text_path` means `wakil enrich <old id>` reads the *new* text and
+    # files its memories under the old source (#173). Checking `exists()` first
+    # told the user to re-run with --overwrite and the re-run then said
+    # --overwrite won't help — same precedence `print_capture_proposal` uses.
     owner_id = _source_owning_path(config, proposal.raw_file.path)
     if owner_id is not None:
         raise IngestError(
@@ -492,6 +487,12 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
             f"sources pointing at one file, so `--overwrite` won't clear this. Rename "
             f"the input so it lands on a different path, or move source #{owner_id}'s "
             f"file aside first."
+        )
+    if replacing and not proposal.overwrite:
+        raise IngestError(
+            f"{proposal.raw_file.path} already exists. Re-run with --overwrite to replace "
+            f"it, or point at a different input. (If this is the same recording captured "
+            f"twice, check `wakil sources list` first.)"
         )
 
     target.parent.mkdir(parents=True, exist_ok=True)

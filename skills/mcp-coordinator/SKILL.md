@@ -40,7 +40,18 @@ connected, ask — don't guess.
    (`transcript`, `article`, or `text`) and the file path or URL.
 2. If the result has `duplicate_of` set, stop and tell the user it's
    already in the KB (cite the existing source id). Nothing else to do.
-3. Otherwise, look at the preview (`title`, `abstract`, `origin`) **and at
+   Same for `collision_source_id`: the computed destination is already
+   another source's raw capture, `ingest_apply` will refuse, and there is
+   nothing you can do about it from here. Stop and tell the user, citing
+   both source ids — the fix is theirs (rename the input, or archive the
+   other source).
+3. If `collision` is set but `collision_source_id` is not, a file is
+   sitting at the destination that no source owns. `ingest_apply` refuses
+   this too, and the `--overwrite` that resolves it is CLI-only and
+   deliberately not exposed here — overwriting a knowledge-base file with
+   no human present is what working-agreement items 11/12 rule out. Report
+   the path and stop.
+4. Otherwise, look at the preview (`title`, `abstract`, `origin`) **and at
    `warnings`**. Anything in `warnings` is a value the author wrote that
    wakil declined to use, so report it — but it is informational, not a
    question: don't wait for a reply. If nothing else looks wrong, call
@@ -49,7 +60,7 @@ connected, ask — don't guess.
    one line back: `Captured as source #<id>, branch <branch>, draft PR:
    <pr_url>` (omit `pr_url` if none was opened, e.g. no `gh`/remote
    configured).
-4. Immediately continue to `enrich_prepare` for that same source id — don't
+5. Immediately continue to `enrich_prepare` for that same source id — don't
    wait for the user to ask for it separately; capture without enrichment
    isn't useful on its own. Use the *same* server for `enrich_*` as you
    used for `ingest_*` — never mix servers for one source.
@@ -62,7 +73,7 @@ connected, ask — don't guess.
    without being asked explicitly. If yours doesn't, just wait: a long
    `enrich_*` call is expected, not a failure — don't retry it, cancel it,
    or fall back to something else mid-flow because it's taking a while.
-5. Look at what `enrich_prepare` returned:
+6. Look at what `enrich_prepare` returned:
    - If `issues` is non-empty, stop. Report the issues plainly; nothing was
      written and the source's branch/PR (if any) is untouched. This is a
      hard stop, not something to work around.
@@ -76,11 +87,11 @@ connected, ask — don't guess.
        something the resolution otherwise treats as significant,
      - anything in `warnings`.
      If none of that applies, call `enrich_apply` right away.
-6. Report the final result as one line with the PR url (now
+7. Report the final result as one line with the PR url (now
    ready-for-review, not a draft) and a short list of files written. If
    `files_to_write`/`files_written` was empty, say so plainly — an
    enrichment that produced nothing is a normal outcome, not a failure.
-7. If any tool call fails, report the error message plainly. Don't retry
+8. If any tool call fails, report the error message plainly. Don't retry
    silently. Any branch/PR already opened is still there for the user to
    follow up on manually — `wakil`'s own cleanup (`abandon_landing`)
    already ran on the wakil side wherever it applies.

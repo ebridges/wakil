@@ -4406,7 +4406,11 @@ def test_capture_records_a_collision_instead_of_sliding_to_a_suffix(
     # Force the same destination the first capture already occupies.
     monkey.raw_file = ProposedFile(path=taken, content=monkey.raw_file.content)
 
-    with pytest.raises(IngestError, match="already exists"):
+    # The forced destination is source #1's own capture, so the owned-path
+    # refusal is the one that fires — deliberately ahead of the plain
+    # "already exists" branch, whose remedy (`--overwrite`) is refused here.
+    # Either way the point of #173 holds: a hard stop, not a silent `-1`.
+    with pytest.raises(IngestError, match="raw capture of source"):
         apply_capture(workspace, monkey)
     assert not (kb_path / taken.replace(".md", "-1.md")).exists()
 

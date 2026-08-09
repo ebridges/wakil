@@ -717,13 +717,14 @@ def _handplace_destination(kb_path: Path, transcript: Path) -> Path:
 def test_capture_refuses_a_destination_collision_instead_of_suffixing(
     kb_path: Path, monkeypatch
 ):
-    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
-    landed = _preplace_destination(kb_path, transcript)
+    # Hand-placed, so the collision is the one --overwrite actually resolves.
+    # Built from an *owned* file, this asserted "--overwrite" appears in the
+    # output — which the preview warning satisfies either way, so it could not
+    # tell the correct message from the contradictory one.
+    landed = _handplace_destination(kb_path, transcript)
 
-    # Same filename shape, different content, so the content-hash dedup path
-    # doesn't catch it first -- this has to fail on the *path*.
-    transcript.write_text("A completely different conversation.\n")
     result = _capture(kb_path, transcript)
 
     assert result.exit_code == 1
@@ -778,3 +779,19 @@ def test_capture_overwrite_refuses_a_file_another_source_owns(kb_path: Path, mon
     assert landed.read_text(encoding="utf-8") == before
     # Same rule as the plain collision: the reason has to precede the preview.
     assert result.output.find("raw capture of source #1") < result.output.find("Raw capture:")
+
+
+def test_an_owned_collision_never_suggests_overwrite(kb_path: Path, monkeypatch):
+    """Guard ordering: checking `exists()` first told the user to re-run with
+    `--overwrite`, and that re-run then said `--overwrite` won't help. The
+    preview and the failure contradicted each other in one run's output."""
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
+    transcript = _init(kb_path)
+    _preplace_destination(kb_path, transcript)
+    transcript.write_text("A completely different conversation.\n")
+
+    result = _capture(kb_path, transcript)
+
+    assert result.exit_code == 1
+    assert "raw capture of source #1" in result.output
+    assert "Re-run with --overwrite" not in result.output
