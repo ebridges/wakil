@@ -193,9 +193,24 @@ def prepare_landing(
 def abandon_landing(config: WorkspaceConfig, context: LandingContext) -> None:
     """Nothing was written for this landing context (e.g. enrichment
     proposed no files) — return to the default branch. No-op for a local
-    context."""
+    context.
+
+    Subject to the same drift rule `land_ingestion` follows: if HEAD is no
+    longer the branch this context resolved, another process owns the working
+    tree and switching under it is the clobber #182 is about. The windows
+    here are the long ones — `_prepare_enrichment_or_exit`'s failure path is
+    reached after four model calls, and MCP's `enrich_prepare` failure paths
+    span the unbounded prepare/apply gap — so a stale return is exactly what
+    would land on someone else's tree.
+    """
     if context.local:
         return
+    if context.branch is not None:
+        try:
+            if git.current_branch(config.root_path) != context.branch:
+                return
+        except git.GitError:
+            return
     _return_to_default(config)
 
 

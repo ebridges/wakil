@@ -1059,3 +1059,37 @@ def test_the_pr_url_is_attached_to_the_existing_change_row(git_kb, monkeypatch):
         changes = list(session.scalars(select(GitChange)))
         assert len(changes) == 1
         assert changes[0].pr_url == "https://pr.url/7"
+
+
+def test_abandon_does_not_yank_the_other_branch(git_kb):
+    """`abandon_landing` reaches its call sites after minutes of model calls
+    (and, over MCP, across an unbounded prepare/apply gap). Returning to the
+    default branch then is the same clobber `land_ingestion` refuses — for a
+    landing that wrote nothing at all."""
+    from wakil.app.git_service import abandon_landing
+
+    root = git_kb.root_path
+    landing = prepare_landing(git_kb, source_id=None, title="Nothing", local=False)
+    assert landing.branch is not None
+
+    # Another process takes the working tree while this one was thinking.
+    _git(root, "switch", "-q", "-c", "other-process-branch")
+
+    abandon_landing(git_kb, landing)
+
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == "other-process-branch"
+
+
+def test_abandon_still_returns_when_the_tree_is_ours(git_kb):
+    """The ordinary case is unchanged: no drift, so the session goes home
+    rather than being stranded on a throwaway ingest branch."""
+    from wakil.app.git_service import abandon_landing
+
+    root = git_kb.root_path
+    default = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    landing = prepare_landing(git_kb, source_id=None, title="Nothing", local=False)
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == landing.branch
+
+    abandon_landing(git_kb, landing)
+
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == default
