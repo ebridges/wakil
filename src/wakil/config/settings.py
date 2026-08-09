@@ -17,7 +17,7 @@ FTS/QMD index — instead of each silently getting its own, empty one.
 
 from __future__ import annotations
 
-from datetime import datetime, tzinfo
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -126,10 +126,11 @@ class WorkspaceConfig(BaseModel):
 def workspace_today(config: WorkspaceConfig) -> str:
     """The user's calendar date, as an ISO string.
 
-    This is what every user-visible date means: `created`/`captured`/
-    `retrieved` frontmatter, the date prefix on a raw capture's filename, the
-    date in a `wakil/ingest/<date>-<slug>` branch name, Timeline entry
-    headings, and the "today" passed into the capture-metadata prompt.
+    This is what every user-visible date means: `created`/`retrieved`
+    frontmatter, the date prefix on a raw capture's filename, Timeline entry
+    headings, and the "today" passed into the capture-metadata prompt. (The
+    date in a `wakil/ingest/<date>-<slug>` branch name is still UTC — see
+    docs/DEVELOPMENT.md for why that one is left alone.)
 
     It is deliberately *not* UTC. Everything used to be `datetime.now(UTC)`,
     so an ingest run at 20:49 US-Eastern was stamped with tomorrow's date --
@@ -143,6 +144,24 @@ def workspace_today(config: WorkspaceConfig) -> str:
     it), not dates a human reads.
     """
     return datetime.now(_workspace_zone(config)).date().isoformat()
+
+
+def workspace_date(config: WorkspaceConfig, instant: datetime) -> str:
+    """The local calendar date an *instant* falls on, ISO.
+
+    The companion to `workspace_today` for values that are already timestamps
+    rather than "now": a `.whisper` archive's `dateCreated`, a `Source`'s
+    `retrieved_at`. Both are absolute instants, and `.date()` on them yields
+    the UTC day -- so a 20:49 US-Eastern recording lands on tomorrow, which
+    is #174's exact symptom showing up somewhere `workspace_today` can't
+    reach.
+
+    A naive datetime (SQLite hands these back for UTC columns) is assumed to
+    be UTC, matching what `utcnow()` wrote.
+    """
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=UTC)
+    return instant.astimezone(_workspace_zone(config)).date().isoformat()
 
 
 def _workspace_zone(config: WorkspaceConfig) -> tzinfo | None:

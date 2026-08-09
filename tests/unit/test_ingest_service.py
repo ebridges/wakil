@@ -551,12 +551,12 @@ def test_capture_persists_title_and_abstract_to_source_metadata(workspace, trans
         assert source.title == CAPTURE_METADATA_JSON["title"]
 
 
-def test_parse_whisper_transcript_strips_filler_words_only(kb_path):
+def test_parse_whisper_transcript_strips_filler_words_only(workspace, kb_path):
     whisper = _write_whisper(
         kb_path / "sample.whisper",
         [_segment("Jane", "I um I was calling you, uh, about the offer.", 0)],
     )
-    dialogue, _ = parse_whisper_transcript(whisper)
+    dialogue, _ = parse_whisper_transcript(whisper, workspace)
     # Only the isolated filler tokens are removed; the repeated "I" and the
     # rest of the phrasing are left exactly as spoken (no ASR repair).
     assert dialogue == "**Jane**: I I was calling you, about the offer."
@@ -4330,3 +4330,41 @@ def test_db_timestamps_stay_utc(workspace, transcript):
         # which a local-time value would be hours away from.
         now_utc = datetime.now(UTC).replace(tzinfo=None)
         assert abs((now_utc - stored).total_seconds()) < 300
+
+
+# --- #197 review: instants must localize too ------------------------------
+
+
+def test_a_whisper_recording_date_is_local_not_utc(workspace, kb_path):
+    """Apple's `dateCreated` is an absolute instant, so `.date()` gave the UTC
+    day -- and `meeting_date` beats `created` for the filename prefix, so an
+    evening recording was filed a day late in *both* places (#174)."""
+    workspace.timezone = "America/New_York"
+    # 2026-08-04T00:49Z == 2026-08-03 20:49 US-Eastern.
+    seconds = (
+        datetime(2026, 8, 4, 0, 49, tzinfo=UTC) - datetime(2001, 1, 1, tzinfo=UTC)
+    ).total_seconds()
+    whisper = _write_whisper(
+        kb_path / "evening.whisper",
+        [_segment("Jane", "Evening sync.", 0)],
+        date_created=seconds,
+    )
+
+    _, recorded_at = parse_whisper_transcript(whisper, workspace)
+    assert recorded_at == "2026-08-03"
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=whisper)
+    assert proposal.meeting_date == "2026-08-03"
+    assert proposal.raw_file.path.startswith("sources/transcripts/2026-08-03-")
+
+
+def test_the_timeline_fallback_date_is_local_not_utc(workspace):
+    """This one is written into an append-only Timeline heading, so a wrong
+    date is permanent in the user's knowledge base."""
+    from wakil.config.settings import workspace_date
+
+    workspace.timezone = "America/New_York"
+    # A naive value, as SQLite hands back a UTC column.
+    assert workspace_date(workspace, datetime(2026, 8, 4, 0, 49)) == "2026-08-03"
+    # And an aware one.
+    assert workspace_date(workspace, datetime(2026, 8, 4, 0, 49, tzinfo=UTC)) == "2026-08-03"

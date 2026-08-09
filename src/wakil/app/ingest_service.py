@@ -45,7 +45,7 @@ from sqlalchemy.orm import Session
 
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
-from wakil.config.settings import WorkspaceConfig, workspace_today
+from wakil.config.settings import WorkspaceConfig, workspace_date, workspace_today
 from wakil.integrations.web import fetch_article
 from wakil.knowledge.wikilinks import WIKILINK_RE as _WIKILINK_RE
 from wakil.knowledge.wikilinks import normalize_target as _normalize_link_path
@@ -280,7 +280,7 @@ def prepare_capture(
         if file is None:
             raise IngestError(f"{kind} ingest needs a file path")
         if kind == "transcript" and file.suffix.lower() == ".whisper":
-            text, recorded_at = parse_whisper_transcript(file)
+            text, recorded_at = parse_whisper_transcript(file, config)
             meeting_date = infer_meeting_date(file, text) or recorded_at
         elif kind == "transcript" and file.suffix.lower() == ".json":
             text = parse_json_transcript(file)
@@ -1061,7 +1061,10 @@ def prepare_enrichment(
         # (issue #77) — retrieved_at is set at capture time for every
         # source; created_at covers the rare row without it.
         captured_at = source.retrieved_at or source.created_at
-        source_captured_date = captured_at.date().isoformat() if captured_at else None
+        # An absolute instant, so `.date()` would give the UTC day -- and this
+        # one is written into an append-only Timeline heading, so a wrong date
+        # here is permanent in the user's KB.
+        source_captured_date = workspace_date(config, captured_at) if captured_at else None
         context = context or metadata.get("context")
         context_digest = context_digest or metadata.get("context_digest")
         context_referenced_paths = (
@@ -3162,11 +3165,19 @@ def _strip_filler_words(text: str) -> str:
 _WHISPER_EPOCH = datetime(2001, 1, 1, tzinfo=UTC)
 
 
-def _whisper_recorded_at(raw_seconds: object) -> str | None:
+def _whisper_recorded_at(raw_seconds: object, config: WorkspaceConfig) -> str | None:
+    """The local calendar date a recording was made.
+
+    Apple's `dateCreated` is an absolute instant (NSDate seconds), so
+    `.date()` on it yields the *UTC* day -- an evening US-Eastern recording
+    would be filed a day late, and `meeting_date` beats `created` for the
+    filename prefix, so the wrong date would reach both the frontmatter and
+    the path (#174).
+    """
     if not isinstance(raw_seconds, int | float):
         return None
     try:
-        return (_WHISPER_EPOCH + timedelta(seconds=raw_seconds)).date().isoformat()
+        return workspace_date(config, _WHISPER_EPOCH + timedelta(seconds=raw_seconds))
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -3205,7 +3216,7 @@ def _dialogue_from_segments(segments: list[dict], speaker_of: Callable[[dict], s
     return "\n\n".join(f"**{speaker}**: {' '.join(parts)}" for speaker, parts in turns)
 
 
-def parse_whisper_transcript(file: Path) -> tuple[str, str | None]:
+def parse_whisper_transcript(file: Path, config: WorkspaceConfig) -> tuple[str, str | None]:
     """Extract speaker-labeled dialogue from an Apple-style .whisper archive.
 
     A `.whisper` file is a zip containing `metadata.json`: diarized
@@ -3226,7 +3237,7 @@ def parse_whisper_transcript(file: Path) -> tuple[str, str | None]:
     if not dialogue:
         raise IngestError(f"{file}: transcript segments contained no text")
 
-    recorded_at = _whisper_recorded_at(data.get("dateCreated"))
+    recorded_at = _whisper_recorded_at(data.get("dateCreated"), config)
     return dialogue, recorded_at
 
 
