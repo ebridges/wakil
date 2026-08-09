@@ -4559,6 +4559,65 @@ def test_collision_fallback_routes_by_type_not_straight_to_drafts(workspace, kb_
     assert sanitized.path != "concepts/taken.md"
 
 
+def test_routing_does_not_land_the_note_on_an_existing_file(workspace, kb_path):
+    """The collision check runs against the *proposed* path; routing then
+    rewrites the directory. Without a second check the corrected path lands on
+    an existing file and the run dies in `apply_enrichment`, after every model
+    call has been paid for."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    (kb_path / "sources").mkdir(exist_ok=True)
+    (kb_path / "sources" / "techtalks-overview.md").write_text("mine\n", encoding="utf-8")
+    proposal = EnrichmentProposal(source_id=1, title="TechTalks Overview")
+    # Free where the model put it, taken where its `type:` routes it to.
+    note = _note("drafts/techtalks-overview.md", type_="source", name="TechTalks Overview")
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert sanitized.path.startswith("sources/")
+    assert sanitized.path != "sources/techtalks-overview.md"
+    assert not (kb_path / sanitized.path).exists()
+    assert any("already exists" in w for w in proposal.warnings)
+    assert (kb_path / "sources" / "techtalks-overview.md").read_text() == "mine\n"
+
+
+def test_reslugging_does_not_land_the_note_on_an_existing_file(workspace, kb_path):
+    """Same hole via the other corrector: the filename half."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    (kb_path / "concepts").mkdir(exist_ok=True)
+    (kb_path / "concepts" / "graph-memory.md").write_text("mine\n", encoding="utf-8")
+    proposal = EnrichmentProposal(source_id=1, title="Graph Memory")
+    note = _note("concepts/Graph Memory.md", type_="concept", name="Graph Memory")
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert sanitized.path != "concepts/graph-memory.md"
+    assert not (kb_path / sanitized.path).exists()
+    assert (kb_path / "concepts" / "graph-memory.md").read_text() == "mine\n"
+
+
+def test_a_freed_path_carries_the_notes_own_wikilinks_with_it(workspace, kb_path):
+    """A self-link left pointing at the taken path would resolve to somebody
+    else's page."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    (kb_path / "concepts").mkdir(exist_ok=True)
+    (kb_path / "concepts" / "graph-memory.md").write_text("mine\n", encoding="utf-8")
+    proposal = EnrichmentProposal(source_id=1, title="Graph Memory")
+    note = _note(
+        "concepts/Graph Memory.md",
+        type_="concept",
+        name="Graph Memory",
+        body="See [[concepts/Graph Memory.md|this page]].",
+    )
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert f"[[{sanitized.path}|this page]]" in sanitized.content
+    assert "concepts/graph-memory.md|this page" not in sanitized.content
+
+
 def test_untyped_note_still_falls_back_to_drafts(workspace):
     """No `type:` means no canonical directory to route to."""
     from wakil.app.ingest_service import _sanitize_note

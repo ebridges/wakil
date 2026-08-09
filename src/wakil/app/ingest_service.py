@@ -3849,7 +3849,8 @@ def _sanitize_note(
         return ProposedFile(path=str(candidate), content=note.content)
 
     candidate = _route_to_schema_directory(config, candidate, note, proposal)
-    return _reslug_proposed_note(candidate, note.content, proposal)
+    corrected = _reslug_proposed_note(candidate, note.content, proposal)
+    return _free_corrected_path(root, corrected, proposal)
 
 
 def _schema_directory_for_note(config: WorkspaceConfig, note: ProposedFile) -> str | None:
@@ -3915,8 +3916,18 @@ def _reslug_proposed_note(
         return ProposedFile(path=str(candidate), content=content)
 
     old_path = str(candidate)
-    new_candidate = candidate.with_name(f"{prefix}{target_rest}{candidate.suffix}")
-    new_path = str(new_candidate)
+    new_path = str(candidate.with_name(f"{prefix}{target_rest}{candidate.suffix}"))
+    proposal.warnings.append(
+        f"Corrected the proposed note's filename from {old_path} to {new_path} "
+        "to match slugify() (the same convention new entity stub pages already use)"
+    )
+    return _retarget_self_links(ProposedFile(path=old_path, content=content), new_path)
+
+
+def _retarget_self_links(proposed: ProposedFile, new_path: str) -> ProposedFile:
+    """Move a proposed note to `new_path`, repointing the wikilinks in its own
+    body that referred to it under its old path."""
+    old_path = proposed.path
 
     def _replace(match: re.Match) -> str:
         link_path = match.group(1).strip()
@@ -3925,12 +3936,31 @@ def _reslug_proposed_note(
             return match.group(0)
         return f"[[{new_path}|{display}]]" if display is not None else f"[[{new_path}]]"
 
-    new_content = _WIKILINK_RE.sub(_replace, content)
+    return ProposedFile(path=new_path, content=_WIKILINK_RE.sub(_replace, proposed.content))
+
+
+def _free_corrected_path(
+    root: Path, proposed: ProposedFile, proposal: "EnrichmentProposal"
+) -> ProposedFile:
+    """Re-check the destination after routing and re-slugging have moved it.
+
+    `_sanitize_note`'s collision check runs against the path the model
+    proposed; `_route_to_schema_directory` and `_reslug_proposed_note` then
+    rewrite the directory and the filename, so the path actually written was
+    never checked against the filesystem. A corrected path landing on an
+    existing file killed the run in `apply_enrichment` -- after every model
+    call had already been paid for -- with "Refusing to overwrite existing
+    file". That is #187's own defect, relocated by #187's fix.
+    """
+    candidate = Path(proposed.path)
+    if not (root / candidate).exists():
+        return proposed
+    free = _unused_path(root, candidate.parent, candidate.stem)
     proposal.warnings.append(
-        f"Corrected the proposed note's filename from {old_path} to {new_path} "
-        "to match slugify() (the same convention new entity stub pages already use)"
+        f"{candidate.as_posix()} already exists, so the corrected note was proposed at "
+        f"{free.as_posix()} instead"
     )
-    return ProposedFile(path=new_path, content=new_content)
+    return _retarget_self_links(proposed, str(free))
 
 
 def _unused_path(root: Path, directory: Path, base: str) -> Path:
