@@ -302,6 +302,11 @@ If your repository signs commits (SSH signing via a hardware key or 1Password),
 `git commit` blocks on an interactive approval prompt. wakil allows 10 minutes
 for that step; set `WAKIL_GIT_COMMIT_TIMEOUT` (seconds) to change it.
 
+Any commit failure leaves you on the ingest branch with the work staged, not
+just a timeout — a rejecting `pre-commit` hook or a signing error does the same,
+so that you can fix the cause and commit in place rather than reconstructing
+the message from another branch. A killed commit gets the extra cleanup below.
+
 If the commit does time out, wakil stays on the ingest branch with your changes
 still staged, clears the `.git/index.lock` the killed process leaves behind
 (without which every later git command in the repo fails), and saves the commit
@@ -316,7 +321,10 @@ The printed command includes the file list; keep it, so the commit stays
 scoped to wakil's own files rather than everything you have staged.
 
 The push and pull request don't happen in that case, so `wakil git summary`
-won't show the change until you push the branch and open the PR yourself.
+won't show the change until either you push the branch and open the PR
+yourself, or you re-run `wakil enrich <id>` once the commit is finished — the
+source already remembers this branch, so the next run resumes onto it and
+lands the PR from there.
 
 ## Entities: compiled pages
 

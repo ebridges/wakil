@@ -343,33 +343,51 @@ def _land_written_files(
     phase: str,
 ) -> None:
     from wakil.app.git_service import GitServiceError, land_ingestion
+    from wakil.integrations.git import commit_timeout
 
     if landing.local:
         console.print("[dim]--local: files written, not committed.[/dim]")
         return
+    # Deliberately not a `console.status` spinner: `git commit` may hand the
+    # terminal to `pinentry-tty` or an ssh passphrase prompt, and a Rich `Live`
+    # repaints the last line on top of it for up to the whole budget — which
+    # would defeat the interactive signing this timeout exists to allow.
+    # `_refresh_qmd_index` below skips a spinner for the same reason.
+    console.print(
+        f"[dim]Committing (approve the signing prompt if one appears); waiting up to "
+        f"{commit_timeout()}s — set WAKIL_GIT_COMMIT_TIMEOUT to change.[/dim]"
+    )
     try:
-        with console.status("Committing (approve the signing prompt if one appears)..."):
-            outcome = land_ingestion(
-                config,
-                landing,
-                source_id=source_id,
-                files=files,
-                title=title,
-                summary=summary,
-                ingest_run_id=ingest_run_id,
-                kind=kind,
-                phase=phase,
-            )
+        outcome = land_ingestion(
+            config,
+            landing,
+            source_id=source_id,
+            files=files,
+            title=title,
+            summary=summary,
+            ingest_run_id=ingest_run_id,
+            kind=kind,
+            phase=phase,
+        )
     except GitServiceError as exc:
         # Name the branch: a failed landing deliberately leaves HEAD on the
         # ingest branch (so staged work isn't stranded), and saying nothing
         # about that moved the user's tree silently.
+        from rich.markup import escape
+
         from wakil.integrations.git import inspect_git
 
         branch = inspect_git(config.root_path).branch
-        location = f"\n[dim]You are on branch {branch}; changes may be staged there.[/dim]"
+        location = (
+            f"\n[dim]You are on branch {escape(branch or '?')}; "
+            "changes may be staged there.[/dim]"
+        )
+        # `exc` carries the hand-finish command, whose commit message is
+        # model-generated — `[[wikilinks]]` in it are read as Rich style tags
+        # and silently deleted, so the command the user copies is wrong
+        # (docs/TROUBLESHOOTING.md records this exact failure).
         console.print(
-            f"[red]Landing failed:[/red] {exc}\n"
+            f"[red]Landing failed:[/red] {escape(str(exc))}\n"
             f"[dim]The written files are still on disk for manual review.[/dim]{location}"
         )
         raise typer.Exit(code=1) from exc
