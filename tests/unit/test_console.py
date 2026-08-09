@@ -47,12 +47,19 @@ def test_missing_update_target_name_survives_markup(capsys):
             )
         ],
         source_id=7,
+        source_branch="wakil/ingest/2026-08-04-call",
     )
     out = capsys.readouterr().out
     assert "Q3 [draft] Planning" in out
     assert "concepts/q3-planning.md" in out
     assert "ingest/2026-08-01-notes" in out
-    assert "wakil enrich 7 --force" in out
+    # The merge has to land on the source's own branch — merging into the
+    # default branch leaves it unchanged — and the re-run is plain, since
+    # `--force` would clear the checkpoints this message promises are kept.
+    assert "git checkout wakil/ingest/2026-08-04-call" in out
+    assert "git merge ingest/2026-08-01-notes" in out
+    assert "wakil enrich 7" in out
+    assert "--force" not in out
 
 
 def test_entity_resolution_table_shows_relevance_column(capsys):

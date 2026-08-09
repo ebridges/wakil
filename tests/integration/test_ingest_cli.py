@@ -845,8 +845,11 @@ def test_enrich_exits_non_zero_when_every_target_is_off_this_branch(
     assert result.exit_code == 1, result.output
     assert "Nothing was written for this source" in result.output
     assert "concepts/only-on-another-branch.md" in result.output
-    # Actionable: says what to do next, not just that it failed.
-    assert "--force" in result.output
+    # Actionable: says what to do next, not just that it failed. And the
+    # advice must not be `--force`, which would clear the checkpoints the
+    # same message promises are being kept.
+    assert "wakil enrich 1" in result.output
+    assert "--force" not in result.output
 
 
 def test_a_failed_cross_branch_enrich_writes_nothing_at_all(kb_path: Path, monkeypatch):

@@ -96,9 +96,12 @@ connected, ask — don't guess.
    enrichment would have updated lives on a branch that isn't merged into
    the working tree, so the source's material landed nowhere. Report it as
    a failure, name the branches the error lists, and leave the source
-   un-enriched. Nothing was persisted, so once the user merges that branch
-   the enrichment can be re-run with `force: true` without duplicating
-   anything.
+   un-enriched. This one needs a human with a shell — the pages have to be
+   merged onto *this source's own* branch, which the error names, and
+   merging into the default branch won't do it. Nothing was persisted, so
+   the enrichment can simply be re-run afterwards; do **not** pass
+   `force: true`, which isn't needed and discards the phase checkpoints
+   that make the re-run cheap.
 8. If any tool call fails, report the error message plainly. Don't retry
    silently. Any branch/PR already opened is still there for the user to
    follow up on manually — `wakil`'s own cleanup (`abandon_landing`)

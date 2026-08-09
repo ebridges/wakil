@@ -544,7 +544,11 @@ def _confirm_and_apply_enrichment(
         # Not a quiet success: entity resolution found real targets, they just
         # aren't in this working tree yet (#188). Exiting 0 here let a whole
         # source's material land nowhere while the batch appeared to succeed.
-        print_missing_update_targets(exc.targets, source_id=proposal.source_id)
+        # `landing.branch` is the source's own ingest branch, which is where
+        # the missing pages have to be merged — not main.
+        print_missing_update_targets(
+            exc.targets, source_id=proposal.source_id, source_branch=landing.branch
+        )
         abandon_landing(config, landing)
         raise typer.Exit(code=1) from exc
     except IngestError as exc:

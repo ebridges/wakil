@@ -383,11 +383,12 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
         console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
 
 
-def print_missing_update_targets(targets, *, source_id: int) -> None:
+def print_missing_update_targets(targets, *, source_id: int, source_branch: str | None) -> None:
     console.print(
         "[red]Nothing was written for this source.[/red] Entity resolution "
         "resolved targets that aren't in the working tree:"
     )
+    held_by: list[str] = []
     for missing in targets:
         where = (
             f"on [bold]{escape(', '.join(missing.branches))}[/bold]"
@@ -398,11 +399,28 @@ def print_missing_update_targets(targets, *, source_id: int) -> None:
         # is read as a style tag and disappears — and the name is the one
         # thing this message exists to convey.
         console.print(f"  - {escape(missing.name)} -> {escape(missing.path)} ({where})")
+        held_by.extend(b for b in missing.branches if b not in held_by)
     console.print(
-        "[dim]Nothing was recorded either — no memories, no status change — so "
-        "after merging the branch that holds them, re-run "
-        f"`wakil enrich {source_id} --force`.[/dim]"
+        "[dim]Nothing was recorded either — no memories, no status change, and the "
+        "phase checkpoints are kept, so the re-run resumes instead of re-paying for "
+        "the model calls.[/dim]"
     )
+    if source_branch and held_by:
+        # `wakil enrich` resumes onto the *source's own* branch and never
+        # merges anything into it, so "merge the PR into main and re-run"
+        # leaves this branch unchanged and hits the identical error. The merge
+        # has to land on this source's branch. And no `--force`: the status is
+        # still `raw`, so a plain re-run is allowed — while `--force` would
+        # clear the very checkpoints named above.
+        console.print("[dim]Bring those pages onto this source's own branch, then re-run:[/dim]")
+        console.print(f"  [bold]git checkout {escape(source_branch)}[/bold]")
+        console.print(f"  [bold]git merge {escape(held_by[0])}[/bold]")
+        console.print(f"  [bold]wakil enrich {source_id}[/bold]")
+    else:
+        console.print(
+            f"[dim]Once those pages are in this working tree, re-run "
+            f"`wakil enrich {source_id}`.[/dim]"
+        )
 
 
 _ACTION_STYLES = {"create": "green", "update": "cyan", "skip": "dim"}
