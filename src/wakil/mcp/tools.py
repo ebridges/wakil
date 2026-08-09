@@ -412,6 +412,9 @@ def ingest_prepare(
         # overwriting a knowledge-base file with no human present is exactly
         # what working-agreement items 11/12 rule out.
         "collision": proposal.collision,
+        # Non-null means the colliding file is another source's raw capture, so
+        # apply refuses unconditionally — not something --overwrite would clear.
+        "collision_source_id": proposal.collision_source_id,
     }
 
 

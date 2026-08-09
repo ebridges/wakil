@@ -758,7 +758,10 @@ _OVERWRITE = Annotated[
     bool,
     typer.Option(
         "--overwrite",
-        help="Replace an existing file at the computed destination path.",
+        help=(
+            "Replace an existing file at the computed destination path. Refused "
+            "if that file is already another source's raw capture."
+        ),
     ),
 ]
 _LOCAL = Annotated[

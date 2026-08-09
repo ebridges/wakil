@@ -703,6 +703,17 @@ def _preplace_destination(kb_path: Path, transcript: Path) -> Path:
     return landed
 
 
+def _handplace_destination(kb_path: Path, transcript: Path) -> Path:
+    """The same destination, occupied by a file no Source row owns -- #173's
+    literal scenario, and the only collision `--overwrite` still resolves."""
+    from wakil.config.settings import WorkspaceConfig, workspace_today
+
+    config = WorkspaceConfig.load(kb_path)
+    landed = kb_path / "sources" / "transcripts" / f"{workspace_today(config)}-meeting.md"
+    landed.write_text("An earlier, hand-cleaned copy.\n", encoding="utf-8")
+    return landed
+
+
 def test_capture_refuses_a_destination_collision_instead_of_suffixing(
     kb_path: Path, monkeypatch
 ):
@@ -725,10 +736,9 @@ def test_capture_refuses_a_destination_collision_instead_of_suffixing(
 
 def test_capture_collision_warns_before_the_confirm_prompt(kb_path: Path, monkeypatch):
     """A --yes caller still has to be able to see why the run aborted."""
-    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
-    _preplace_destination(kb_path, transcript)
-    transcript.write_text("A completely different conversation.\n")
+    _handplace_destination(kb_path, transcript)
 
     result = _capture(kb_path, transcript)
     warning_at = result.output.find("already exists")
@@ -738,13 +748,33 @@ def test_capture_collision_warns_before_the_confirm_prompt(kb_path: Path, monkey
     assert warning_at < preview_at
 
 
-def test_capture_overwrite_flag_replaces_the_existing_file(kb_path: Path, monkeypatch):
-    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
+def test_capture_overwrite_flag_replaces_an_unowned_file(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
     transcript = _init(kb_path)
-    landed = _preplace_destination(kb_path, transcript)
-    transcript.write_text("A completely different conversation.\n")
+    landed = _handplace_destination(kb_path, transcript)
 
     result = _capture(kb_path, transcript, "--overwrite")
 
     assert result.exit_code == 0
-    assert "different conversation" in landed.read_text(encoding="utf-8")
+    assert "routing prototype" in landed.read_text(encoding="utf-8")
+    # Under `--overwrite --yes` this output is the entire record of a
+    # destructive write, so it must not read as a fresh file (#173).
+    assert "REPLACE" in result.output
+    assert "NEW " not in result.output
+    assert "replaced" in result.output
+
+
+def test_capture_overwrite_refuses_a_file_another_source_owns(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient(), FakeCaptureClient())
+    transcript = _init(kb_path)
+    landed = _preplace_destination(kb_path, transcript)
+    before = landed.read_text(encoding="utf-8")
+    transcript.write_text("A completely different conversation.\n")
+
+    result = _capture(kb_path, transcript, "--overwrite")
+
+    assert result.exit_code == 1
+    assert "raw capture of source #1" in result.output
+    assert landed.read_text(encoding="utf-8") == before
+    # Same rule as the plain collision: the reason has to precede the preview.
+    assert result.output.find("raw capture of source #1") < result.output.find("Raw capture:")

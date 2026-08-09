@@ -169,6 +169,10 @@ class CaptureProposal:
     # used to silently pick `<name>-1.md` instead, producing a near-duplicate
     # nobody noticed. Surfaced in the preview and refused at apply time.
     collision: str | None = None
+    # Set when an existing Source row already claims the computed destination.
+    # `--overwrite` replaces the file but cannot rehome that row, so the two
+    # would end up sharing one `raw_text_path` — see `apply_capture`.
+    collision_source_id: int | None = None
     overwrite: bool = False
 
 
@@ -177,6 +181,9 @@ class CaptureResult:
     source_id: int
     ingest_run_id: int
     raw_file_path: str
+    # True when the write replaced an existing file rather than creating one,
+    # so the result line reports a destructive write as one (#173).
+    replaced: bool = False
 
 
 @dataclass
@@ -419,6 +426,7 @@ def prepare_capture(
         # the note.
         proposal.abstract = authored_abstract or metadata.abstract
     proposal.raw_file = _build_raw_file(config, proposal, slug_source)
+    proposal.collision_source_id = _source_owning_path(config, proposal.raw_file.path)
     return proposal
 
 
@@ -429,6 +437,12 @@ def _authored_text(metadata: dict, *keys: str) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _source_owning_path(config: WorkspaceConfig, path: str) -> int | None:
+    """The id of the source whose raw capture already lives at `path`, if any."""
+    with open_session(config) as session:
+        return session.scalar(select(Source.id).where(Source.raw_text_path == path))
 
 
 def _generate_capture_metadata(
@@ -458,12 +472,27 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
         raise IngestError(f"Source already ingested (source id {proposal.duplicate_of})")
 
     target = config.root_path / proposal.raw_file.path
-    if target.exists() and not proposal.overwrite:
+    replacing = target.exists()
+    if replacing and not proposal.overwrite:
         raise IngestError(
             f"{proposal.raw_file.path} already exists. Re-run with --overwrite to replace "
             f"it, or point at a different input. (If this is the same recording captured "
             f"twice, check `wakil sources list` first.)"
         )
+    # --overwrite replaces the file, but it cannot rehome the Source row that
+    # already points at it. Two rows sharing one `raw_text_path` means
+    # `wakil enrich <old id>` reads the *new* text and files its memories and
+    # timeline entries under the old source — silent misattribution, so this is
+    # refused even with --overwrite (#173).
+    owner_id = _source_owning_path(config, proposal.raw_file.path)
+    if owner_id is not None:
+        raise IngestError(
+            f"{proposal.raw_file.path} is already the raw capture of source #{owner_id}. "
+            f"Overwriting it would leave two sources pointing at the same file. "
+            f"Archive that source first (`wakil sources archive {owner_id}`), or point "
+            f"at a different input."
+        )
+
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(proposal.raw_file.content, encoding="utf-8")
 
@@ -503,7 +532,11 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
             # constraint is what actually closes that window; this is just
             # surfacing it the same way an early duplicate-of hit is.
             session.rollback()
-            target.unlink(missing_ok=True)
+            # Only roll back a file this call created. Under --overwrite the
+            # write replaced content that was already on disk, and deleting it
+            # would turn a lost race into data loss.
+            if not replacing:
+                target.unlink(missing_ok=True)
             existing_id = session.scalar(
                 select(Source.id).where(
                     Source.workspace_id == workspace_id,
@@ -528,7 +561,10 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
         index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
         session.commit()
         return CaptureResult(
-            source_id=source.id, ingest_run_id=run.id, raw_file_path=proposal.raw_file.path
+            source_id=source.id,
+            ingest_run_id=run.id,
+            raw_file_path=proposal.raw_file.path,
+            replaced=replacing,
         )
 
 

@@ -142,15 +142,17 @@ def print_status(status: WorkspaceStatus) -> None:
             console.print(f"  [dim]{line}[/dim]")
 
 
-def _print_file_preview(proposed: ProposedFile) -> None:
+def _print_file_preview(proposed: ProposedFile, *, replacing: bool = False) -> None:
     preview = proposed.content[:1500]
     if len(proposed.content) > 1500:
         preview += "\n…"
     low_confidence = (
         proposed.confidence is not None and proposed.confidence < _LOW_CONFIDENCE_THRESHOLD
     )
-    title = f"NEW {proposed.path}"
-    border_style = "green"
+    # `REPLACE` rather than `NEW` when the write destroys an existing file: under
+    # `--overwrite --yes` this panel is the only record of the destructive write (#173).
+    title = f"{'REPLACE' if replacing else 'NEW'} {proposed.path}"
+    border_style = "yellow" if replacing else "green"
     if proposed.confidence is not None:
         title += f" (confidence {proposed.confidence:.2f})"
     if low_confidence:
@@ -219,22 +221,41 @@ def print_capture_proposal(proposal: CaptureProposal) -> None:
     console.print(Panel(header, title="Capture preview", border_style="cyan"))
     for warning in proposal.warnings:
         console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
+    owned = proposal.collision_source_id
+    replacing = bool(proposal.collision) and proposal.overwrite and owned is None
     if proposal.collision:
         # Before the confirm, not after: a --yes caller still needs to see
-        # why the run is about to abort (#173).
-        console.print(
-            f"[yellow]warning:[/yellow] {proposal.collision} already exists. "
-            "Capture will refuse to overwrite it; re-run with [bold]--overwrite[/bold] "
-            "to replace it, or point at a different input."
-        )
+        # why the run is about to abort — or, with --overwrite, what it is
+        # about to destroy (#173).
+        if owned is not None:
+            console.print(
+                f"[yellow]warning:[/yellow] {proposal.collision} is the raw capture of "
+                f"source [bold]#{owned}[/bold]. Capture will refuse it even with "
+                f"[bold]--overwrite[/bold], because both sources would then point at the "
+                f"same file. Archive source #{owned} first, or point at a different input."
+            )
+        elif replacing:
+            console.print(
+                f"[yellow]warning:[/yellow] {proposal.collision} already exists and "
+                "[bold]--overwrite[/bold] was given — its current contents will be "
+                "replaced by the capture below."
+            )
+        else:
+            console.print(
+                f"[yellow]warning:[/yellow] {proposal.collision} already exists. "
+                "Capture will refuse to overwrite it; re-run with [bold]--overwrite[/bold] "
+                "to replace it, or point at a different input."
+            )
     console.print("[bold]Raw capture:[/bold]")
-    _print_file_preview(proposal.raw_file)
+    _print_file_preview(proposal.raw_file, replacing=replacing)
 
 
 def print_capture_result(result: CaptureResult) -> None:
-    console.print(
-        f"Captured source [bold]#{result.source_id}[/bold]: [green]+ {result.raw_file_path}[/green]"
-    )
+    if result.replaced:
+        marker = f"[yellow]~ {result.raw_file_path} (replaced)[/yellow]"
+    else:
+        marker = f"[green]+ {result.raw_file_path}[/green]"
+    console.print(f"Captured source [bold]#{result.source_id}[/bold]: {marker}")
     console.print(
         f"[dim]Analyze and link it into the knowledge base with "
         f"`wakil enrich {result.source_id}`.[/dim]"
