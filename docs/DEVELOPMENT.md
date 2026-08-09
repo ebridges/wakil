@@ -218,3 +218,21 @@ Stopping after two rounds was deliberate, per this file's own entry on the perso
 `transcript`'s new truncation scenario pasted the `[SOURCE TRUNCATED: …]` marker into the scenario's `query`. In production, `_truncate_source` appends that marker to the *source text* — the untrusted content channel the model is asked to analyze, at the end of a long document, where it is easy to miss or to mistake for transcript content. `tests/evals/runner.py` renders `query` as the leading instruction and `workspace.overlay` files as pasted content, so the eval was testing the strictly easier case and would have kept passing if the notice had regressed into the source body.
 
 The rule generalizes past this one scenario: **an eval scenario's `query` is the operator's instruction, and `workspace.overlay` is everything the tool assembles.** Anything the code puts in the prompt on the operator's behalf — a truncation marker, a schema block, a related-notes digest — belongs in the overlay, positioned where the code positions it. A signal moved into the instruction slot tests instruction-following, not the behaviour under test.
+
+### A skill rule keyed on an input the call never receives is a bias, not a constraint
+
+**Established:** 2026-08-09 · **Source:** issue #176, PR #202 review rounds 1 and 2 — `note-revision/SKILL.md`, `entity-compile/SKILL.md`, `schema/entities/person.yaml`
+
+A rule shaped "use X if the page declares it, otherwise fall back to Y" reads like a constraint and behaves like an unconditional instruction to do Y, whenever X is not actually reachable. The model can't report that its premise was unavailable; it just always takes the else-branch. This shipped twice in one PR, in two different ways:
+
+- **No producer.** `note-revision` was told to take pronouns from a `pronouns:`/`gender:` field. Nothing declared that field in any entity schema and nothing ever wrote one, so the rule could only ever resolve to they/them — including on pages where a source had stated the pronouns outright.
+- **No channel.** `entity-compile` got the same rule, and `prepare_entity_compile` hands that call `post.content` — frontmatter stripped. Even after `person.yaml` declared the field, this call could not see it, so a page reading `pronouns: she/her` would have had its Compiled Truth *rewritten* to they/them. A durable rewrite of correct user content, by a rule added to prevent exactly that.
+
+Two checks before adding a rule that reads a field, a section, or a prior value:
+
+1. **Trace the producer.** Grep for something that writes it. If nothing does, the rule needs a supply side in the same change, or it is not a rule.
+2. **Trace the prompt.** Find the `build_*_prompt` for that DAG stage and confirm the value is in what it assembles. `note-revision` gets `current_full_content` (frontmatter included); `entity-compile` gets `entity_name` + two section strings. Two skills, same sentence, different reachability.
+
+When the value genuinely isn't available, don't pass it in reflexively — re-scope the rule to what the call *can* check. `entity-compile`'s became "carry forward whatever pronouns the prose already uses; never introduce one," which is satisfiable with its real inputs and happens to sit better with its additive-only doctrine anyway.
+
+Note that an eval will not catch this on its own: `tests/evals/runner.py` pastes whole files, frontmatter included, so a scenario written the obvious way passes while production fails. That is the sibling entry above ("An eval must put a production signal in the channel production puts it in"), applied to the input channel — the fix is to put the value where production puts it, which for this case meant carrying the pronouns in the page's prose.
