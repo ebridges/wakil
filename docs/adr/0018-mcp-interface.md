@@ -96,6 +96,34 @@ Expose wakil as an MCP server via a new `wakil mcp serve` subcommand
   CLI has, with no new review-mechanism questions — there's nothing to
   gate on a read.
 
+## Amendment (2026-08-09): metadata-only source maintenance is single-call
+
+`wakil sources relink|archive|unarchive` are exposed over MCP as three
+single-call write tools, not as prepare/apply pairs. This narrows the
+consequence recorded above — "there is no tool that writes anything without
+first returning a preview from a separate call" — so it is stated here rather
+than left to a docstring.
+
+The pair exists to put a reviewable diff between an agent and the user's
+Markdown, which is what working-agreement items 11/12 are about. These three
+tools write no Markdown at all: they move a `raw_text_path` pointer, or set
+`archived_at`/`archive_reason`/`superseded_by_id`, in SQLite. Every one is
+undone by another single call (`unarchive`, or a second `relink`), nothing
+they touch is durable knowledge under ADR 0007, and a preview of "this row
+will have `archived_at` set" is ceremony rather than review.
+
+The line this draws: **a prepare/apply pair is required for anything that
+writes Markdown, and for anything not reversible by a single further call.**
+Memory lifecycle transitions stay out of scope, as the Decision section says
+— not because they are metadata (they are), but because `promote` changes
+what grounds a query answer, which is a knowledge decision rather than a
+bookkeeping one.
+
+`relink` carries the one real risk in the group: it is agent-callable and it
+chooses which file `enrich` will read into a model prompt. It is therefore
+confined to non-hidden, non-`SKIPPED_DIRS` paths inside the workspace, and
+refuses a path another live source already owns.
+
 ## Sources
 
 - `PROMPT.md`, "Product Shape" ("the design should not prevent additional

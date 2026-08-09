@@ -5039,3 +5039,87 @@ def test_archive_rejects_a_self_reference_and_an_unknown_superseder(workspace, t
         archive_source(workspace, source_id, superseded_by=source_id)
     with pytest.raises(IngestError, match="No source with id"):
         archive_source(workspace, source_id, superseded_by=9999)
+
+
+def test_relink_refuses_a_path_another_source_owns(workspace, kb_path, transcript):
+    """The same one-source-per-path invariant `apply_capture` enforces —
+    without it relink is a back door to the silent misattribution capture
+    refuses, and this one is agent-callable over MCP."""
+    from wakil.app.ingest_service import relink_source
+
+    first = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    owner_id = apply_capture(workspace, first).source_id
+
+    other = kb_path / "another.txt"
+    other.write_text("Jane: a different call entirely.\n", encoding="utf-8")
+    second = prepare_capture(workspace, "transcript", _capture_client(), file=other)
+    second_id = apply_capture(workspace, second).source_id
+    original = second.raw_file.path
+
+    with pytest.raises(IngestError, match=f"raw capture of source #{owner_id}"):
+        relink_source(workspace, second_id, first.raw_file.path)
+    assert get_source(workspace, second_id).raw_text_path == original
+
+    # Relinking a source to the path it already holds is a no-op, not a clash.
+    assert relink_source(workspace, second_id, original).raw_text_path == original
+
+
+def test_relink_refuses_tooling_directories(workspace, kb_path, transcript):
+    """`.wakil/` holds the config and the SQLite DB, and `enrich` reads
+    `raw_text_path` into a model prompt."""
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+
+    hidden = kb_path / ".wakil" / "notes.md"
+    hidden.parent.mkdir(exist_ok=True)
+    hidden.write_text("internal\n", encoding="utf-8")
+
+    with pytest.raises(IngestError, match="doesn't treat as knowledge base content"):
+        relink_source(workspace, source_id, ".wakil/notes.md")
+
+
+def test_archiving_unblocks_the_path_and_the_hash(workspace, kb_path, transcript):
+    """The collision error tells the user to archive and retry. Without an
+    `archived_at` filter, following that instruction hit the same error
+    again with nothing left to try."""
+    from wakil.app.ingest_service import archive_source
+
+    first = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    first_id = apply_capture(workspace, first).source_id
+
+    archive_source(workspace, first_id, reason="bad capture, redoing")
+
+    # Same destination, different content, without clobbering the fixture:
+    # the path check must no longer fire.
+    (kb_path / "redo").mkdir(exist_ok=True)
+    same_shape = kb_path / "redo" / transcript.name
+    same_shape.write_text("Jane: the corrected transcript.\n", encoding="utf-8")
+    redo = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+    assert redo.collision_source_id is None
+    redo.overwrite = True
+    assert apply_capture(workspace, redo).source_id != first_id
+
+    # And the identical file re-captured after archiving isn't a duplicate.
+    second = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    assert second.duplicate_of is None
+
+
+def test_backfill_skips_archived_sources(workspace, kb_path, transcript):
+    """One paid model call per source; archiving means stop spending here."""
+    from wakil.app.ingest_service import archive_source, plan_abstract_backfill
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        assert source is not None
+        source.metadata_json = json.dumps({})  # drop the abstract, so it's a candidate
+        session.commit()
+
+    assert [i.source_id for i in plan_abstract_backfill(workspace, _capture_client())] == [
+        source_id
+    ]
+    archive_source(workspace, source_id)
+    assert plan_abstract_backfill(workspace, _capture_client()) == []

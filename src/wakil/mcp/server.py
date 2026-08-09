@@ -11,7 +11,9 @@ knowledge base — the MCP analogue of the CLI's preview-then-confirm gate.
 The `sources_*` maintenance tools (`relink`, `archive`, `unarchive`) are
 deliberately single-call instead: they touch only operational metadata in
 SQLite, never the user's Markdown, and each is reversible by another call.
-A prepare/apply pair would be ceremony over a pointer update.
+A prepare/apply pair would be ceremony over a pointer update. That narrows
+ADR 0018's original "no tool writes without a preview call" consequence, so
+it is recorded as an amendment in the ADR itself, not just here.
 
 Also exposes `skills/mcp-coordinator/SKILL.md` (the fast-capture coordinator
 skill, docs/adr/0019) as an MCP resource so a connected client sees it with

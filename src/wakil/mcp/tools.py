@@ -239,6 +239,9 @@ def _source_dict(source) -> dict:
         "archived_at": source.archived_at.isoformat() if source.archived_at else None,
         "archive_reason": source.archive_reason,
         "superseded_by_id": source.superseded_by_id,
+        # `sources_relink` exists to change this, so the caller has to be able
+        # to see what it ended up as.
+        "raw_text_path": source.raw_text_path,
         "source_type": source.source_type,
         "title": source.title,
         "origin": source.origin,

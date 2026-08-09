@@ -1011,3 +1011,68 @@ def test_the_revision_phase_is_not_checkpointed_when_a_target_was_missing(
     # candidate set.
     assert "revision" not in phases
     assert "extraction" in phases
+
+# --- sources relink / archive / unarchive at the CLI layer (issues #178, #183) ---
+
+
+def test_sources_archive_unarchive_round_trip(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    archived = runner.invoke(
+        app, ["-w", str(kb_path), "sources", "archive", "1", "--reason", "wrong recording"]
+    )
+    assert archived.exit_code == 0, archived.output
+
+    listed = runner.invoke(app, ["-w", str(kb_path), "sources", "list"])
+    assert "No sources match" in listed.output
+
+    # --include-archived has to *say* which rows are archived, or it can't be
+    # used for the one thing it exists for.
+    with_archived = runner.invoke(
+        app, ["-w", str(kb_path), "sources", "list", "--include-archived"]
+    )
+    assert with_archived.exit_code == 0, with_archived.output
+    assert "archived" in with_archived.output
+
+    shown = runner.invoke(app, ["-w", str(kb_path), "sources", "show", "1"])
+    assert "Archived" in shown.output
+    assert "wrong recording" in shown.output
+
+    restored = runner.invoke(app, ["-w", str(kb_path), "sources", "unarchive", "1"])
+    assert restored.exit_code == 0, restored.output
+    assert "2026-07-09 Fake Capture Title" in runner.invoke(
+        app, ["-w", str(kb_path), "sources", "list"]
+    ).output
+
+
+def test_sources_archive_unknown_id_exits_non_zero(kb_path: Path):
+    runner.invoke(app, ["init", str(kb_path)])
+    result = runner.invoke(app, ["-w", str(kb_path), "sources", "archive", "42"])
+    assert result.exit_code == 1
+    assert "No source with id 42" in result.output
+
+
+def test_sources_relink_reports_and_refuses(kb_path: Path, monkeypatch):
+    _client_queue(monkeypatch, FakeCaptureClient())
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    moved = kb_path / "sources" / "transcripts" / "hand-fixed.md"
+    moved.write_text("---\ntype: source\n---\n\n# Fixed\n", encoding="utf-8")
+    ok = runner.invoke(
+        app, ["-w", str(kb_path), "sources", "relink", "1", "sources/transcripts/hand-fixed.md"]
+    )
+    assert ok.exit_code == 0, ok.output
+    assert "hand-fixed.md" in ok.output
+
+    missing = runner.invoke(
+        app, ["-w", str(kb_path), "sources", "relink", "1", "sources/transcripts/nope.md"]
+    )
+    assert missing.exit_code == 1
+    assert "No file at" in missing.output
+
+    outside = runner.invoke(app, ["-w", str(kb_path), "sources", "relink", "1", "/etc/hosts"])
+    assert outside.exit_code == 1
+    assert "outside the knowledge base" in outside.output

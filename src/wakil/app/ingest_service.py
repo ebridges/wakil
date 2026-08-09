@@ -44,10 +44,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from wakil.app.search_service import SearchHit, search_workspace
-from wakil.app.workspace_service import index_notes, open_session
+from wakil.app.workspace_service import SourceRelink, index_notes, open_session
 from wakil.config.settings import WorkspaceConfig, workspace_date, workspace_today
 from wakil.integrations import git
 from wakil.integrations.web import fetch_article
+from wakil.knowledge.markdown import SKIPPED_DIRS
 from wakil.knowledge.wikilinks import WIKILINK_RE as _WIKILINK_RE
 from wakil.knowledge.wikilinks import normalize_target as _normalize_link_path
 from wakil.llm.client import ModelClient
@@ -209,6 +210,11 @@ class CaptureResult:
     # True when the write replaced an existing file rather than creating one,
     # so the result line reports a destructive write as one (#173).
     replaced: bool = False
+    # Renamed raw captures this call's indexing repointed. Carried out to the
+    # caller because `wakil ingest`/`wakil enrich` index too, and a repoint
+    # applied with no output is the silent pointer change working agreement
+    # item 12 rules out — `wakil index` was the only path that reported it.
+    sources_relinked: list["SourceRelink"] = field(default_factory=list)
 
 
 @dataclass
@@ -311,6 +317,8 @@ class EnrichmentResult:
     # enrichment was prepared — the preview's warnings are shown pre-apply
     # and don't cover this, so it's surfaced here instead.
     stale_updates_skipped: list[str] = field(default_factory=list)
+    # See CaptureResult.sources_relinked.
+    sources_relinked: list["SourceRelink"] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -445,8 +453,14 @@ def prepare_capture(
         candidates = [content_hash]
         if legacy_hash is not None and legacy_hash != content_hash:
             candidates.append(legacy_hash)
+        # Archived rows don't block a re-capture: archiving a bad attempt so
+        # the redo can land is the workflow #183 exists for, and blocking on
+        # a row the user just declared dead is the same dead end the path
+        # collision had.
         existing = session.scalar(
-            select(Source.id).where(Source.content_hash.in_(candidates))
+            select(Source.id).where(
+                Source.content_hash.in_(candidates), Source.archived_at.is_(None)
+            )
         )
         if existing is not None:
             proposal.duplicate_of = existing
@@ -482,10 +496,23 @@ def _authored_text(metadata: dict, *keys: str) -> str | None:
     return None
 
 
-def _source_owning_path(config: WorkspaceConfig, path: str) -> int | None:
-    """The id of the source whose raw capture already lives at `path`, if any."""
+def _source_owning_path(
+    config: WorkspaceConfig, path: str, *, exclude: int | None = None
+) -> int | None:
+    """The id of the *live* source whose raw capture lives at `path`, if any.
+
+    Archived rows are skipped, which is what makes `wakil sources archive` the
+    escape hatch the collision error tells the user to reach for (#183) —
+    without the filter, following that instruction hit the identical error
+    again with nothing left to try.
+    """
     with open_session(config) as session:
-        return session.scalar(select(Source.id).where(Source.raw_text_path == path))
+        query = select(Source.id).where(
+            Source.raw_text_path == path, Source.archived_at.is_(None)
+        )
+        if exclude is not None:
+            query = query.where(Source.id != exclude)
+        return session.scalar(query)
 
 
 def _generate_capture_metadata(
@@ -527,9 +554,10 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
         raise IngestError(
             f"{proposal.raw_file.path} is already the raw capture of source #{owner_id} "
             f"(see `wakil sources show {owner_id}`). Writing there would leave two "
-            f"sources pointing at one file, so `--overwrite` won't clear this. Rename "
-            f"the input so it lands on a different path, or move source #{owner_id}'s "
-            f"file aside first."
+            f"sources pointing at one file, so `--overwrite` won't clear this. If this "
+            f"capture supersedes that one, archive it — `wakil sources archive "
+            f"{owner_id} --superseded-by <new id>` — which frees the path; otherwise "
+            f"rename the input so it lands somewhere else."
         )
     if replacing and not proposal.overwrite:
         raise IngestError(
@@ -603,13 +631,16 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
             ),
         )
         session.add(run)
-        index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
+        indexed = index_notes(
+            session, workspace_id, config.root_path, prune=not config.is_linked_worktree
+        )
         session.commit()
         return CaptureResult(
             source_id=source.id,
             ingest_run_id=run.id,
             raw_file_path=proposal.raw_file.path,
             replaced=replacing,
+            sources_relinked=indexed.sources_relinked,
         )
 
 
@@ -628,7 +659,11 @@ def plan_abstract_backfill(
     metadata model call per source, same contract as capture itself."""
     items: list[AbstractBackfillItem] = []
     with open_session(config) as session:
-        sources = session.scalars(select(Source).order_by(Source.id)).all()
+        # Archived rows are excluded: archiving means "stop spending attention
+        # here", and a backfill is one paid model call per source.
+        sources = session.scalars(
+            select(Source).where(Source.archived_at.is_(None)).order_by(Source.id)
+        ).all()
         for source in sources:
             metadata = json.loads(source.metadata_json or "{}")
             if metadata.get("abstract") or not source.raw_text_path:
@@ -804,11 +839,32 @@ def relink_source(config: WorkspaceConfig, source_id: int, new_path: str) -> Sou
             f"{new_path} is outside the knowledge base ({root}). "
             "A source's raw capture has to live in the workspace."
         )
+    # Inside the workspace isn't enough: `.git/` and `.wakil/` are inside it,
+    # and `.wakil/` holds the config and the SQLite database. `enrich` feeds
+    # `raw_text_path` straight into a model prompt, and this tool is
+    # agent-callable over MCP. Same exclusion `discover_markdown_files` uses.
+    relative_parts = target.relative_to(root).parts
+    if any(part.startswith(".") or part in SKIPPED_DIRS for part in relative_parts[:-1]):
+        raise IngestError(
+            f"{new_path} is inside a directory wakil doesn't treat as knowledge base "
+            "content. A source's raw capture has to be a note, not tooling state."
+        )
     if not target.is_file():
         raise IngestError(f"No file at {new_path} — nothing to relink to.")
     # Store the workspace-relative form, so `../kb/sources/x.md` and a symlinked
     # route to the same file both land as the one path everything else expects.
     relative = target.relative_to(root).as_posix()
+    # The same one-source-per-path invariant `apply_capture` enforces. Without
+    # it, relink is a back door to exactly the silent misattribution capture
+    # refuses: `wakil enrich <other id>` would read this file and file its
+    # memories under that source instead.
+    owner_id = _source_owning_path(config, relative, exclude=source_id)
+    if owner_id is not None:
+        raise IngestError(
+            f"{relative} is already the raw capture of source #{owner_id}. Two sources "
+            f"cannot share one file — archive source #{owner_id} first "
+            f"(`wakil sources archive {owner_id}`), or relink to a different path."
+        )
     with open_session(config) as session:
         workspace_id, _ = _require_workspace_ids(session, config)
         row = session.get(Source, source_id)
@@ -3120,7 +3176,9 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
             ),
         )
         session.add(run)
-        index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
+        indexed = index_notes(
+            session, workspace_id, config.root_path, prune=not config.is_linked_worktree
+        )
         session.commit()
 
         # The resume window this feature exists for is closed once the
@@ -3136,6 +3194,7 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
             memories_created=len(memory_rows),
             relationships_created=relationships_created,
             stale_updates_skipped=stale_updates_skipped,
+            sources_relinked=indexed.sources_relinked,
         )
 
 
