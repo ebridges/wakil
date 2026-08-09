@@ -847,3 +847,36 @@ def test_enrich_exits_non_zero_when_every_target_is_off_this_branch(
     assert "concepts/only-on-another-branch.md" in result.output
     # Actionable: says what to do next, not just that it failed.
     assert "--force" in result.output
+
+
+def test_a_failed_cross_branch_enrich_writes_nothing_at_all(kb_path: Path, monkeypatch):
+    """"Nothing was written" has to be true, and the `--force` remediation it
+    prints has to be safe. Committing the memories and flipping the source to
+    `enriched` before printing it made the message false and turned the advice
+    into a duplicate-memory instruction."""
+    from sqlalchemy import select
+
+    from wakil.app.workspace_service import open_session
+    from wakil.config.settings import WorkspaceConfig
+    from wakil.storage.schema import IngestRun, Memory, Source
+
+    _client_queue(
+        monkeypatch,
+        FakeCaptureClient(),
+        FakeClient((NO_NOTE_EXTRACTION_JSON, UPDATE_ELSEWHERE_RESOLUTION_JSON)),
+    )
+    transcript = _init(kb_path)
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
+    assert result.exit_code == 1, result.output
+
+    config = WorkspaceConfig.load(kb_path)
+    with open_session(config) as session:
+        assert session.scalars(select(Memory)).all() == []
+        assert session.scalar(select(Source.status).where(Source.id == 1)) == "raw"
+        operations = [
+            json.loads(r.metadata_json or "{}").get("operation")
+            for r in session.scalars(select(IngestRun)).all()
+        ]
+    assert operations == ["capture"]

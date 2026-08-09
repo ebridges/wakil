@@ -24,6 +24,7 @@ from wakil.ui.console import (
     print_enrichment_result,
     print_entity_update_preview,
     print_index_result,
+    print_missing_update_targets,
     print_proposal_issues,
     print_query_result,
     print_root_issues,
@@ -511,7 +512,12 @@ def _confirm_and_apply_enrichment(
     config: WorkspaceConfig, *, proposal: "EnrichmentProposal", landing, yes: bool
 ) -> "EnrichmentResult":
     from wakil.app.git_service import GitServiceError, abandon_landing, assert_landing_intact
-    from wakil.app.ingest_service import IngestError, apply_enrichment, validate_proposal
+    from wakil.app.ingest_service import (
+        IngestError,
+        MissingUpdateTargetsError,
+        apply_enrichment,
+        validate_proposal,
+    )
 
     print_enrichment_proposal(proposal)
     issues = validate_proposal(proposal, kb_root=config.root_path)
@@ -530,7 +536,16 @@ def _confirm_and_apply_enrichment(
         assert_landing_intact(config, landing)
         result = apply_enrichment(config, proposal)
     except GitServiceError as exc:
+        # Drift: the tree is another process's now, so don't switch out from
+        # under it -- report and stay put (#182/#195).
         console.print(f"[red]Enrichment failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    except MissingUpdateTargetsError as exc:
+        # Not a quiet success: entity resolution found real targets, they just
+        # aren't in this working tree yet (#188). Exiting 0 here let a whole
+        # source's material land nowhere while the batch appeared to succeed.
+        print_missing_update_targets(exc.targets, source_id=proposal.source_id)
+        abandon_landing(config, landing)
         raise typer.Exit(code=1) from exc
     except IngestError as exc:
         console.print(f"[red]Enrichment failed:[/red] {exc}")
@@ -746,28 +761,10 @@ def enrich(
                 phase="enrichment",
             )
         else:
+            # The missing-update-target case never reaches here:
+            # `apply_enrichment` raises before it commits, so the run is a
+            # true no-op (#188).
             abandon_landing(config, landing)
-            if proposal.missing_update_targets:
-                # Not a quiet success: entity resolution found real targets,
-                # they just aren't in this working tree yet (#188). Exiting 0
-                # here let a whole source's material land nowhere while the
-                # batch appeared to succeed.
-                console.print(
-                    "[red]Nothing was written for this source.[/red] Entity resolution "
-                    "resolved targets that aren't in the working tree:"
-                )
-                for missing in proposal.missing_update_targets:
-                    where = (
-                        f"on [bold]{', '.join(missing.branches)}[/bold]"
-                        if missing.branches
-                        else "nowhere wakil can see"
-                    )
-                    console.print(f"  - {missing.name} -> {missing.path} ({where})")
-                console.print(
-                    "[dim]Merge the branch that holds them, then re-run "
-                    f"`wakil enrich {source_id} --force`.[/dim]"
-                )
-                raise typer.Exit(code=1)
             console.print("[dim]No files were written; nothing to land.[/dim]")
 
     if result.files_written:

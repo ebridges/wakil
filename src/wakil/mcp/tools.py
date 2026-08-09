@@ -30,6 +30,7 @@ from wakil.app.git_service import (
 from wakil.app.graph_service import Direction, TraversalError, traverse
 from wakil.app.ingest_service import (
     IngestError,
+    MissingUpdateTargetsError,
     apply_capture,
     apply_enrichment,
     get_source,
@@ -601,26 +602,23 @@ def enrich_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str
 
         try:
             result = apply_enrichment(config, proposal)
+        except MissingUpdateTargetsError as exc:
+            # A coordinating agent must not read this as success: the source's
+            # material landed nowhere because its targets live on an unmerged
+            # ingest branch (#188). Nothing was persisted, so retrying after
+            # the merge is safe rather than duplicating memories.
+            abandon_landing(config, landing)
+            raise ToolError(
+                f"{exc}. Nothing was recorded either — no memories, no status change "
+                "— so merge the branch that holds them, then re-run enrichment with "
+                "force=true."
+            ) from exc
         except IngestError as exc:
             abandon_landing(config, landing)
             raise ToolError(str(exc)) from exc
 
         if not result.files_written:
             abandon_landing(config, landing)
-            if proposal.missing_update_targets:
-                # A coordinating agent must not read this as success: the
-                # source's material landed nowhere because its targets live on
-                # an unmerged ingest branch (#188).
-                detail = "; ".join(
-                    f"{m.name} -> {m.path}"
-                    + (f" (on {', '.join(m.branches)})" if m.branches else "")
-                    for m in proposal.missing_update_targets
-                )
-                raise ToolError(
-                    "Nothing was written for this source. Entity resolution resolved "
-                    f"targets that aren't in the working tree: {detail}. Merge the "
-                    "branch that holds them, then re-run enrichment with force=true."
-                )
             return {
                 "files_written": [],
                 "memories_created": 0,

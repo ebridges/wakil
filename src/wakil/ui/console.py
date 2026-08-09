@@ -383,6 +383,28 @@ def print_enrichment_proposal(proposal: EnrichmentProposal) -> None:
         console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
 
 
+def print_missing_update_targets(targets, *, source_id: int) -> None:
+    console.print(
+        "[red]Nothing was written for this source.[/red] Entity resolution "
+        "resolved targets that aren't in the working tree:"
+    )
+    for missing in targets:
+        where = (
+            f"on [bold]{escape(', '.join(missing.branches))}[/bold]"
+            if missing.branches
+            else "nowhere wakil can see"
+        )
+        # Names and paths come from model output. A name like `Q3 [draft]`
+        # is read as a style tag and disappears — and the name is the one
+        # thing this message exists to convey.
+        console.print(f"  - {escape(missing.name)} -> {escape(missing.path)} ({where})")
+    console.print(
+        "[dim]Nothing was recorded either — no memories, no status change — so "
+        "after merging the branch that holds them, re-run "
+        f"`wakil enrich {source_id} --force`.[/dim]"
+    )
+
+
 _ACTION_STYLES = {"create": "green", "update": "cyan", "skip": "dim"}
 
 

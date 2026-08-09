@@ -300,7 +300,10 @@ the preview says so — though a transcript still gets the normal cleanup pass.
 When enrichment resolves an entity page that exists only on an earlier,
 unmerged ingest branch — normal when you capture a cluster of related sources
 before reviewing any PRs — it now exits non-zero naming that branch, instead
-of reporting success with nothing written.
+of reporting success with nothing written. The run is abandoned whole: no
+memories are recorded and the source stays `raw`, so merging the branch and
+re-running with `--force` completes the source rather than filing a second
+copy of everything it extracted.
 
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:

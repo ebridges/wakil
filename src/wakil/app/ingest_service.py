@@ -104,6 +104,28 @@ class IngestError(RuntimeError):
     pass
 
 
+class MissingUpdateTargetsError(IngestError):
+    """Enrichment produced no file writes because every target it resolved
+    lives on a branch that isn't merged into this working tree (#188).
+
+    Raised before anything is persisted so the run really is a no-op: the
+    caller's remediation is `wakil enrich <id> --force` after merging, and
+    that re-records every candidate memory, so a partially-applied run would
+    turn the advice into a duplicate-memory instruction. Carries the targets
+    structured so the CLI can render them and the MCP layer can relay them."""
+
+    def __init__(self, targets: list["_MissingUpdateTarget"]) -> None:
+        self.targets = targets
+        detail = "; ".join(
+            f"{t.name} -> {t.path}" + (f" (on {', '.join(t.branches)})" if t.branches else "")
+            for t in targets
+        )
+        super().__init__(
+            "Nothing was written for this source. Entity resolution resolved targets "
+            f"that aren't in the working tree: {detail}"
+        )
+
+
 @dataclass
 class ProposedFile:
     """A new file to write. `confidence` mirrors `EntityUpdate.confidence` —
@@ -2940,6 +2962,16 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
     files_written = _write_new_proposed_files(config, proposal)
     updated_files, stale_updates_skipped = _apply_entity_updates(config, proposal)
     files_written += updated_files
+
+    # Before the session, so this really is a no-op: nothing reached disk (that
+    # is what the empty `files_written` means) and nothing reaches the database
+    # either. Committing here instead would record the memories, flip the
+    # source to `enriched`, and then tell the user to re-run with `--force` —
+    # advice that duplicates every memory it just wrote (#188). Checkpoints are
+    # deliberately left in place, same as the validation failure above, so the
+    # post-merge re-run resumes instead of re-paying for the model calls.
+    if not files_written and proposal.missing_update_targets:
+        raise MissingUpdateTargetsError(proposal.missing_update_targets)
 
     with open_session(config) as session:
         workspace_id, user_id = _require_workspace_ids(session, config)
