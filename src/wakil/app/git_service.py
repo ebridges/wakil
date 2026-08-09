@@ -205,13 +205,7 @@ def abandon_landing(config: WorkspaceConfig, context: LandingContext) -> None:
     """
     if context.local:
         return
-    if context.branch is not None:
-        try:
-            if git.current_branch(config.root_path) != context.branch:
-                return
-        except git.GitError:
-            return
-    _return_to_default(config)
+    _return_to_default(config, context.branch)
 
 
 def land_ingestion(
@@ -291,12 +285,12 @@ def land_ingestion(
         # detecting drift is that someone else owns this tree.
         raise
     except GitServiceError:
-        _return_to_default(config)
+        _return_to_default(config, landed_on)
         raise
 
     if pr_url:
         _attach_pr_to_change(config, sha, pr_url, ingest_run_id)
-    returned_to = _return_to_default(config)
+    returned_to = _return_to_default(config, landed_on)
     return CommitOutcome(
         branch=landed_on,
         commit_sha=sha,
@@ -507,17 +501,27 @@ def _remember_source_pr(config: WorkspaceConfig, source_id: int, pr_url: str) ->
         session.commit()
 
 
-def _return_to_default(config: WorkspaceConfig) -> str | None:
+def _return_to_default(config: WorkspaceConfig, expected: str | None = None) -> str | None:
     """Leave the working tree on the repo's default branch.
 
-    Best-effort: a failure here leaves the session on the ingest branch,
-    which is recoverable, whereas raising would fail a command whose work is
-    already committed and pushed. Returns the branch actually ended up on, so
-    the caller reports an observation rather than an intention."""
+    `expected` is the branch this landing owns. When HEAD is something else,
+    another process took the tree and this returns without switching — the
+    rule is "return once the work is durable in git *and the tree is still
+    ours*, stay put otherwise", and the second clause has to live here rather
+    than in each caller. The windows are wide: `_land_pr` asserts HEAD before
+    the push, but the push plus a 120-second `gh` timeout run after that.
+
+    Best-effort otherwise: a failure here leaves the session on the ingest
+    branch, which is recoverable, whereas raising would fail a command whose
+    work is already committed and pushed. Returns the branch actually ended
+    up on, so the caller reports an observation rather than an intention."""
     root = config.root_path
     try:
+        current = git.current_branch(root)
+        if expected is not None and current != expected:
+            return current
         target = git.require_default_branch(root)
-        if git.current_branch(root) != target:
+        if current != target:
             git.checkout(root, target)
         return git.current_branch(root)
     except git.GitError:

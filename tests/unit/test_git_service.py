@@ -1093,3 +1093,42 @@ def test_abandon_still_returns_when_the_tree_is_ours(git_kb):
     abandon_landing(git_kb, landing)
 
     assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == default
+
+
+def test_drift_during_the_pr_step_does_not_yank_on_the_success_path(git_kb, monkeypatch):
+    """`_land_pr` asserts HEAD before the push, but the push plus a 120s `gh`
+    timeout run after that. A process taking the tree in that window used to
+    be switched to the default branch, and the landing reported success."""
+    root = git_kb.root_path
+    _add_local_origin(root)  # without a remote, `_land_pr` returns before the window
+    source_id = _insert_source(git_kb, title="Late Drift")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Late Drift", local=False)
+    assert landing.branch is not None
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "d.md").write_text("hi\n", encoding="utf-8")
+
+    def _steal_the_tree(*args, **kwargs):
+        _git(root, "switch", "-q", "-c", "other-process-branch")
+        return "https://pr.url/1"
+
+    monkeypatch.setattr("wakil.app.git_service.gh_available", lambda: True)
+    monkeypatch.setattr("wakil.app.git_service.find_pull_request", lambda *a, **k: None)
+    monkeypatch.setattr("wakil.app.git_service.git.push_branch", lambda r, name: None)
+    monkeypatch.setattr("wakil.app.git_service.create_pull_request", _steal_the_tree)
+
+    outcome = land_ingestion(
+        git_kb,
+        landing,
+        source_id=source_id,
+        files=["drafts/d.md"],
+        title="Late Drift",
+        summary=None,
+        ingest_run_id=None,
+        kind="source",
+        phase="capture",
+    )
+
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == "other-process-branch"
+    # And the outcome reports where the tree actually is, not where we meant
+    # to leave it.
+    assert outcome.returned_to == "other-process-branch"
