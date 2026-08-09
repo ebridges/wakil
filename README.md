@@ -305,11 +305,15 @@ for that step; set `WAKIL_GIT_COMMIT_TIMEOUT` (seconds) to change it.
 If the commit does time out, wakil stays on the ingest branch with your changes
 still staged, clears the `.git/index.lock` the killed process leaves behind
 (without which every later git command in the repo fails), and saves the commit
-message it was going to use. The error prints the command to finish by hand:
+message it was going to use. The error prints the exact command to finish by
+hand — run it from that branch, without switching away first:
 
 ```bash
-git -C <workspace> commit -F .git/COMMIT_EDITMSG
+git -C <workspace> commit -F <workspace>/.git/COMMIT_EDITMSG
 ```
+
+The push and pull request don't happen in that case, so `wakil git summary`
+won't show the change until you push the branch and open the PR yourself.
 
 ## Entities: compiled pages
 

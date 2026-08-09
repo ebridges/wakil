@@ -6,6 +6,8 @@ write helpers raise GitError so callers can surface what went wrong.
 
 import contextlib
 import os
+import shlex
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -29,6 +31,18 @@ class GitError(RuntimeError):
     pass
 
 
+class GitTimeout(GitError):
+    """We killed the git process because it exceeded its deadline.
+
+    Typed rather than sniffed from the message: `_run_git_checked` embeds the
+    full argv in its failure text, and that argv includes the commit message
+    — which is model-generated from ingested content. A transcript titled
+    "the day our API timed out" was enough to misclassify an ordinary commit
+    failure as a timeout and route it into stale-lock cleanup, deleting an
+    `index.lock` held by a live process.
+    """
+
+
 def commit_timeout() -> int:
     """Seconds to allow `git commit`. Override with WAKIL_GIT_COMMIT_TIMEOUT.
 
@@ -45,6 +59,9 @@ def commit_timeout() -> int:
         value = 0
     if value > 0:
         return value
+    # Plain stderr rather than the Rich console the CLI uses: this module is
+    # also imported under `wakil mcp serve`, where anything on stdout would
+    # corrupt the JSON-RPC stream.
     print(
         f"warning: ignoring {_COMMIT_TIMEOUT_ENV}={raw!r} (not a positive number of "
         f"seconds); using {COMMIT_TIMEOUT_SECONDS}.",
@@ -90,15 +107,38 @@ def _run_git_checked(root: Path, *args: str, timeout: int = 60) -> str:
             capture_output=True,
             text=True,
             timeout=timeout,
+            # Own process group, so a timeout can kill git's *descendants*
+            # too. `subprocess.run` only SIGKILLs the direct child; a signing
+            # helper or hook survives it, reparented to init. That matters
+            # beyond a stray GUI prompt: a hook that itself runs git can
+            # re-take `.git/index.lock` after `_recover_from_killed_commit`
+            # has already cleaned it up.
+            start_new_session=True,
         )
     except subprocess.TimeoutExpired as exc:
-        raise GitError(f"git {args[0]} timed out after {timeout} seconds.") from exc
+        _kill_process_group(exc)
+        raise GitTimeout(f"git {args[0]} timed out after {timeout} seconds.") from exc
     except OSError as exc:
         raise GitError(f"git {args[0]} failed: {exc}") from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         raise GitError(f"git {' '.join(args)} failed: {detail}")
     return result.stdout.strip()
+
+
+def _kill_process_group(exc: subprocess.TimeoutExpired) -> None:
+    """SIGKILL the timed-out child's whole process group.
+
+    `subprocess.run` has already killed and reaped the direct child by the
+    time it raises, but anything git spawned (a hook, a signing helper) is
+    still running. Best-effort: the group may already be gone, and on the
+    outside chance the pid is unavailable there is nothing to do.
+    """
+    pid = getattr(exc, "pid", None)
+    if pid is None:
+        return
+    with contextlib.suppress(OSError, ProcessLookupError, PermissionError):
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
 
 
 def changed_files(root: Path) -> list[str]:
@@ -188,10 +228,8 @@ def stage_and_commit(root: Path, paths: list[str], message: str) -> str:
     _run_git_checked(root, "add", "--", *paths)
     try:
         _run_git_checked(root, "commit", "-m", message, "--", *paths, timeout=commit_timeout())
-    except GitError as exc:
-        if "timed out" not in str(exc):
-            raise
-        raise GitError(_recover_from_killed_commit(root, message, exc)) from exc
+    except GitTimeout as exc:
+        raise GitTimeout(_recover_from_killed_commit(root, message, exc)) from exc
     return _run_git_checked(root, "rev-parse", "HEAD")
 
 
@@ -219,24 +257,37 @@ def _recover_from_killed_commit(root: Path, message: str, exc: GitError) -> str:
     """
     git_dir = _git_dir(root)
     cleaned = []
+    saved_message: Path | None = None
     if git_dir is not None:
         for lock in [git_dir / "index.lock", *git_dir.glob("next-index-*.lock")]:
             with contextlib.suppress(OSError):
                 lock.unlink()
                 cleaned.append(lock.name)
+        editmsg = git_dir / "COMMIT_EDITMSG"
         with contextlib.suppress(OSError):
-            (git_dir / "COMMIT_EDITMSG").write_text(message, encoding="utf-8")
+            editmsg.write_text(message, encoding="utf-8")
+            saved_message = editmsg
 
-    lines = [str(exc)]
-    if "commit" in str(exc):
-        lines.append(
-            "If it was waiting on an interactive signing prompt, raise "
-            f"{_COMMIT_TIMEOUT_ENV} (seconds) and try again."
-        )
+    lines = [
+        str(exc),
+        "If it was waiting on an interactive signing prompt, raise "
+        f"{_COMMIT_TIMEOUT_ENV} (seconds) and try again.",
+    ]
     if cleaned:
         lines.append(f"Removed the stale {', '.join(cleaned)} the killed process left behind.")
     lines.append("Your changes are still staged. Finish the commit by hand with:")
-    lines.append(f"    git -C {root} commit -F .git/COMMIT_EDITMSG")
+    if saved_message is not None:
+        # Absolute path rather than `.git/COMMIT_EDITMSG`: in a linked
+        # worktree `<root>/.git` is a *file*, so the relative form fails with
+        # "could not read log file: Not a directory".
+        lines.append(f"    git -C {root} commit -F {saved_message}")
+    else:
+        # Nothing was saved, so `-F` would commit these files under whatever
+        # stale message a previous commit happened to leave behind.
+        subject = message.splitlines()[0] if message else ""
+        lines.append(f"    git -C {root} commit -m {shlex.quote(subject)}")
+        if "\n" in message:
+            lines.append("    (subject only — the message body could not be preserved)")
     return "\n".join(lines)
 
 

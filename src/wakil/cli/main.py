@@ -347,19 +347,19 @@ def _land_written_files(
     if landing.local:
         console.print("[dim]--local: files written, not committed.[/dim]")
         return
-    console.print("[dim]Committing… approve the signing prompt if one appears.[/dim]")
     try:
-        outcome = land_ingestion(
-            config,
-            landing,
-            source_id=source_id,
-            files=files,
-            title=title,
-            summary=summary,
-            ingest_run_id=ingest_run_id,
-            kind=kind,
-            phase=phase,
-        )
+        with console.status("Committing (approve the signing prompt if one appears)..."):
+            outcome = land_ingestion(
+                config,
+                landing,
+                source_id=source_id,
+                files=files,
+                title=title,
+                summary=summary,
+                ingest_run_id=ingest_run_id,
+                kind=kind,
+                phase=phase,
+            )
     except GitServiceError as exc:
         # Name the branch: a failed landing deliberately leaves HEAD on the
         # ingest branch (so staged work isn't stranded), and saying nothing

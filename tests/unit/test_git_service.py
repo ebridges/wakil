@@ -517,12 +517,15 @@ def test_a_killed_commit_leaves_the_repo_usable(git_kb, monkeypatch):
     # No stale locks: the repo is still writable by git.
     assert list((root / ".git").glob("*.lock")) == []
     # And the message the commit would have had is recoverable.
-    assert "a wakil message" in (root / ".git" / "COMMIT_EDITMSG").read_text()
-    assert "commit -F .git/COMMIT_EDITMSG" in message
+    editmsg = root / ".git" / "COMMIT_EDITMSG"
+    assert "a wakil message" in editmsg.read_text()
+    # Absolute path: `.git` is a *file* in a linked worktree, so the relative
+    # form fails there with "could not read log file: Not a directory".
+    assert f"commit -F {editmsg}" in message
 
     # The advertised recovery actually runs, once the human-paced step is done.
     hook.unlink()
-    _git(root, "commit", "-F", ".git/COMMIT_EDITMSG")
+    _git(root, "commit", "-F", str(editmsg))
     assert "a wakil message" in _git(root, "log", "-1", "--format=%s%n%b")
 
 
@@ -543,3 +546,69 @@ def test_a_timed_out_push_is_not_described_as_a_signing_prompt(git_kb, monkeypat
     assert message == "git push timed out after 120 seconds."
     assert "signing" not in message
     assert "WAKIL_GIT_COMMIT_TIMEOUT" not in message
+
+
+def test_a_commit_message_containing_timed_out_is_not_a_timeout(git_kb):
+    """`_run_git_checked` embeds the full argv in its failure text, and that
+    argv includes the commit message -- which is model-generated from
+    ingested content. Sniffing "timed out" out of that string routed an
+    ordinary commit failure into stale-lock cleanup."""
+    root = git_kb.root_path
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'hook says no' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    (root / "note.md").write_text("hi\n")
+
+    with pytest.raises(git.GitError) as excinfo:
+        git.stage_and_commit(root, ["note.md"], "📥 wakil source: add The day our API timed out")
+
+    assert not isinstance(excinfo.value, git.GitTimeout)
+    message = str(excinfo.value)
+    # No timeout advice, and no claim to have cleaned up after a kill.
+    assert "WAKIL_GIT_COMMIT_TIMEOUT" not in message
+    assert "Removed the stale" not in message
+
+
+def test_a_lock_held_by_a_live_process_is_never_deleted(git_kb):
+    """The stale-lock cleanup is only safe because a real timeout means our
+    own child died holding it. Misclassification made it delete a lock some
+    other process was actively using."""
+    root = git_kb.root_path
+    foreign_lock = root / ".git" / "index.lock"
+    foreign_lock.write_text("held by a live process\n")
+    (root / "note.md").write_text("hi\n")
+
+    with pytest.raises(git.GitError):
+        git.stage_and_commit(root, ["note.md"], "📥 wakil source: add A note that timed out")
+
+    assert foreign_lock.exists()
+    assert foreign_lock.read_text() == "held by a live process\n"
+
+
+def test_the_recovery_command_works_in_a_linked_worktree(git_kb, tmp_path, monkeypatch):
+    """In a linked worktree `<root>/.git` is a file, so a relative
+    `-F .git/COMMIT_EDITMSG` fails with "Not a directory"."""
+    linked = tmp_path / "linked"
+    _git(git_kb.root_path, "worktree", "add", "-q", "-b", "scratch/wt", str(linked), "main")
+    assert (linked / ".git").is_file()  # the thing that breaks the relative form
+
+    # Hooks live in the *common* dir, not the worktree's own git dir.
+    hook_dir = Path(_git(linked, "rev-parse", "--git-common-dir")).resolve() / "hooks"
+    hook_dir.mkdir(parents=True, exist_ok=True)
+    hook = hook_dir / "pre-commit"
+    hook.write_text("#!/bin/sh\nsleep 30\n")
+    hook.chmod(0o755)
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "2")
+    (linked / "note.md").write_text("hi\n")
+
+    with pytest.raises(git.GitTimeout) as excinfo:
+        git.stage_and_commit(linked, ["note.md"], "test: worktree message")
+
+    # Pull the advertised command out of the message and actually run it.
+    recovery = next(
+        line.strip() for line in str(excinfo.value).splitlines() if "commit -F" in line
+    )
+    editmsg = recovery.split("commit -F ", 1)[1].strip()
+    hook.unlink()
+    _git(linked, "commit", "-F", editmsg)
+    assert "worktree message" in _git(linked, "log", "-1", "--format=%s")
