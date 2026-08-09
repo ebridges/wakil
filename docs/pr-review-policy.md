@@ -17,6 +17,12 @@ dash", presented at similar length.
 Applies to a human reading a review and to an agent working one. The default
 is **not** to fix everything.
 
+This is guidance for *responding* to a review. It is deliberately not
+guidance for the reviewer: that agent should report everything it finds, and
+its output format (a triage table proposing these same buckets) lives in
+`.claude/agents/pr-reviewer.md`. Suppressing findings would lose information;
+sorting them costs nothing.
+
 ## The three buckets
 
 Judge each finding by one question: *what breaks if we ship without it?*

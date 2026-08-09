@@ -202,7 +202,10 @@ When contributing to this repo:
     human immediately before it happens, in every context.
 12. Do not silently rewrite user knowledge.
 13. When acting on `pr-reviewer` feedback, triage it against
-    `docs/pr-review-policy.md` rather than fixing every finding. Fix what
+    `docs/pr-review-policy.md` rather than fixing every finding. (That policy
+    is for *responding* to a review, not producing one — the reviewer's own
+    output format lives in `.claude/agents/pr-reviewer.md`, and it should
+    report everything it finds.) Fix what
     causes a regression or fails the PR's own goal; file an issue for narrow
     edge cases and decisions; decline nits **and say so in the thread**.
     Over-fixing is not merely wasteful — an optional finding implemented as
