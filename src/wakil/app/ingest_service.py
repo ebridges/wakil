@@ -487,10 +487,11 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
     owner_id = _source_owning_path(config, proposal.raw_file.path)
     if owner_id is not None:
         raise IngestError(
-            f"{proposal.raw_file.path} is already the raw capture of source #{owner_id}. "
-            f"Overwriting it would leave two sources pointing at the same file. "
-            f"Archive that source first (`wakil sources archive {owner_id}`), or point "
-            f"at a different input."
+            f"{proposal.raw_file.path} is already the raw capture of source #{owner_id} "
+            f"(see `wakil sources show {owner_id}`). Writing there would leave two "
+            f"sources pointing at one file, so `--overwrite` won't clear this. Rename "
+            f"the input so it lands on a different path, or move source #{owner_id}'s "
+            f"file aside first."
         )
 
     target.parent.mkdir(parents=True, exist_ok=True)

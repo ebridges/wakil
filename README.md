@@ -251,11 +251,13 @@ overwriting run labels its preview `REPLACE` and its result line `replaced`
 rather than presenting a destructive write as a new file.
 
 `--overwrite` is for a file you put there yourself (a hand-cleaned transcript
-sitting at its final path). If the occupant is *another source's* raw capture,
-capture refuses even with `--overwrite` and names the owning source: replacing
-the file cannot move that source's pointer, so both would end up reading the
-same text and `wakil enrich <old id>` would file its memories under the wrong
-source. Archive the old source first (`wakil sources archive <id>`).
+sitting at its final path). If that path is already *another source's* raw
+capture, capture refuses even with `--overwrite` and names the owning source:
+writing there cannot move that source's pointer, so both would end up reading
+the same text and `wakil enrich <old id>` would file its memories under the
+wrong source. Rename the input so it lands on a different path, or move the
+other source's file aside. The refusal is on the source record, not the file,
+so it applies even when that source's file is no longer on disk.
 
 Dates that appear in frontmatter and filenames (`created`, `retrieved`, a
 recording's own date, the `YYYY-MM-DD-` filename prefix) use your machine's

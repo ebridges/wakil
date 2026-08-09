@@ -4475,3 +4475,20 @@ def test_sanitize_note_still_dedupes_silently(workspace, kb_path):
     (kb_path / "drafts").mkdir(exist_ok=True)
     (kb_path / "drafts" / "taken.md").write_text("x\n", encoding="utf-8")
     assert str(_unused_path(kb_path, Path("drafts"), "taken")) == "drafts/taken-1.md"
+
+
+def test_capture_refuses_an_owned_path_even_when_the_file_is_gone(workspace, kb_path, transcript):
+    """The refusal is on the Source row, not the file, so the preview has to
+    warn on the row too — gating the warning behind an on-disk collision left
+    this case aborting with no explanation at all."""
+    taken = _existing_transcript_at(workspace, kb_path, transcript)
+    (kb_path / taken).unlink()
+
+    same_shape = kb_path / transcript.name
+    same_shape.write_text("Jane: a second take of the same call.\n", encoding="utf-8")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+
+    assert proposal.collision is None  # nothing on disk to collide with
+    assert proposal.collision_source_id is not None
+    with pytest.raises(IngestError, match="raw capture of source"):
+        apply_capture(workspace, proposal)

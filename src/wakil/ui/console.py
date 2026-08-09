@@ -223,18 +223,22 @@ def print_capture_proposal(proposal: CaptureProposal) -> None:
         console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
     owned = proposal.collision_source_id
     replacing = bool(proposal.collision) and proposal.overwrite and owned is None
-    if proposal.collision:
-        # Before the confirm, not after: a --yes caller still needs to see
-        # why the run is about to abort — or, with --overwrite, what it is
-        # about to destroy (#173).
-        if owned is not None:
-            console.print(
-                f"[yellow]warning:[/yellow] {proposal.collision} is the raw capture of "
-                f"source [bold]#{owned}[/bold]. Capture will refuse it even with "
-                f"[bold]--overwrite[/bold], because both sources would then point at the "
-                f"same file. Archive source #{owned} first, or point at a different input."
-            )
-        elif replacing:
+    # Before the confirm, not after: a --yes caller still needs to see why the
+    # run is about to abort — or, with --overwrite, what it is about to
+    # destroy (#173). The owned case is checked independently of
+    # `proposal.collision`, since apply refuses on the Source row whether or
+    # not that source's file is still on disk.
+    if owned is not None:
+        destination = proposal.collision or proposal.raw_file.path
+        console.print(
+            f"[yellow]warning:[/yellow] {destination} is the raw capture of source "
+            f"[bold]#{owned}[/bold]. Capture will refuse it even with "
+            f"[bold]--overwrite[/bold], because both sources would then point at the "
+            f"same file. Rename the input so it lands elsewhere, or move source "
+            f"#{owned}'s file aside first."
+        )
+    elif proposal.collision:
+        if replacing:
             console.print(
                 f"[yellow]warning:[/yellow] {proposal.collision} already exists and "
                 "[bold]--overwrite[/bold] was given — its current contents will be "
