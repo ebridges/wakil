@@ -446,14 +446,18 @@ when a capture went wrong and was redone under a new id, so an abandoned
 attempt stops looking like one that still needs attention. `unarchive`
 reverses it.
 
-Archiving is also what unblocks a redo. An archived source no longer holds
-its `raw_text_path` or its content hash against a new capture, so the
-"already the raw capture of source #N" refusal and the "already ingested"
-duplicate check both stop firing once you archive the attempt they name —
-which is what makes them actionable rather than dead ends.
-`backfill-abstract` skips archived sources too — archiving means stop
-spending model calls here. (`wakil enrich <archived-id>` still works; whether
-it should is [#216](https://github.com/ebridges/wakil/issues/216).)
+Archiving frees the *path*: an archived source stops holding its
+`raw_text_path` against a new capture, so the "already the raw capture of
+source #N" refusal stops firing once you archive the attempt it names — which
+is what makes that refusal actionable rather than a dead end. Re-capturing a
+byte-identical file is still refused as a duplicate, archived or not, because
+the content hash is unique per workspace at the database level; freeing that
+too needs a schema change and is tracked as
+[#226](https://github.com/ebridges/wakil/issues/226).
+
+`backfill-abstract` skips archived sources — archiving means stop spending
+model calls here. (`wakil enrich <archived-id>` still works; whether it should
+is [#216](https://github.com/ebridges/wakil/issues/216).)
 
 `wakil sources relink <id> <path>` points a source at a file it holds itself:
 the path must be inside the knowledge base, outside wakil's own state

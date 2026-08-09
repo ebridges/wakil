@@ -5101,9 +5101,11 @@ def test_archiving_unblocks_the_path_and_the_hash(workspace, kb_path, transcript
     redo.overwrite = True
     assert apply_capture(workspace, redo).source_id != first_id
 
-    # And the identical file re-captured after archiving isn't a duplicate.
+    # The *hash* half deliberately still blocks: `uq_sources_workspace_content_hash`
+    # covers archived rows, so letting prepare through would only defer the
+    # failure past a paid model call to a misleading IntegrityError (#226).
     second = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
-    assert second.duplicate_of is None
+    assert second.duplicate_of == first_id
 
 
 def test_backfill_skips_archived_sources(workspace, kb_path, transcript):

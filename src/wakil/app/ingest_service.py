@@ -453,14 +453,16 @@ def prepare_capture(
         candidates = [content_hash]
         if legacy_hash is not None and legacy_hash != content_hash:
             candidates.append(legacy_hash)
-        # Archived rows don't block a re-capture: archiving a bad attempt so
-        # the redo can land is the workflow #183 exists for, and blocking on
-        # a row the user just declared dead is the same dead end the path
-        # collision had.
+        # Deliberately NOT filtered by `archived_at`, unlike the path check in
+        # `_source_owning_path`. `uq_sources_workspace_content_hash` still
+        # covers archived rows, so skipping them here doesn't let the redo
+        # through — it just defers the failure past the capture-metadata model
+        # call to an IntegrityError whose message ("lost a race with a
+        # concurrent identical capture") is wrong. Making archiving free the
+        # hash needs a partial index or a nulled-out hash, i.e. a migration
+        # and a decision: see #226.
         existing = session.scalar(
-            select(Source.id).where(
-                Source.content_hash.in_(candidates), Source.archived_at.is_(None)
-            )
+            select(Source.id).where(Source.content_hash.in_(candidates))
         )
         if existing is not None:
             proposal.duplicate_of = existing
