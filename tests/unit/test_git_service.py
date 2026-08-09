@@ -1,3 +1,5 @@
+import inspect
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -408,3 +410,234 @@ def test_abandon_landing_returns_to_original_branch(git_kb):
     assert _git(git_kb.root_path, "rev-parse", "--abbrev-ref", "HEAD") == landing.branch
     abandon_landing(git_kb, landing)
     assert _git(git_kb.root_path, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+
+
+# --- commit timeout (issue #171) -------------------------------------------
+
+
+def test_commit_timeout_defaults_and_honors_the_env_override(monkeypatch):
+    monkeypatch.delenv("WAKIL_GIT_COMMIT_TIMEOUT", raising=False)
+    assert git.commit_timeout() == git.COMMIT_TIMEOUT_SECONDS
+
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "900")
+    assert git.commit_timeout() == 900
+
+    # Junk and non-positive values fall back rather than disabling the guard.
+    for bad in ("", "abc", "0", "-5"):
+        monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", bad)
+        assert git.commit_timeout() == git.COMMIT_TIMEOUT_SECONDS
+
+
+def test_stage_and_commit_gives_the_commit_its_own_timeout(git_kb, monkeypatch):
+    """`git commit` may sit waiting on an interactive signing prompt; the
+    surrounding add/rev-parse calls may not."""
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "777")
+    seen: list[tuple[str, int | None]] = []
+    real_run = subprocess.run
+
+    def spy(args, **kwargs):
+        seen.append((args[3], kwargs.get("timeout")))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("wakil.integrations.git.subprocess.run", spy)
+
+    (git_kb.root_path / "note.md").write_text("hi\n", encoding="utf-8")
+    git.stage_and_commit(git_kb.root_path, ["note.md"], "test: add note")
+
+    # Compare the neighbours against the default rather than a literal, so a
+    # future change to `_run_git_checked`'s default doesn't fail this test for
+    # the wrong reason -- what matters is that only `commit` differs.
+    default = inspect.signature(git._run_git_checked).parameters["timeout"].default
+    by_verb = dict(seen)
+    assert by_verb["commit"] == 777
+    assert by_verb["add"] == default
+    assert by_verb["rev-parse"] == default
+
+
+def test_commit_timeout_leaves_head_on_the_branch_with_work_staged(git_kb, monkeypatch):
+    """On a timed-out commit the caller must be able to finish by hand, so
+    wakil must not switch away from the branch (issue #171)."""
+    root = git_kb.root_path
+    source_id = _insert_source(git_kb, title="Signing Prompt")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Signing Prompt", local=False)
+    assert landing.branch is not None
+    (root / "note.md").write_text("hi\n", encoding="utf-8")
+
+    real_run = subprocess.run
+
+    def timeout_on_commit(args, **kwargs):
+        if args[3] == "commit":
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 0))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("wakil.integrations.git.subprocess.run", timeout_on_commit)
+
+    with pytest.raises(GitServiceError) as excinfo:
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["note.md"],
+            title="Signing Prompt",
+            summary=None,
+            ingest_run_id=None,
+            kind="ingest",
+            phase="capture",
+        )
+
+    message = str(excinfo.value)
+    assert "timed out" in message
+    assert "WAKIL_GIT_COMMIT_TIMEOUT" in message
+    # Still on the ingest branch, with the staged change intact.
+    assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == landing.branch
+    assert "note.md" in _git(root, "diff", "--cached", "--name-only")
+
+
+def test_a_killed_commit_leaves_the_repo_usable(git_kb, monkeypatch):
+    """Causes a real timeout instead of simulating one.
+
+    `subprocess.run` SIGKILLs the child, and git holds `.git/index.lock`
+    across the whole commit, so the killed process used to leave the lock
+    behind — wedging every later git write and making the recovery the error
+    message advertised fail outright. A slow pre-commit hook stands in for an
+    interactive signing prompt: git has already taken the lock by the time it
+    runs.
+    """
+    root = git_kb.root_path
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nsleep 30\n")
+    hook.chmod(0o755)
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "2")
+    (root / "note.md").write_text("hi\n")
+
+    with pytest.raises(git.GitError) as excinfo:
+        git.stage_and_commit(root, ["note.md"], "test: a wakil message\n\nWith a body.")
+
+    message = str(excinfo.value)
+    assert "timed out" in message
+    # No stale locks: the repo is still writable by git.
+    assert list((root / ".git").glob("*.lock")) == []
+    # And the message the commit would have had is recoverable.
+    editmsg = root / ".git" / "COMMIT_EDITMSG"
+    assert "a wakil message" in editmsg.read_text()
+    # Absolute path: `.git` is a *file* in a linked worktree, so the relative
+    # form fails there with "could not read log file: Not a directory".
+    assert f"commit -F {editmsg}" in message
+
+    # The advertised recovery actually runs, once the human-paced step is done.
+    hook.unlink()
+    _git(root, "commit", "-F", str(editmsg))
+    assert "a wakil message" in _git(root, "log", "-1", "--format=%s%n%b")
+
+
+def test_a_timed_out_push_is_not_described_as_a_signing_prompt(git_kb, monkeypatch):
+    """The signing framing belongs to `commit`; `_run_git_checked` is also how
+    push/add/switch run, and every clause of it is wrong for those."""
+    real_run = subprocess.run
+
+    def timeout_on_push(args, **kwargs):
+        if args[3] == "push":
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 0))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr("wakil.integrations.git.subprocess.run", timeout_on_push)
+    with pytest.raises(git.GitError) as excinfo:
+        git.push_branch(git_kb.root_path, "some-branch")
+    message = str(excinfo.value)
+    assert message == "git push timed out after 120 seconds."
+    assert "signing" not in message
+    assert "WAKIL_GIT_COMMIT_TIMEOUT" not in message
+
+
+def test_a_commit_message_containing_timed_out_is_not_a_timeout(git_kb):
+    """`_run_git_checked` embeds the full argv in its failure text, and that
+    argv includes the commit message -- which is model-generated from
+    ingested content. Sniffing "timed out" out of that string routed an
+    ordinary commit failure into stale-lock cleanup."""
+    root = git_kb.root_path
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'hook says no' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    (root / "note.md").write_text("hi\n")
+
+    with pytest.raises(git.GitError) as excinfo:
+        git.stage_and_commit(root, ["note.md"], "📥 wakil source: add The day our API timed out")
+
+    assert not isinstance(excinfo.value, git.GitTimeout)
+    message = str(excinfo.value)
+    # No timeout advice, and no claim to have cleaned up after a kill.
+    assert "WAKIL_GIT_COMMIT_TIMEOUT" not in message
+    assert "Removed the stale" not in message
+
+
+def test_a_lock_held_by_a_live_process_is_never_deleted(git_kb):
+    """The stale-lock cleanup is only safe because a real timeout means our
+    own child died holding it. Misclassification made it delete a lock some
+    other process was actively using."""
+    root = git_kb.root_path
+    foreign_lock = root / ".git" / "index.lock"
+    foreign_lock.write_text("held by a live process\n")
+    (root / "note.md").write_text("hi\n")
+
+    with pytest.raises(git.GitError):
+        git.stage_and_commit(root, ["note.md"], "📥 wakil source: add A note that timed out")
+
+    assert foreign_lock.exists()
+    assert foreign_lock.read_text() == "held by a live process\n"
+
+
+def test_the_recovery_command_works_in_a_linked_worktree(git_kb, tmp_path, monkeypatch):
+    """In a linked worktree `<root>/.git` is a file, so a relative
+    `-F .git/COMMIT_EDITMSG` fails with "Not a directory"."""
+    linked = tmp_path / "linked"
+    _git(git_kb.root_path, "worktree", "add", "-q", "-b", "scratch/wt", str(linked), "main")
+    assert (linked / ".git").is_file()  # the thing that breaks the relative form
+
+    # Hooks live in the *common* dir, not the worktree's own git dir.
+    hook_dir = Path(_git(linked, "rev-parse", "--git-common-dir")).resolve() / "hooks"
+    hook_dir.mkdir(parents=True, exist_ok=True)
+    hook = hook_dir / "pre-commit"
+    hook.write_text("#!/bin/sh\nsleep 30\n")
+    hook.chmod(0o755)
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "2")
+    (linked / "note.md").write_text("hi\n")
+
+    with pytest.raises(git.GitTimeout) as excinfo:
+        git.stage_and_commit(linked, ["note.md"], "test: worktree message")
+
+    # Run the advertised command verbatim, rather than reconstructing it --
+    # that is the claim under test.
+    recovery = next(
+        line.strip() for line in str(excinfo.value).splitlines() if "commit -F" in line
+    )
+    hook.unlink()
+    subprocess.run(shlex.split(recovery), check=True, capture_output=True)
+    assert "worktree message" in _git(linked, "log", "-1", "--format=%s")
+
+
+def test_the_recovery_command_does_not_sweep_in_the_users_staged_work(git_kb, monkeypatch):
+    """The commit that timed out was pathspec-scoped; an unscoped recovery
+    would commit everything in the index."""
+    root = git_kb.root_path
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nsleep 30\n")
+    hook.chmod(0o755)
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "2")
+
+    (root / "MY_PRIVATE_DRAFT.md").write_text("not wakil's to commit\n")
+    _git(root, "add", "MY_PRIVATE_DRAFT.md")
+    (root / "wakil_note.md").write_text("wakil's file\n")
+
+    with pytest.raises(git.GitTimeout) as excinfo:
+        git.stage_and_commit(root, ["wakil_note.md"], "test: scoped")
+
+    recovery = next(
+        line.strip() for line in str(excinfo.value).splitlines() if "commit -F" in line
+    )
+    hook.unlink()
+    subprocess.run(shlex.split(recovery), check=True, capture_output=True)
+
+    committed = _git(root, "show", "--name-only", "--format=", "HEAD").split()
+    assert committed == ["wakil_note.md"]
+    # The user's own staged file is untouched, still staged.
+    assert "MY_PRIVATE_DRAFT.md" in _git(root, "diff", "--cached", "--name-only")

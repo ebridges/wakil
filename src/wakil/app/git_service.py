@@ -203,13 +203,25 @@ def land_ingestion(
     message = commit_message(kind, f"add {title}")
     if summary:
         message += f"\n\n{summary}"
+
+    # Record the branch *before* attempting the commit. When a commit fails
+    # and the user finishes it by hand (issue #171's recovery path), this row
+    # is the only thing that lets a later `wakil enrich <id>` resume onto the
+    # same branch. Recording it afterwards meant `Source.git_branch` stayed
+    # NULL, the next run cut a fresh branch off the default, and
+    # `_load_source_text` then failed with "Could not read raw capture" —
+    # because the capture only exists on the branch that was abandoned.
+    _remember_source_branch(config, source_id, context.branch)
     try:
         sha = git.stage_and_commit(config.root_path, files, message)
     except git.GitError as exc:
-        _return_to_branch(config.root_path, context.original_branch)
+        # Deliberately stay put. `git add` may have succeeded and only the
+        # commit failed (e.g. a signing prompt timed out), so switching away
+        # now would strand staged work on a branch the caller is no longer on
+        # and force them to reconstruct the commit by hand -- the recovery
+        # cost reported in issue #171.
         raise GitServiceError(str(exc)) from exc
 
-    _remember_source_branch(config, source_id, context.branch)
     try:
         pr_url = _land_pr(config, source_id, context.branch, title, summary, files, kind, phase)
     except GitServiceError:

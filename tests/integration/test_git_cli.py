@@ -221,3 +221,42 @@ def test_git_history(git_kb):
     result = runner.invoke(app, ["-w", str(git_kb), "git", "history", "no-such-file.md"])
     assert result.exit_code == 0
     assert "No git history" in result.output
+
+
+def test_landing_failure_prints_the_recovery_command_verbatim(git_kb, monkeypatch, capsys):
+    """The hand-finish command embeds a model-generated commit message. Rich
+    reads `[[wikilinks]]` in it as style tags and deletes them, so the command
+    the user copies is subtly wrong — the one thing this failure path exists
+    to hand over."""
+    import typer
+
+    from wakil.app.git_service import GitServiceError, LandingContext
+    from wakil.cli import main as cli_main
+
+    message = (
+        "git commit timed out. Finish it by hand: git -C /kb commit "
+        "-m '📥 wakil source: add Notes [draft] on [[people/jane]]' -- notes/a.md"
+    )
+
+    def _boom(*args, **kwargs):
+        raise GitServiceError(message)
+
+    monkeypatch.setattr("wakil.app.git_service.land_ingestion", _boom)
+    cli_main.console.width = 300
+
+    with pytest.raises(typer.Exit):
+        cli_main._land_written_files(
+            cli_main.WorkspaceConfig.load(git_kb),
+            LandingContext(branch="wakil/ingest/x", original_branch="main", local=False),
+            source_id=1,
+            files=["notes/a.md"],
+            title="Notes",
+            summary=None,
+            ingest_run_id=1,
+            kind="ingest",
+            phase="capture",
+        )
+
+    out = capsys.readouterr().out.replace("\n", "")
+    assert "[draft]" in out
+    assert "[[people/jane]]" in out

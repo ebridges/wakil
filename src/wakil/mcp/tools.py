@@ -324,8 +324,14 @@ def _land(
             phase=phase,
         )
     except GitServiceError as exc:
+        # Name the branch: a failed landing deliberately leaves HEAD on the
+        # ingest branch (so staged work isn't stranded), and saying nothing
+        # about that moves the caller's tree silently.
+        branch = git_integration.inspect_git(config.root_path).branch
+        location = f" HEAD is on {branch}; changes may be staged there."
         raise ToolError(
             f"Landing failed: {exc} (written files are still on disk for manual review)."
+            f"{location}"
         ) from exc
 
 

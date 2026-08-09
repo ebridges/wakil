@@ -4,13 +4,77 @@ Read helpers return None/empty on failure (status display must never crash);
 write helpers raise GitError so callers can surface what went wrong.
 """
 
+import contextlib
+import os
+import shlex
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# `git commit` can block indefinitely on an interactive signing prompt (SSH
+# signing via a hardware key or 1Password pops a GUI approval a human has to
+# click), so it gets its own generous budget rather than the default below.
+# Deliberately not TTY-gated: `sys.stdin.isatty()` is False under
+# `wakil mcp serve` and under pytest's CliRunner, which is exactly where a
+# GUI signing prompt can still appear -- gating on it would shorten the
+# timeout in the case that needs it most. The knowing tradeoff: under
+# `mcp serve` a hung commit now blocks a tool call for up to ten minutes,
+# likely past the client's own patience. Lower WAKIL_GIT_COMMIT_TIMEOUT for
+# that deployment if it matters more than surviving a slow signing prompt.
+#
+# Known gap: `subprocess.run` SIGKILLs only the direct child, so a signing
+# helper or hook git spawned survives the timeout, reparented to init. Running
+# the child in its own process group so the group could be killed was tried
+# and reverted: `TimeoutExpired` carries no pid to kill (so the cleanup never
+# fired), and `setsid()` drops the controlling terminal, which breaks
+# `pinentry-tty` and ssh passphrase prompts on *every* checked git write --
+# strictly worse than the orphan it was meant to reap.
+COMMIT_TIMEOUT_SECONDS = 600
+_COMMIT_TIMEOUT_ENV = "WAKIL_GIT_COMMIT_TIMEOUT"
 
 
 class GitError(RuntimeError):
     pass
+
+
+class GitTimeout(GitError):
+    """We killed the git process because it exceeded its deadline.
+
+    Typed rather than sniffed from the message: `_run_git_checked` embeds the
+    full argv in its failure text, and that argv includes the commit message
+    — which is model-generated from ingested content. A transcript titled
+    "the day our API timed out" was enough to misclassify an ordinary commit
+    failure as a timeout and route it into stale-lock cleanup, deleting an
+    `index.lock` held by a live process.
+    """
+
+
+def commit_timeout() -> int:
+    """Seconds to allow `git commit`. Override with WAKIL_GIT_COMMIT_TIMEOUT.
+
+    An unusable value warns rather than silently reverting: a typo'd
+    `WAKIL_GIT_COMMIT_TIMEOUT=60s` behaving as 600 is the kind of thing nobody
+    notices until a commit dies at the wrong moment.
+    """
+    raw = os.environ.get(_COMMIT_TIMEOUT_ENV)
+    if not raw:
+        return COMMIT_TIMEOUT_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value > 0:
+        return value
+    # Plain stderr rather than the Rich console the CLI uses: this module is
+    # also imported under `wakil mcp serve`, where anything on stdout would
+    # corrupt the JSON-RPC stream.
+    print(
+        f"warning: ignoring {_COMMIT_TIMEOUT_ENV}={raw!r} (not a positive number of "
+        f"seconds); using {COMMIT_TIMEOUT_SECONDS}.",
+        file=sys.stderr,
+    )
+    return COMMIT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -51,7 +115,9 @@ def _run_git_checked(root: Path, *args: str, timeout: int = 60) -> str:
             text=True,
             timeout=timeout,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        raise GitTimeout(f"git {args[0]} timed out after {timeout} seconds.") from exc
+    except OSError as exc:
         raise GitError(f"git {args[0]} failed: {exc}") from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -138,10 +204,88 @@ def resolve_default_branch(root: Path) -> str | None:
 
 
 def stage_and_commit(root: Path, paths: list[str], message: str) -> str:
-    """Stage exactly `paths`, commit, and return the commit sha."""
+    """Stage exactly `paths`, commit, and return the commit sha.
+
+    The commit gets `commit_timeout()` rather than the default -- it is the
+    one git call in wakil that can legitimately sit waiting on a human.
+    """
     _run_git_checked(root, "add", "--", *paths)
-    _run_git_checked(root, "commit", "-m", message, "--", *paths)
+    try:
+        _run_git_checked(root, "commit", "-m", message, "--", *paths, timeout=commit_timeout())
+    except GitTimeout as exc:
+        raise GitTimeout(_recover_from_killed_commit(root, paths, message, exc)) from exc
     return _run_git_checked(root, "rev-parse", "HEAD")
+
+
+def _recover_from_killed_commit(
+    root: Path, paths: list[str], message: str, exc: GitError
+) -> str:
+    """Clean up after a `git commit` we killed, and say how to finish it.
+
+    `subprocess.run` SIGKILLs the child on timeout, and git holds
+    `.git/index.lock` across the whole commit -- including the signing prompt
+    and any pre-commit hook. So the killed process leaves the lock behind, and
+    then *every* subsequent git write in the repo fails ("Unable to create
+    '.git/index.lock': File exists") until someone works out they have to
+    delete a file. Recovering from a 10-minute timeout was strictly worse than
+    the 60-second failure it replaced.
+
+    Removing the lock here is a stale-lock cleanup rather than a race:
+    `subprocess.run` has already reaped the child by the time it raises, and a
+    lock held by *another* process would have made this commit fail instantly
+    rather than time out.
+
+    The message is written to `.git/COMMIT_EDITMSG` so the recovery command
+    actually restores it. A plain `git commit` does not: `-m` messages only
+    reach `COMMIT_EDITMSG` at a point the kill may well have pre-empted (a
+    slow pre-commit hook runs before it), so the editor can open empty and
+    abort.
+    """
+    git_dir = _git_dir(root)
+    cleaned = []
+    saved_message: Path | None = None
+    if git_dir is not None:
+        for lock in [git_dir / "index.lock", *git_dir.glob("next-index-*.lock")]:
+            with contextlib.suppress(OSError):
+                lock.unlink()
+                cleaned.append(lock.name)
+        editmsg = git_dir / "COMMIT_EDITMSG"
+        with contextlib.suppress(OSError):
+            editmsg.write_text(message, encoding="utf-8")
+            saved_message = editmsg
+
+    lines = [
+        str(exc),
+        "If it was waiting on an interactive signing prompt, raise "
+        f"{_COMMIT_TIMEOUT_ENV} (seconds) and try again.",
+    ]
+    if cleaned:
+        lines.append(f"Removed the stale {', '.join(cleaned)} the killed process left behind.")
+    # Keep the pathspec. The commit that timed out was scoped to wakil's own
+    # files; an unscoped recovery would commit everything in the index,
+    # sweeping the user's unrelated staged work into a wakil commit.
+    pathspec = " ".join(shlex.quote(path) for path in paths)
+    lines.append("Your changes are still staged. Finish the commit by hand with:")
+    if saved_message is not None:
+        # Absolute path rather than `.git/COMMIT_EDITMSG`: in a linked
+        # worktree `<root>/.git` is a *file*, so the relative form fails with
+        # "could not read log file: Not a directory".
+        lines.append(f"    git -C {root} commit -F {saved_message} -- {pathspec}")
+    else:
+        # Nothing was saved, so `-F` would commit these files under whatever
+        # stale message a previous commit happened to leave behind.
+        subject = message.splitlines()[0] if message else ""
+        lines.append(f"    git -C {root} commit -m {shlex.quote(subject)} -- {pathspec}")
+        if "\n" in message:
+            lines.append("    (subject only — the message body could not be preserved)")
+    return "\n".join(lines)
+
+
+def _git_dir(root: Path) -> Path | None:
+    """This checkout's own git directory -- not the common dir, since
+    `index.lock` is per worktree."""
+    path = _run_git(root, "rev-parse", "--absolute-git-dir")
+    return Path(path) if path else None
 
 
 def push_branch(root: Path, name: str) -> None:
