@@ -4618,6 +4618,66 @@ def test_a_freed_path_carries_the_notes_own_wikilinks_with_it(workspace, kb_path
     assert "concepts/graph-memory.md|this page" not in sanitized.content
 
 
+def test_a_directory_move_carries_the_notes_own_wikilinks_with_it(workspace, kb_path):
+    """The routing mover left self-links at the pre-move path, so a note that
+    linked to itself shipped a dangling link — the exact invariant the reslug
+    mover was already honouring."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    proposal = EnrichmentProposal(source_id=1, title="Graph Memory")
+    note = _note(
+        "drafts/graph-memory.md",
+        type_="concept",
+        name="Graph Memory",
+        body="See [[drafts/graph-memory.md|this page]].",
+    )
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    # The fixture KB already holds concepts/graph-memory.md, so the free-path
+    # corrector fires too — which is the point: the link must follow the
+    # *final* path, whichever correctors ran.
+    assert sanitized.path.startswith("concepts/")
+    assert f"[[{sanitized.path}|this page]]" in sanitized.content
+    assert "[[drafts/graph-memory.md" not in sanitized.content
+
+
+def test_a_move_and_a_reslug_together_retarget_links_once(workspace, kb_path):
+    """Both correctors fire on one note: the link has to end up at the final
+    path, not at either intermediate one."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    proposal = EnrichmentProposal(source_id=1, title="Graph Memory")
+    note = _note(
+        "drafts/graph-memory-notes.md",
+        type_="concept",
+        name="Graph Memory",
+        body="See [[drafts/graph-memory-notes.md|this page]].",
+    )
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert sanitized.path.startswith("concepts/graph-memory")
+    assert f"[[{sanitized.path}|this page]]" in sanitized.content
+    assert "drafts/" not in sanitized.content
+
+
+def test_the_drafts_fallback_also_carries_self_links(workspace, kb_path):
+    """The unroutable/collision fallback moves the note too."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    proposal = EnrichmentProposal(source_id=1, title="Loose Idea")
+    note = ProposedFile(
+        path="/etc/passwd",
+        content="no frontmatter here\n\nSee [[/etc/passwd|this page]].\n",
+    )
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert sanitized.path.startswith("drafts/")
+    assert f"[[{sanitized.path}|this page]]" in sanitized.content
+
+
 def test_untyped_note_still_falls_back_to_drafts(workspace):
     """No `type:` means no canonical directory to route to."""
     from wakil.app.ingest_service import _sanitize_note

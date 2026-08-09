@@ -3846,11 +3846,17 @@ def _sanitize_note(
         # under sources/, not drafts/" failure.
         directory = _schema_directory_for_note(config, note) or config.generated_directory
         candidate = _unused_path(root, Path(directory), slugify(proposal.title))
-        return ProposedFile(path=str(candidate), content=note.content)
+        return _retarget_self_links(note, str(candidate))
 
+    # Each corrector below decides a path and records its own warning; the
+    # note's self-referential wikilinks are repointed once, at the end,
+    # against the path the model actually proposed. Retargeting inside each
+    # mover instead meant every mover had to remember to do it, and one of
+    # three didn't — leaving a link at the pre-move path, dangling.
     candidate = _route_to_schema_directory(config, candidate, note, proposal)
-    corrected = _reslug_proposed_note(candidate, note.content, proposal)
-    return _free_corrected_path(root, corrected, proposal)
+    candidate = _reslug_target(candidate, note.content, proposal)
+    candidate = _free_target(root, candidate, proposal)
+    return _retarget_self_links(note, str(candidate))
 
 
 def _schema_directory_for_note(config: WorkspaceConfig, note: ProposedFile) -> str | None:
@@ -3896,9 +3902,8 @@ def _route_to_schema_directory(
     return corrected
 
 
-def _reslug_proposed_note(
-    candidate: Path, content: str, proposal: "EnrichmentProposal"
-) -> ProposedFile:
+def _reslug_target(candidate: Path, content: str, proposal: "EnrichmentProposal") -> Path:
+    """Re-derive the filename from the note's own H1, leaving any leading date."""
     try:
         body = frontmatter_lib.loads(content).content
     except Exception:
@@ -3913,21 +3918,23 @@ def _reslug_proposed_note(
     h1_text = h1_match.group(0).lstrip("#").strip() if h1_match else None
     target_rest = slugify(h1_text) if h1_text else slugify(rest)
     if target_rest == rest:
-        return ProposedFile(path=str(candidate), content=content)
+        return candidate
 
-    old_path = str(candidate)
-    new_path = str(candidate.with_name(f"{prefix}{target_rest}{candidate.suffix}"))
+    corrected = candidate.with_name(f"{prefix}{target_rest}{candidate.suffix}")
     proposal.warnings.append(
-        f"Corrected the proposed note's filename from {old_path} to {new_path} "
-        "to match slugify() (the same convention new entity stub pages already use)"
+        f"Corrected the proposed note's filename from {candidate.as_posix()} to "
+        f"{corrected.as_posix()} to match slugify() (the same convention new entity "
+        "stub pages already use)"
     )
-    return _retarget_self_links(ProposedFile(path=old_path, content=content), new_path)
+    return corrected
 
 
 def _retarget_self_links(proposed: ProposedFile, new_path: str) -> ProposedFile:
     """Move a proposed note to `new_path`, repointing the wikilinks in its own
-    body that referred to it under its old path."""
+    body that referred to it under the path the model originally proposed."""
     old_path = proposed.path
+    if _normalize_link_path(old_path) == _normalize_link_path(new_path):
+        return ProposedFile(path=new_path, content=proposed.content)
 
     def _replace(match: re.Match) -> str:
         link_path = match.group(1).strip()
@@ -3939,28 +3946,25 @@ def _retarget_self_links(proposed: ProposedFile, new_path: str) -> ProposedFile:
     return ProposedFile(path=new_path, content=_WIKILINK_RE.sub(_replace, proposed.content))
 
 
-def _free_corrected_path(
-    root: Path, proposed: ProposedFile, proposal: "EnrichmentProposal"
-) -> ProposedFile:
+def _free_target(root: Path, candidate: Path, proposal: "EnrichmentProposal") -> Path:
     """Re-check the destination after routing and re-slugging have moved it.
 
     `_sanitize_note`'s collision check runs against the path the model
-    proposed; `_route_to_schema_directory` and `_reslug_proposed_note` then
-    rewrite the directory and the filename, so the path actually written was
-    never checked against the filesystem. A corrected path landing on an
-    existing file killed the run in `apply_enrichment` -- after every model
-    call had already been paid for -- with "Refusing to overwrite existing
-    file". That is #187's own defect, relocated by #187's fix.
+    proposed; `_route_to_schema_directory` and `_reslug_target` then rewrite
+    the directory and the filename, so the path actually written was never
+    checked against the filesystem. A corrected path landing on an existing
+    file killed the run in `apply_enrichment` -- after every model call had
+    already been paid for -- with "Refusing to overwrite existing file". That
+    is #187's own defect, relocated by #187's fix.
     """
-    candidate = Path(proposed.path)
     if not (root / candidate).exists():
-        return proposed
+        return candidate
     free = _unused_path(root, candidate.parent, candidate.stem)
     proposal.warnings.append(
         f"{candidate.as_posix()} already exists, so the corrected note was proposed at "
         f"{free.as_posix()} instead"
     )
-    return _retarget_self_links(proposed, str(free))
+    return free
 
 
 def _unused_path(root: Path, directory: Path, base: str) -> Path:
