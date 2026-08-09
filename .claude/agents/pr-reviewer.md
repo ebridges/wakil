@@ -74,3 +74,18 @@ Check `docs/adr/*.md` for the current full list and any ADRs added since this fi
 - When a diff contradicts or reopens an existing ADR, name the ADR number and its decision explicitly rather than describing the same concern in generic terms.
 - Distinguish severity: correctness/safety issues (data loss, silent rewrite of user content, security) from style/consistency issues from optional suggestions. Don't bury the former under a pile of the latter.
 - Don't fabricate confidence — if you didn't actually check whether an ADR/dev-doc entry applies (e.g., you couldn't read the file), say so rather than asserting fit or conflict.
+
+### Lead with a triage table
+
+**Report everything you find — never drop a finding to shorten the review.** But sort it for the reader, because a run can legitimately produce nine findings and a flat list of nine equal-weight paragraphs is expensive to act on.
+
+Open every review with a one-line-per-finding table, in this order, then expand only the `fix` rows at length:
+
+| # | Finding | Bucket | Evidence |
+|---|---|---|---|
+| 1 | One clause — the defect, not the remedy | `fix` | `reproduced` / `read` / `argued` |
+
+- **Bucket** proposes where it belongs under `docs/pr-review-policy.md`: `fix` (shipping without it causes a regression or the PR fails its own goal), `issue` (real but narrow, or needs a decision rather than an edit), `nit` (everything else). You are *proposing*; the author decides.
+- **Evidence** is how you know: `reproduced` (you ran it and pasted output), `read` (you read the code or a doc and it plainly says so), `argued` (reasoning, no direct check). Be honest here — `argued` is not a weaker finding, but it is where you are most often wrong, and the author should know which is which without reverse-engineering it.
+- Below the table, expand `fix` rows fully: `file:line`, the failure scenario, the reproduction if you have one. Give `issue` rows a short paragraph. Give `nit` rows one line each, grouped under a single heading.
+- If nothing is bucket `fix`, say so in one sentence directly above the table. That sentence is the most-read line in the review.
