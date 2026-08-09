@@ -789,16 +789,32 @@ def relink_source(config: WorkspaceConfig, source_id: int, new_path: str) -> Sou
     table, but nothing propagated that to `sources.raw_text_path`, so a
     renamed capture left `enrich` failing with "Could not read raw capture
     <old path>" and no supported way to fix it (#178).
+
+    `new_path` is caller-supplied — an argument on the CLI, a parameter on the
+    `sources_relink` MCP tool — and everything downstream treats
+    `raw_text_path` as workspace-relative and trusted: `enrich` reads the file
+    and puts its contents in a model prompt. So it is confined to the
+    workspace here, the same bar `_sanitize_note` holds model-proposed note
+    paths to, rather than accepting any path on the machine.
     """
-    target = config.root_path / new_path
+    root = config.root_path.resolve()
+    target = (root / new_path).resolve()
+    if not target.is_relative_to(root):
+        raise IngestError(
+            f"{new_path} is outside the knowledge base ({root}). "
+            "A source's raw capture has to live in the workspace."
+        )
     if not target.is_file():
         raise IngestError(f"No file at {new_path} — nothing to relink to.")
+    # Store the workspace-relative form, so `../kb/sources/x.md` and a symlinked
+    # route to the same file both land as the one path everything else expects.
+    relative = target.relative_to(root).as_posix()
     with open_session(config) as session:
         workspace_id, _ = _require_workspace_ids(session, config)
         row = session.get(Source, source_id)
         if row is None or row.workspace_id != workspace_id:
             raise IngestError(f"No source with id {source_id} in this workspace.")
-        row.raw_text_path = new_path
+        row.raw_text_path = relative
         session.commit()
         return _summarize_source(row)
 

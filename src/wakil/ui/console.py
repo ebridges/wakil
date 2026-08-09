@@ -677,6 +677,11 @@ def print_index_result(result: IndexResult) -> None:
         f"{result.unchanged} unchanged, "
         f"[red]{result.removed} removed[/red])"
     )
+    for relink in result.sources_relinked:
+        console.print(
+            f"  [cyan]source #{relink.source_id}[/cyan] now points at "
+            f"{escape(relink.new_path)} [dim](was {escape(relink.old_path)})[/dim]"
+        )
 
 
 def print_root_issues(issues: list[RootIssue], *, prefix: str = "Warning") -> None:

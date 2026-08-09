@@ -32,11 +32,24 @@ DEFAULT_USER_NAME = "default"
 
 
 @dataclass
+class SourceRelink:
+    """A `sources.raw_text_path` that indexing repointed after a rename."""
+
+    source_id: int
+    old_path: str
+    new_path: str
+
+
+@dataclass
 class IndexResult:
     added: int = 0
     updated: int = 0
     unchanged: int = 0
     removed: int = 0
+    # Reported rather than applied silently: this is wakil changing a pointer
+    # into the user's own knowledge base on its own initiative, and a wrong
+    # guess sends `enrich` at the wrong file (working agreement item 12).
+    sources_relinked: list[SourceRelink] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -140,6 +153,7 @@ def _follow_renamed_raw_captures(
     existing: dict[str, Note],
     parsed: dict[str, "MarkdownFile"],
     seen: set[str],
+    result: IndexResult,
 ) -> None:
     """Repoint `sources.raw_text_path` when a raw capture is moved on disk.
 
@@ -175,7 +189,12 @@ def _follow_renamed_raw_captures(
         )
     ):
         if source.raw_text_path is not None:
-            source.raw_text_path = moves[source.raw_text_path]
+            old_path = source.raw_text_path
+            new_path = moves[old_path]
+            source.raw_text_path = new_path
+            result.sources_relinked.append(
+                SourceRelink(source_id=source.id, old_path=old_path, new_path=new_path)
+            )
 
 
 def index_notes(
@@ -228,7 +247,7 @@ def index_notes(
             result.unchanged += 1
 
     if prune:
-        _follow_renamed_raw_captures(session, workspace_id, existing, parsed, seen)
+        _follow_renamed_raw_captures(session, workspace_id, existing, parsed, seen, result)
         removed_note_ids: list[int] = []
         for key, note in existing.items():
             if key not in seen:

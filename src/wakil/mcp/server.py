@@ -3,10 +3,15 @@
 Binds to exactly one workspace for the life of the process (same model as
 every other `wakil` command's `-w/--workspace` resolution) and registers a
 small set of tools, thin wrappers over `mcp/tools.py`. Read tools return
-plain data; the two write flows (`ingest_*`, `enrich_*`) are prepare/apply
-pairs backed by `mcp/proposals.py`'s in-process cache, so a client must make
-an explicit second call to actually write anything — the MCP analogue of
-the CLI's preview-then-confirm gate.
+plain data; the two flows that write Markdown (`ingest_*`, `enrich_*`) are
+prepare/apply pairs backed by `mcp/proposals.py`'s in-process cache, so a
+client must make an explicit second call before anything lands in the
+knowledge base — the MCP analogue of the CLI's preview-then-confirm gate.
+
+The `sources_*` maintenance tools (`relink`, `archive`, `unarchive`) are
+deliberately single-call instead: they touch only operational metadata in
+SQLite, never the user's Markdown, and each is reversible by another call.
+A prepare/apply pair would be ceremony over a pointer update.
 
 Also exposes `skills/mcp-coordinator/SKILL.md` (the fast-capture coordinator
 skill, docs/adr/0019) as an MCP resource so a connected client sees it with
@@ -135,7 +140,9 @@ def _register_git_tools(mcp: FastMCP, config: WorkspaceConfig) -> None:
 def _register_write_tools(mcp: FastMCP, config: WorkspaceConfig, cache: ProposalCache) -> None:
     @mcp.tool()
     def sources_relink(source_id: int, path: str) -> dict:
-        """Point a source at its raw capture's current path after a rename."""
+        """Point a source at its raw capture's current path after a rename.
+
+        `path` must be inside this workspace; anything else is rejected."""
         return tools.sources_relink(config, source_id, path)
 
     @mcp.tool()

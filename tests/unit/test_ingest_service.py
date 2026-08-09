@@ -4904,6 +4904,31 @@ def test_index_follows_a_renamed_raw_capture(workspace, kb_path, transcript):
     assert get_source(workspace, source_id).raw_text_path == new_path
 
 
+def test_index_reports_the_sources_it_repointed(workspace, kb_path, transcript):
+    """wakil changing a pointer into the user's knowledge base on its own
+    initiative has to say so — a wrong guess sends `enrich` at the wrong
+    file, and the run was previously silent about it entirely."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    old_path = proposal.raw_file.path
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    new_path = "sources/transcripts/2026-07-09-canonical-name.md"
+    (kb_path / new_path).write_bytes((kb_path / old_path).read_bytes())
+    (kb_path / old_path).unlink()
+
+    with open_session(workspace) as session:
+        result = index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    assert [(r.source_id, r.old_path, r.new_path) for r in result.sources_relinked] == [
+        (source_id, old_path, new_path)
+    ]
+
+
 def test_index_does_not_guess_when_the_file_was_edited_as_well_as_moved(
     workspace, kb_path, transcript
 ):
@@ -4942,6 +4967,41 @@ def test_relink_points_a_source_at_its_current_path(workspace, kb_path, transcri
     assert relink_source(workspace, source_id, moved).raw_text_path == moved
     with pytest.raises(IngestError, match="No file at"):
         relink_source(workspace, source_id, "sources/transcripts/nope.md")
+
+
+def test_relink_refuses_a_target_outside_the_workspace(workspace, kb_path, transcript, tmp_path):
+    """`raw_text_path` is trusted downstream — `enrich` reads the file and puts
+    its contents in a model prompt — and the path is caller-supplied, on the
+    CLI and on the `sources_relink` MCP tool alike."""
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    original = proposal.raw_file.path
+
+    outside = tmp_path / "secrets.md"
+    outside.write_text("not part of the knowledge base\n", encoding="utf-8")
+
+    for escape_attempt in (str(outside), f"../{outside.name}"):
+        with pytest.raises(IngestError, match="outside the knowledge base"):
+            relink_source(workspace, source_id, escape_attempt)
+
+    assert get_source(workspace, source_id).raw_text_path == original
+
+
+def test_relink_stores_the_workspace_relative_path(workspace, kb_path, transcript):
+    """An absolute path inside the workspace is accepted, but normalized —
+    everything downstream joins `raw_text_path` onto the root."""
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+
+    moved = "sources/transcripts/2026-07-09-hand-fixed.md"
+    (kb_path / moved).write_text("---\ntype: source\n---\n\n# Fixed\n", encoding="utf-8")
+
+    result = relink_source(workspace, source_id, str(kb_path / moved))
+    assert result.raw_text_path == moved
 
 
 def test_archive_hides_a_source_from_the_default_listing(workspace, transcript, kb_path):

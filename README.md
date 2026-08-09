@@ -424,9 +424,17 @@ lands the PR from there.
 ### Maintaining sources
 
 `wakil index` follows a raw capture that was moved on disk, repointing the
-source at its new path automatically when the content is unchanged. If the
-file was edited as well as moved, the move can't be inferred safely — use
-`wakil sources relink <id> <path>` rather than leaving `enrich` broken.
+source at its new path when the content is unchanged, and naming each
+repointed source in its output rather than changing the pointer silently. If
+the file was edited as well as moved, the move can't be inferred safely — use
+`wakil sources relink <id> <path>` rather than leaving `enrich` broken. The
+target has to be inside the knowledge base.
+
+Rename-following is part of indexing's prune pass, so it doesn't run in a
+linked git worktree: a worktree only has one branch checked out, so a file
+missing from it is usually just committed on another branch rather than
+moved, and indexing there only adds and updates. In a worktree, `wakil
+sources relink` is the way to repoint a moved capture.
 
 `wakil sources archive <id> [--reason TEXT] [--superseded-by ID]` retires a
 source without deleting it: the row, its memories, and its history stay, but
