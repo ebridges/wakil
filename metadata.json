@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZM78CEB4PWAG8YH13VQAJM5",
+  "strategy": "manual-commit",
+  "branch": "fix/cross-branch-update-target",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "README.md",
+    "skills/mcp-coordinator/SKILL.md",
+    "src/wakil/app/ingest_service.py",
+    "src/wakil/cli/main.py",
+    "src/wakil/mcp/tools.py",
+    "src/wakil/ui/console.py",
+    "tests/integration/test_ingest_cli.py",
+    "tests/unit/test_console.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 34,
+    "cache_creation_tokens": 13694,
+    "cache_read_tokens": 7651813,
+    "output_tokens": 7717,
+    "api_call_count": 18
+  }
+}
