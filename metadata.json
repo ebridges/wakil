@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZM65F5YY888MJG81CW30170",
+  "strategy": "manual-commit",
+  "branch": "fix/git-commit-timeout",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "README.md",
+    "docs/DEVELOPMENT.md",
+    "src/wakil/cli/main.py",
+    "tests/integration/test_git_cli.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 173,
+    "cache_creation_tokens": 115945,
+    "cache_read_tokens": 28283061,
+    "output_tokens": 29635,
+    "api_call_count": 91
+  }
+}
