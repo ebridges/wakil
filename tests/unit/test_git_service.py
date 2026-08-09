@@ -1,4 +1,5 @@
 import inspect
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -604,11 +605,39 @@ def test_the_recovery_command_works_in_a_linked_worktree(git_kb, tmp_path, monke
     with pytest.raises(git.GitTimeout) as excinfo:
         git.stage_and_commit(linked, ["note.md"], "test: worktree message")
 
-    # Pull the advertised command out of the message and actually run it.
+    # Run the advertised command verbatim, rather than reconstructing it --
+    # that is the claim under test.
     recovery = next(
         line.strip() for line in str(excinfo.value).splitlines() if "commit -F" in line
     )
-    editmsg = recovery.split("commit -F ", 1)[1].strip()
     hook.unlink()
-    _git(linked, "commit", "-F", editmsg)
+    subprocess.run(shlex.split(recovery), check=True, capture_output=True)
     assert "worktree message" in _git(linked, "log", "-1", "--format=%s")
+
+
+def test_the_recovery_command_does_not_sweep_in_the_users_staged_work(git_kb, monkeypatch):
+    """The commit that timed out was pathspec-scoped; an unscoped recovery
+    would commit everything in the index."""
+    root = git_kb.root_path
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nsleep 30\n")
+    hook.chmod(0o755)
+    monkeypatch.setenv("WAKIL_GIT_COMMIT_TIMEOUT", "2")
+
+    (root / "MY_PRIVATE_DRAFT.md").write_text("not wakil's to commit\n")
+    _git(root, "add", "MY_PRIVATE_DRAFT.md")
+    (root / "wakil_note.md").write_text("wakil's file\n")
+
+    with pytest.raises(git.GitTimeout) as excinfo:
+        git.stage_and_commit(root, ["wakil_note.md"], "test: scoped")
+
+    recovery = next(
+        line.strip() for line in str(excinfo.value).splitlines() if "commit -F" in line
+    )
+    hook.unlink()
+    subprocess.run(shlex.split(recovery), check=True, capture_output=True)
+
+    committed = _git(root, "show", "--name-only", "--format=", "HEAD").split()
+    assert committed == ["wakil_note.md"]
+    # The user's own staged file is untouched, still staged.
+    assert "MY_PRIVATE_DRAFT.md" in _git(root, "diff", "--cached", "--name-only")

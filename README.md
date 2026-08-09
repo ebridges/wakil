@@ -309,8 +309,11 @@ message it was going to use. The error prints the exact command to finish by
 hand — run it from that branch, without switching away first:
 
 ```bash
-git -C <workspace> commit -F <workspace>/.git/COMMIT_EDITMSG
+git -C <workspace> commit -F <workspace>/.git/COMMIT_EDITMSG -- <the files it listed>
 ```
+
+The printed command includes the file list; keep it, so the commit stays
+scoped to wakil's own files rather than everything you have staged.
 
 The push and pull request don't happen in that case, so `wakil git summary`
 won't show the change until you push the branch and open the PR yourself.
