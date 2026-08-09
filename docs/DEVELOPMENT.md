@@ -190,6 +190,8 @@ This is the second recorded instance of the same shape (RESOLVER.md's 4,000-char
 
 Append the notice rather than substituting it into the budget, and assert in a test that the analyzed prefix is byte-identical to what it was before — otherwise a fix for visibility quietly shrinks the input it was meant to explain.
 
+Both recorded instances now go through one helper, `_cut_to_budget(text, cap=…, label=…, unanalyzed=…)`: `MAX_SOURCE_CHARS` on the source (enrichment *and* the capture-metadata call, whose abstract is durable), and `GUIDE_MAX_CHARS` on `RESOLVER.md`. Reach for it rather than writing a third bare slice — a cap that isn't announced is indistinguishable, from the outside, from the model getting the answer wrong.
+
 ### Adding SKILL.md guidance has a budget cost that can degrade an unrelated step
 
 **Established:** 2026-08-07 · **Source:** issue #176, `note-revision/SKILL.md`, four measured live-eval runs

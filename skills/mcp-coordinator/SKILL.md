@@ -52,11 +52,16 @@ connected, ask — don't guess.
    no human present is what working-agreement items 11/12 rule out. Report
    the path and stop.
 4. Otherwise, look at the preview (`title`, `abstract`, `origin`) **and at
-   `warnings`**. Anything in `warnings` is a value the author wrote that
-   wakil declined to use, so report it — but it is informational, not a
-   question: don't wait for a reply. If nothing else looks wrong, call
-   `ingest_apply` immediately — don't ask the
-   user to re-confirm fields that are already visible and routine. Report
+   `warnings`**. Show any warning to the user before applying: this is
+   where wakil reports something it did that the preview alone doesn't
+   reveal — a value the author wrote that wakil declined to use, and most
+   importantly that a long source was cut to the model's budget, meaning
+   the `title`/`abstract` about to be written into the file's frontmatter
+   describe only the part that was read. A plausible abstract of the first
+   11% of a two-hour recording looks exactly like a good one. If nothing
+   looks wrong and `warnings` is empty, call `ingest_apply` immediately —
+   don't ask the user to re-confirm fields
+   that are already visible and routine. Report
    one line back: `Captured as source #<id>, branch <branch>, draft PR:
    <pr_url>` (omit `pr_url` if none was opened, e.g. no `gh`/remote
    configured).

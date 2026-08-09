@@ -5263,3 +5263,31 @@ def test_capture_metadata_truncation_is_not_silent_either(workspace, kb_path, mo
 def test_a_short_capture_produces_no_truncation_warning(workspace, kb_path, transcript):
     proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
     assert proposal.warnings == []
+
+
+def test_resolver_guide_truncation_is_not_silent(workspace, kb_path):
+    """The second recorded instance of the budget-cap shape, and the one
+    docs/DEVELOPMENT.md cites as instance #1 — it was still a bare slice, so
+    the rule named a precedent that was itself unfixed."""
+    from wakil.app.ingest_service import GUIDE_MAX_CHARS, load_workspace_guides
+
+    (kb_path / "RESOLVER.md").write_text("rule. " * (GUIDE_MAX_CHARS // 2), encoding="utf-8")
+    warnings: list[str] = []
+    guides = load_workspace_guides(workspace, warnings)
+
+    assert "SOURCE TRUNCATED" in guides["RESOLVER.md"]
+    assert guides["RESOLVER.md"][:GUIDE_MAX_CHARS] == ("rule. " * (GUIDE_MAX_CHARS // 2))[
+        :GUIDE_MAX_CHARS
+    ]
+    assert len(warnings) == 1
+    assert "RESOLVER.md truncated" in warnings[0]
+    assert "move the rules that matter most to the top" in warnings[0]
+
+
+def test_a_short_resolver_guide_is_untouched(workspace, kb_path):
+    from wakil.app.ingest_service import load_workspace_guides
+
+    (kb_path / "RESOLVER.md").write_text("one short rule.\n", encoding="utf-8")
+    warnings: list[str] = []
+    assert load_workspace_guides(workspace, warnings)["RESOLVER.md"] == "one short rule.\n"
+    assert warnings == []

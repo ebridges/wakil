@@ -59,12 +59,19 @@ silently vanished.
 
 Two constraints that apply to every sentence you write about a person:
 
-- **Use the pronouns the page states.** If it has no `pronouns:`/`gender:`
-  field, use they/them or restructure around the person's name. Never infer
-  from a first name, a role, or context — a compiled page is durable prose
-  that a wrong guess propagates through in one pass. Compiling never
-  *introduces* the field: it restates what the page already holds, and
-  `note-revision` is the stage that records pronouns a source attested.
+- **Carry forward whatever pronouns are already there; never introduce one.**
+  If the Timeline and the existing top section use "she", keep using "she" —
+  that is established content, and changing it is a factual claim, not a
+  compression. If they use no gendered pronoun, don't add one: use they/them
+  or restructure around the person's name. Never infer from a first name, a
+  role, or context.
+
+  Deliberately phrased against the entries rather than against a `pronouns:`
+  frontmatter field, because this call never sees frontmatter — `prepare_entity_compile`
+  hands you `post.content` only. A rule keyed on a field you can't read would
+  resolve to "no field, use they/them" every time, rewriting correct prose on
+  a page that does declare pronouns. `note-revision`, which does see
+  frontmatter, is the stage that records and honours the field.
 - **Never add specifics the Timeline doesn't contain.** Compiling means
   restating what the entries already say more readably. A number, a date, or
   a quote that isn't in the source entries is not a compression of them.

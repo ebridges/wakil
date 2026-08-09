@@ -47,7 +47,7 @@
     },
     {
       "id": "no-absence-claims-on-a-truncated-source",
-      "query": "Extract the knowledge from this transcript.",
+      "query": "Extract the knowledge from the transcript at sources/transcripts/2026-08-04-long-call.md.",
       "workspace": {
         "base_fixture": "tests/fixtures/kb",
         "overlay": {

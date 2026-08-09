@@ -18,7 +18,9 @@
         "Does not invent facts about Jane that aren't present anywhere in the given Timeline",
         "Does not propose editing, reordering, or adding any Timeline / Log entry -- only the Compiled Truth section is being re-synthesized here"
       ],
-      "related_skills": ["note-revision"]
+      "related_skills": [
+        "note-revision"
+      ]
     },
     {
       "id": "similar-but-distinct-meetings-stay-distinct",
@@ -37,7 +39,9 @@
         "If genuinely uncertain whether the two entries describe the same underlying evaluation or two different ones, keeps both rather than collapsing them -- but here they should be recognized as clearly distinct given the different topics and decisions",
         "Does not propose any change to the Timeline / Log entries themselves"
       ],
-      "related_skills": ["note-revision"]
+      "related_skills": [
+        "note-revision"
+      ]
     },
     {
       "id": "placeholder-compiled-truth-gets-real-synthesis",
@@ -56,7 +60,9 @@
         "Does not silently state 'one lead investor' as if that were true from the start -- reflects that the field narrowed from two candidates to one, since the earlier candidate count is also a fact recorded in the Timeline",
         "Does not propose any change to the Timeline / Log entries themselves, and does not invent a company detail (e.g. a specific investor name) that isn't present anywhere in the given Timeline"
       ],
-      "related_skills": ["note-revision"]
+      "related_skills": [
+        "note-revision"
+      ]
     },
     {
       "id": "full-resynthesis-drops-superseded-restatement",
@@ -75,7 +81,9 @@
         "Keeps Marcus Webb as CEO intact -- a durable, once-stated identifying fact, unaffected by the redundancy rule",
         "Does not propose any change to the Timeline / Log entries themselves -- only the Compiled Truth section is being re-synthesized"
       ],
-      "related_skills": ["note-revision"]
+      "related_skills": [
+        "note-revision"
+      ]
     },
     {
       "id": "full-resynthesis-keeps-durable-once-stated-fact",
@@ -94,7 +102,9 @@
         "Does not treat 'mentioned only once' by itself as a reason to compress either fact -- the frequency-only reading is exactly the wrong rule for a once-stated durable fact",
         "Does not propose any change to the Timeline / Log entries themselves"
       ],
-      "related_skills": ["note-revision"]
+      "related_skills": [
+        "note-revision"
+      ]
     },
     {
       "id": "full-resynthesis-compresses-ephemeral-once-stated-fact",
@@ -113,7 +123,9 @@
         "Keeps the launch-delay decision (Payments API v2 pushed from June to August) intact -- a durable, once-stated decision -- and dropping the ephemeral reschedule detail does not come at the cost of this fact",
         "Does not propose any change to the Timeline / Log entries themselves"
       ],
-      "related_skills": ["note-revision"]
+      "related_skills": [
+        "note-revision"
+      ]
     },
     {
       "id": "full-resynthesis-repeat-run-no-additional-loss",
@@ -132,7 +144,26 @@
         "The resulting Compiled Truth is not thinner or missing content relative to the existing one shown -- demonstrating that a second consecutive full-resynthesis run over an unchanged Timeline does not lose more content than the first run already did",
         "Does not propose any change to the Timeline / Log entries themselves"
       ],
-      "related_skills": ["note-revision"]
+      "related_skills": [
+        "note-revision"
+      ]
+    },
+    {
+      "id": "carries-forward-established-pronouns",
+      "query": "Run `wakil entities compile priya-raman` in spirit: re-synthesize people/priya-raman.md's Compiled Truth section from its Timeline / Log.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/priya-raman.md": "---\ntype: person\nname: Priya Raman\npronouns: she/her\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-07-01\n---\n\n# Priya Raman\n\n## Compiled Truth\n\nPriya leads the data platform team. She took it over in July and is running the warehouse cutover.\n\n## Timeline / Log\n\n### 2026-07-01 -- handover\n- Priya took over the data platform team.\n- She inherited the warehouse cutover mid-flight.\n\n### 2026-08-04 -- cutover plan\n- She set the cutover date for the 20th.\n"
+        }
+      },
+      "expected_behavior": [
+        "Keeps using she/her for Priya in the re-synthesized Compiled Truth, since the existing top section and every Timeline entry already use it.",
+        "Does not rewrite the established pronouns to they/them or restructure the prose to avoid pronouns.",
+        "Does not introduce any pronoun or gendered description not already present in the page's prose.",
+        "Still compiles rather than copying: the result is a synthesis of the Timeline entries, not a concatenation of them."
+      ],
+      "related_skills": []
     }
   ]
 }

@@ -141,7 +141,7 @@ Non-transcript raw captures written by `_build_raw_file` come out with frontmatt
 
 **Implication:** If a workspace's `RESOLVER.md` grows past 4,000 characters, any routing rules declared after that point are silently dropped from what the model sees during ingest — with nothing in the output to indicate the guide was cut off. This is easy to miss because the file looks complete when opened in an editor.
 
-**Fix / workaround:** If ingest behavior seems to ignore rules defined later in `RESOLVER.md`, check the file's character count against the 4,000-char `GUIDE_MAX_CHARS` limit first. Until a truncation warning is added, keep the guide file under ~4,000 chars (front-load the most important rules), or raise `GUIDE_MAX_CHARS` in `ingest_service.py`.
+**Fix:** Resolved 2026-08-09 (PR #202, `_cut_to_budget`). The cut now announces itself in both directions — the model is told its view of the guide is partial, and the enrichment preview carries a warning naming the character counts and telling you to front-load the rules that matter. The 4,000-char cap itself is unchanged; raise `GUIDE_MAX_CHARS` in `ingest_service.py` if you need more. Left here as the recorded first instance of the budget-cap shape generalized in `docs/DEVELOPMENT.md`.
 
 ### Entity resolution misses names that only appear in the filename, not the transcript body
 

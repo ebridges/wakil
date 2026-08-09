@@ -186,10 +186,12 @@ class CaptureProposal:
     # H1 suppresses the generated one so the note is never double-wrapped.
     authored_metadata: dict = field(default_factory=dict)
     authored_h1: str | None = None
-    # Authored values wakil declined to use (a wakil-owned key, or one the
-    # `source` schema rejects). Shown in the preview -- silently dropping a
-    # value the author wrote is exactly the kind of invisible behaviour #172
-    # was about.
+    # Anything wakil did that the preview has to show before the confirm:
+    # authored values it declined to use (a wakil-owned key, or one the
+    # `source` schema rejects, #172), and a source cut to the model's budget
+    # (#176). Silently dropping a value the author wrote, or silently
+    # describing a fraction of the file as if it were the file, is exactly
+    # the invisible behaviour those issues are about.
     warnings: list[str] = field(default_factory=list)
     # Set when the computed destination is already occupied (#173). Capture
     # used to silently pick `<name>-1.md` instead, producing a near-duplicate
@@ -200,8 +202,6 @@ class CaptureProposal:
     # would end up sharing one `raw_text_path` — see `apply_capture`.
     collision_source_id: int | None = None
     overwrite: bool = False
-    # Shown in the capture preview, same as EnrichmentProposal.warnings.
-    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -546,7 +546,8 @@ def _generate_capture_metadata(
         text,
         unanalyzed=(
             "The title and abstract written into this capture's frontmatter describe "
-            "only the part that was read."
+            "only the part that was read — split the file and capture the parts "
+            "separately if that matters."
         ),
     )
     if warning is not None:
@@ -1221,31 +1222,36 @@ _TRUNCATION_NOTICE = (
 )
 
 
-def _cut_to_budget(text: str, *, unanalyzed: str) -> tuple[str, str | None]:
-    """Cut the source to the prompt budget, saying so in both directions.
+def _cut_to_budget(
+    text: str, *, unanalyzed: str, cap: int = MAX_SOURCE_CHARS, label: str = "Source"
+) -> tuple[str, str | None]:
+    """Cut text to a prompt budget, saying so in both directions.
 
     The cut itself is unchanged; what's new is that it stops being silent.
     The model is told its view is partial so it doesn't reason about absence,
     and the caller gets a warning to show the operator so a short summary of a
     long recording is explicable rather than mysterious. `unanalyzed` names
-    what the operator loses, which differs per call site.
+    what the operator loses, which differs per call site; `cap`/`label` let
+    the workspace-guide cut share this rather than growing a second, silent
+    truncation of its own.
     """
-    if len(text) <= MAX_SOURCE_CHARS:
+    if len(text) <= cap:
         return text, None
     warning = (
-        f"Source truncated to {MAX_SOURCE_CHARS:,} of {len(text):,} characters for the "
-        f"model — roughly the last {100 - int(100 * MAX_SOURCE_CHARS / len(text))}% of it "
-        f"was not read. {unanalyzed}"
+        f"{label} truncated to {cap:,} of {len(text):,} characters for the model — "
+        f"roughly the last {100 - int(100 * cap / len(text))}% of it was not read. "
+        f"{unanalyzed}"
     )
-    notice = _TRUNCATION_NOTICE.format(shown=MAX_SOURCE_CHARS, total=len(text))
-    return text[:MAX_SOURCE_CHARS] + notice, warning
+    notice = _TRUNCATION_NOTICE.format(shown=cap, total=len(text))
+    return text[:cap] + notice, warning
 
 
 def _truncate_source(text: str, proposal: "EnrichmentProposal") -> str:
     truncated, warning = _cut_to_budget(
         text,
         unanalyzed=(
-            "Anything the enrichment says about the end of this source is unsupported."
+            "Anything the enrichment says about the end of this source is unsupported. "
+            "If the later material matters, capture it as a second source."
         ),
     )
     if warning is not None:
@@ -1268,7 +1274,7 @@ def _populate_proposal_from_models(
     """Run both DAG model calls (extraction, then entity resolution),
     mutating `proposal` in place with their results -- mirrors this file's
     `_run_extraction`/`_run_entity_resolution` mutate-in-place convention."""
-    guides = load_workspace_guides(config)
+    guides = load_workspace_guides(config, proposal.warnings)
     related_pairs = [(hit.ref, hit.title) for hit in related_notes]
     source_text = _truncate_source(text, proposal)
 
@@ -3981,7 +3987,9 @@ def _relative_origin(config: WorkspaceConfig, file: Path) -> str:
 # Frontmatter and workspace guidance
 
 
-def load_workspace_guides(config: WorkspaceConfig) -> dict[str, str]:
+def load_workspace_guides(
+    config: WorkspaceConfig, warnings: list[str] | None = None
+) -> dict[str, str]:
     """RESOLVER.md (routing) excerpt, when present.
 
     Page shape and metadata guidance no longer comes from a workspace
@@ -3994,9 +4002,23 @@ def load_workspace_guides(config: WorkspaceConfig) -> dict[str, str]:
     path = config.root_path / "RESOLVER.md"
     if path.is_file():
         with contextlib.suppress(OSError):
-            guides["RESOLVER.md"] = path.read_text(encoding="utf-8", errors="replace")[
-                :GUIDE_MAX_CHARS
-            ]
+            text = path.read_text(encoding="utf-8", errors="replace")
+            # The second recorded instance of the budget-cap shape (see
+            # docs/DEVELOPMENT.md). This one loses the user's own routing
+            # rules, silently, and docs/TROUBLESHOOTING.md was reduced to
+            # advising "keep the guide under ~4,000 chars" because nothing
+            # said when you had gone past it.
+            guides["RESOLVER.md"], warning = _cut_to_budget(
+                text,
+                cap=GUIDE_MAX_CHARS,
+                label="RESOLVER.md",
+                unanalyzed=(
+                    "Routing rules past that point were not applied; move the rules that "
+                    "matter most to the top of the file."
+                ),
+            )
+            if warning is not None and warnings is not None:
+                warnings.append(warning)
     return guides
 
 
