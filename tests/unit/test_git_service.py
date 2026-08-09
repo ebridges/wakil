@@ -1132,3 +1132,50 @@ def test_drift_during_the_pr_step_does_not_yank_on_the_success_path(git_kb, monk
     # And the outcome reports where the tree actually is, not where we meant
     # to leave it.
     assert outcome.returned_to == "other-process-branch"
+
+
+def test_drift_during_the_commit_records_where_the_commit_actually_went(git_kb, monkeypatch):
+    """The commit is durable but on the wrong branch. Leaving `git_branch`
+    naming a branch that provably lacks it sends the next `wakil enrich` to
+    check out a branch with no raw capture on it — "Could not read raw
+    capture", which is the #180 symptom the early recording exists to
+    prevent."""
+    root = git_kb.root_path
+    source_id = _insert_source(git_kb, "Race The Record")
+    landing = prepare_landing(git_kb, source_id=source_id, title="Race The Record", local=False)
+    assert landing.branch is not None
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "rr.md").write_text("x\n")
+
+    real_commit = git.stage_and_commit
+
+    def drift_then_commit(r, paths, message):
+        _git(root, "switch", "-q", "main")
+        return real_commit(r, paths, message)
+
+    monkeypatch.setattr("wakil.app.git_service.git.stage_and_commit", drift_then_commit)
+
+    with pytest.raises(BranchDriftError):
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["drafts/rr.md"],
+            title="Race The Record",
+            summary=None,
+            ingest_run_id=None,
+            kind="source",
+            phase="capture",
+        )
+
+    sha = _git(root, "rev-parse", "main")
+    with open_session(git_kb) as session:
+        source = session.get(Source, source_id)
+        assert source is not None
+        # Points at the branch that actually holds the capture, not the one
+        # `_assert_commit_landed` just proved wrong.
+        assert source.git_branch == "main"
+        assert source.git_branch != landing.branch
+        changes = session.scalars(select(GitChange)).all()
+        # The durable commit is recorded, and against the right branch.
+        assert [(c.commit_sha, c.branch_name) for c in changes] == [(sha, "main")]

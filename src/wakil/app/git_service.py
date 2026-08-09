@@ -270,7 +270,24 @@ def land_ingestion(
     # between it and the commit itself. Verifying the sha actually landed on
     # the branch we claim is what makes `landed_on` an observation rather than
     # a label -- which is the whole thesis of this change (#181).
-    _assert_commit_landed(config, landed_on, sha)
+    try:
+        _assert_commit_landed(config, landed_on, sha)
+    except BranchDriftError:
+        # The commit is durable, just not where we said. Record what actually
+        # happened before raising: leaving the `git_changes` row unwritten and
+        # `Source.git_branch` still naming a branch that provably lacks this
+        # commit sends the next `wakil enrich` to check out a branch with no
+        # raw capture on it, which fails with "Could not read raw capture" --
+        # verbatim the #180 symptom the early `_remember_source_branch` above
+        # exists to prevent. Pointing the source at the branch that does hold
+        # the capture can mean pointing it at the default branch; that is
+        # still strictly better than a branch known not to have it, and the
+        # error tells the user to move the commit where it belongs.
+        actual = _branch_holding(config, sha)
+        _record_change(config, files, sha, actual, None, title, ingest_run_id, kind)
+        if actual is not None:
+            _remember_source_branch(config, source_id, actual)
+        raise
 
     # Record the commit now, not after the PR. It is durable in git from this
     # point; a push/`gh` failure used to leave a real commit with no
@@ -450,6 +467,25 @@ def _assert_commit_landed(config: WorkspaceConfig, branch: str, sha: str) -> Non
             f"likely another wakil process. The commit is durable; find it with "
             f"`git branch --contains {sha[:10]}` and move it where it belongs."
         )
+
+
+def _branch_holding(config: WorkspaceConfig, sha: str) -> str | None:
+    """The branch a drifted commit actually landed on, if we can name one.
+
+    Prefers the current branch when it holds the commit — that is the branch
+    the other process left the tree on, and the one whose working tree has
+    the capture in it."""
+    try:
+        holders = git.branches_with_commit(config.root_path, sha)
+    except git.GitError:
+        return None
+    if not holders:
+        return None
+    try:
+        current = git.current_branch(config.root_path)
+    except git.GitError:
+        return holders[0]
+    return current if current in holders else holders[0]
 
 
 def _attach_pr_to_change(

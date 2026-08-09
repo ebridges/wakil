@@ -289,6 +289,18 @@ def rev_parse(root: Path, ref: str) -> str:
     return _run_git_checked(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
 
 
+def branches_with_commit(root: Path, sha: str) -> list[str]:
+    """Local branches whose history contains `sha`, tip-first.
+
+    Tolerant, not checked: the only caller is already reporting a failure and
+    is trying to say something more useful than "somewhere". Empty means we
+    could not tell, which the caller must not read as "nowhere"."""
+    out = _run_git(root, "branch", "--contains", sha, "--format=%(refname:short)")
+    if not out:
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
 def stage_and_commit(root: Path, paths: list[str], message: str) -> str:
     """Stage exactly `paths`, commit, and return the commit sha.
 
