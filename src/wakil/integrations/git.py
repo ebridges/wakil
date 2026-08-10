@@ -290,7 +290,8 @@ def rev_parse(root: Path, ref: str) -> str:
 
 
 def branches_with_commit(root: Path, sha: str) -> list[str]:
-    """Local branches whose history contains `sha`, tip-first.
+    """Local branches whose history contains `sha`, in git's own order
+    (refname-alphabetical, not tip-first — the caller picks, not the order).
 
     Tolerant, not checked: the only caller is already reporting a failure and
     is trying to say something more useful than "somewhere". Empty means we
