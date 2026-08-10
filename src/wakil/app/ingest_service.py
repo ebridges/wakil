@@ -2560,7 +2560,15 @@ def _run_entity_updates(
     warnings_before = len(proposal.warnings)
     _revise_candidates(config, client, text, proposal, candidates)
 
-    if checkpoint_hash is not None:
+    # Not checkpointed when a target was missing: that is not a clean
+    # completion (ADR 0020's own rule), and the staleness key covers only the
+    # source text, context, and model — nothing about which candidates were
+    # reachable. Saving here meant the post-merge re-run this file tells the
+    # user to do returned the cached payload and never revised the page that
+    # had just become available: zero model calls, exit 0, nothing written,
+    # source flipped to `enriched`. That is the silent no-op #188 is about,
+    # reached by following #188's own remediation.
+    if checkpoint_hash is not None and not proposal.missing_update_targets:
         _save_checkpoint(
             config,
             proposal.source_id,
@@ -2974,8 +2982,16 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
     # keeps the re-run plain, and a plain re-run keeps the phase checkpoints
     # (only `--force` clears them), so it resumes instead of re-paying for the
     # model calls (#188).
-    if not files_written and proposal.missing_update_targets:
-        raise MissingUpdateTargetsError(proposal.missing_update_targets)
+    # Only when at least one target is *recoverable* — i.e. actually sits on
+    # some branch. A resolution pointing at a path that exists nowhere (a
+    # wrong model-produced path, or a stale index row for a deleted note —
+    # the case the warning in `_run_entity_updates` was originally written
+    # for) can never be resolved by merging, so hard-aborting on it is a
+    # permanent dead end whose only escape is `--force`, which the message
+    # correctly tells the user not to use. Those stay warnings.
+    recoverable = [t for t in proposal.missing_update_targets if t.branches]
+    if not files_written and recoverable:
+        raise MissingUpdateTargetsError(recoverable)
 
     with open_session(config) as session:
         workspace_id, user_id = _require_workspace_ids(session, config)
