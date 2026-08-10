@@ -31,6 +31,37 @@ def test_warning_containing_wikilinks_is_not_mangled_by_markup(capsys):
     assert "warning: []" not in out
 
 
+def test_missing_update_target_name_survives_markup(capsys):
+    """The name is the one thing this message exists to convey, and it comes
+    from model output — a bracketed one was read as a style tag and vanished."""
+    from wakil.app.ingest_service import _MissingUpdateTarget
+    from wakil.ui.console import print_missing_update_targets
+
+    console.width = 200
+    print_missing_update_targets(
+        [
+            _MissingUpdateTarget(
+                name="Q3 [draft] Planning",
+                path="concepts/q3-planning.md",
+                branches=["ingest/2026-08-01-notes"],
+            )
+        ],
+        source_id=7,
+        source_branch="wakil/ingest/2026-08-04-call",
+    )
+    out = capsys.readouterr().out
+    assert "Q3 [draft] Planning" in out
+    assert "concepts/q3-planning.md" in out
+    assert "ingest/2026-08-01-notes" in out
+    # The merge has to land on the source's own branch — merging into the
+    # default branch leaves it unchanged — and the re-run is plain, since
+    # `--force` would clear the checkpoints this message promises are kept.
+    assert "git checkout wakil/ingest/2026-08-04-call" in out
+    assert "git merge ingest/2026-08-01-notes" in out
+    assert "wakil enrich 7" in out
+    assert "--force" not in out
+
+
 def test_entity_resolution_table_shows_relevance_column(capsys):
     proposal = EnrichmentProposal(
         source_id=1,

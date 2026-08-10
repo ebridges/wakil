@@ -90,7 +90,18 @@ connected, ask — don't guess.
 7. Report the final result as one line with the PR url (now
    ready-for-review, not a draft) and a short list of files written. If
    `files_to_write`/`files_written` was empty, say so plainly — an
-   enrichment that produced nothing is a normal outcome, not a failure.
+   enrichment that produced nothing is usually a normal outcome, not a
+   failure. The one exception is an `enrich_apply` error beginning
+   "Nothing was written for this source": that means every page the
+   enrichment would have updated lives on a branch that isn't merged into
+   the working tree, so the source's material landed nowhere. Report it as
+   a failure, name the branches the error lists, and leave the source
+   un-enriched. This one needs a human with a shell — the pages have to be
+   merged onto *this source's own* branch, which the error names, and
+   merging into the default branch won't do it. Nothing was persisted, so
+   the enrichment can simply be re-run afterwards; do **not** pass
+   `force: true`, which isn't needed and discards the phase checkpoints
+   that make the re-run cheap.
 8. If any tool call fails, report the error message plainly. Don't retry
    silently. Any branch/PR already opened is still there for the user to
    follow up on manually — `wakil`'s own cleanup (`abandon_landing`)

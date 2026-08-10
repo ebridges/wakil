@@ -795,3 +795,219 @@ def test_an_owned_collision_never_suggests_overwrite(kb_path: Path, monkeypatch)
     assert result.exit_code == 1
     assert "raw capture of source #1" in result.output
     assert "Re-run with --overwrite" not in result.output
+
+# --- update target on an unmerged branch (issue #188) ----------------------
+
+# Extraction that proposes no note of its own, so the run's only possible
+# output is the entity update -- the shape #188 reports.
+NO_NOTE_EXTRACTION_JSON = json.dumps(
+    {
+        "title": "Second Source",
+        "summary": "More on the same topic.",
+        "key_points": ["Author commentary unique to this source"],
+        "memories": [{"type": "insight", "content": "A unique point.", "confidence": 0.9}],
+        "relationships": [],
+        "proposed_note": None,
+    }
+)
+
+UPDATE_ELSEWHERE_RESOLUTION_JSON = json.dumps(
+    {
+        "entities": [
+            {
+                "name": "Compositional Skill Routing",
+                "entity_type": "concept",
+                "action": "update",
+                "target_note_path": "concepts/only-on-another-branch.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            }
+        ]
+    }
+)
+
+
+def _git(root: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _git_kb_with_page_on_another_branch(kb_path: Path) -> Path:
+    """A real repo where `concepts/only-on-another-branch.md` exists on a
+    branch that isn't merged. Without git the page is missing from *every*
+    branch, which is the unrecoverable case, not #188's."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=kb_path, check=True)
+    _git(kb_path, "config", "user.email", "test@example.com")
+    _git(kb_path, "config", "user.name", "Test User")
+    _git(kb_path, "config", "commit.gpgsign", "false")
+    _git(kb_path, "add", "-A")
+    _git(kb_path, "commit", "-q", "-m", "seed")
+
+    _git(kb_path, "switch", "-q", "-c", "wakil/ingest/2026-08-01-earlier")
+    page = kb_path / "concepts" / "only-on-another-branch.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: concept\nname: Compositional Skill Routing\n"
+        "created: 2026-08-01\nupdated: 2026-08-01\n---\n\n"
+        "# Compositional Skill Routing\n\n## Compiled Truth\n\nEarlier work.\n",
+        encoding="utf-8",
+    )
+    _git(kb_path, "add", "-A")
+    _git(kb_path, "commit", "-q", "-m", "earlier page")
+    _git(kb_path, "switch", "-q", "main")
+
+    runner.invoke(app, ["init", str(kb_path)])
+    return kb_path
+
+
+def test_enrich_exits_non_zero_when_every_target_is_off_this_branch(
+    kb_path: Path, monkeypatch
+):
+    """Issue #188: this reported success with exit 0 while writing nothing,
+    so a second source's unique material silently landed nowhere."""
+    _client_queue(
+        monkeypatch,
+        FakeCaptureClient(),
+        FakeClient((NO_NOTE_EXTRACTION_JSON, UPDATE_ELSEWHERE_RESOLUTION_JSON)),
+    )
+    _git_kb_with_page_on_another_branch(kb_path)
+    transcript = kb_path / "meeting.txt"
+    transcript.write_text("We approved the routing prototype.\n")
+    (kb_path / ".gitignore").write_text("meeting.txt\n")
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
+
+    assert result.exit_code == 1, result.output
+    assert "Nothing was written for this source" in result.output
+    assert "concepts/only-on-another-branch.md" in result.output
+    # Actionable: says what to do next, not just that it failed. And the
+    # advice must not be `--force`, which would clear the checkpoints the
+    # same message promises are being kept.
+    assert "wakil enrich 1" in result.output
+    assert "--force" not in result.output
+
+
+def test_a_failed_cross_branch_enrich_writes_nothing_at_all(kb_path: Path, monkeypatch):
+    """"Nothing was written" has to be true, and the `--force` remediation it
+    prints has to be safe. Committing the memories and flipping the source to
+    `enriched` before printing it made the message false and turned the advice
+    into a duplicate-memory instruction."""
+    from sqlalchemy import select
+
+    from wakil.app.workspace_service import open_session
+    from wakil.config.settings import WorkspaceConfig
+    from wakil.storage.schema import IngestRun, Memory, Source
+
+    _client_queue(
+        monkeypatch,
+        FakeCaptureClient(),
+        FakeClient((NO_NOTE_EXTRACTION_JSON, UPDATE_ELSEWHERE_RESOLUTION_JSON)),
+    )
+    _git_kb_with_page_on_another_branch(kb_path)
+    transcript = kb_path / "meeting.txt"
+    transcript.write_text("We approved the routing prototype.\n")
+    (kb_path / ".gitignore").write_text("meeting.txt\n")
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
+    assert result.exit_code == 1, result.output
+
+    config = WorkspaceConfig.load(kb_path)
+    with open_session(config) as session:
+        assert session.scalars(select(Memory)).all() == []
+        assert session.scalar(select(Source.status).where(Source.id == 1)) == "raw"
+        operations = [
+            json.loads(r.metadata_json or "{}").get("operation")
+            for r in session.scalars(select(IngestRun)).all()
+        ]
+    assert operations == ["capture"]
+
+
+def test_a_target_that_exists_nowhere_warns_instead_of_dead_ending(kb_path: Path, monkeypatch):
+    """A resolution pointing at a path on no branch at all — a wrong
+    model-produced path, or a stale index row — can never be fixed by
+    merging, so hard-aborting makes it a permanent exit-1 whose only escape
+    is the `--force` the message correctly forbids."""
+    _client_queue(
+        monkeypatch,
+        FakeCaptureClient(),
+        FakeClient((NO_NOTE_EXTRACTION_JSON, UPDATE_ELSEWHERE_RESOLUTION_JSON)),
+    )
+    transcript = _init(kb_path)  # not a git repo: the page is on no branch
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
+
+    assert result.exit_code == 0, result.output
+    assert "Nothing was written for this source" not in result.output
+    # Still visible — it just isn't a hard stop.
+    assert "only-on-another-branch" in result.output
+
+
+MIXED_RESOLUTION_JSON = json.dumps(
+    {
+        "entities": [
+            {
+                "name": "Graph Memory",
+                "entity_type": "concept",
+                "action": "update",
+                "target_note_path": "concepts/graph-memory.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+            {
+                "name": "Compositional Skill Routing",
+                "entity_type": "concept",
+                "action": "update",
+                "target_note_path": "concepts/only-on-another-branch.md",
+                "confidence": 0.9,
+                "relevance": "central",
+            },
+        ]
+    }
+)
+
+
+def test_the_revision_phase_is_not_checkpointed_when_a_target_was_missing(
+    kb_path: Path, monkeypatch
+):
+    """The mixed shape: one target on disk makes `candidates` non-empty, so
+    the revision phase ran and was checkpointed. The staleness key covers the
+    source text and model but nothing about which candidates were reachable,
+    so the post-merge re-run this feature *instructs* returned the cached
+    payload and never revised the newly-available page — zero model calls,
+    exit 0, nothing written. That is #188's own silent no-op, resurrected."""
+    from sqlalchemy import select
+
+    from wakil.app.workspace_service import open_session
+    from wakil.config.settings import WorkspaceConfig
+    from wakil.storage.schema import EnrichmentCheckpoint
+
+    _client_queue(
+        monkeypatch,
+        FakeCaptureClient(),
+        FakeClient((NO_NOTE_EXTRACTION_JSON, MIXED_RESOLUTION_JSON, STUB_SYNTHESIS_JSON)),
+    )
+    _git_kb_with_page_on_another_branch(kb_path)
+    transcript = kb_path / "meeting.txt"
+    transcript.write_text("We approved the routing prototype.\n")
+    (kb_path / ".gitignore").write_text("meeting.txt\n")
+    _capture(kb_path, transcript)
+
+    result = runner.invoke(app, ["-w", str(kb_path), "enrich", "1", "--yes", "--local"])
+    assert result.exit_code == 1, result.output
+
+    config = WorkspaceConfig.load(kb_path)
+    with open_session(config) as session:
+        phases = sorted(p for (p,) in session.execute(select(EnrichmentCheckpoint.phase)))
+    # Extraction and resolution are clean completions and are kept, so the
+    # re-run is cheap. Revision is not — it ran against an incomplete
+    # candidate set.
+    assert "revision" not in phases
+    assert "extraction" in phases

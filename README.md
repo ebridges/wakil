@@ -297,6 +297,28 @@ just as much as wakil's `title:`). A scratch note or a stretch of dialogue
 between two `---` rules is kept as content instead of being parsed away, and
 the preview says so — though a transcript still gets the normal cleanup pass.
 
+When enrichment resolves an entity page that exists only on an earlier,
+unmerged ingest branch — normal when you capture a cluster of related sources
+before reviewing any PRs — it now exits non-zero naming that branch, instead
+of reporting success with nothing written. The run is abandoned whole: no
+memories are recorded, the source stays `raw`, and the phase checkpoints are
+kept, so nothing is duplicated and the re-run resumes rather than re-paying
+for the model calls.
+
+The merge has to land on *this source's own* branch. `wakil enrich` resumes
+onto the branch recorded at capture time and never merges anything into it,
+so merging the other PR into your default branch leaves this one unchanged
+and the re-run hits the same error. The error prints the exact commands:
+
+```bash
+git checkout wakil/ingest/<this source's branch>
+git merge wakil/ingest/<the branch holding the pages>
+wakil enrich <id>
+```
+
+No `--force` — the source is still `raw`, so a plain re-run is allowed, and
+`--force` would discard the checkpoints that make it cheap.
+
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:
 

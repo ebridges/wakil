@@ -30,6 +30,7 @@ from wakil.app.git_service import (
 from wakil.app.graph_service import Direction, TraversalError, traverse
 from wakil.app.ingest_service import (
     IngestError,
+    MissingUpdateTargetsError,
     apply_capture,
     apply_enrichment,
     get_source,
@@ -601,6 +602,21 @@ def enrich_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str
 
         try:
             result = apply_enrichment(config, proposal)
+        except MissingUpdateTargetsError as exc:
+            # A coordinating agent must not read this as success: the source's
+            # material landed nowhere because its targets live on an unmerged
+            # ingest branch (#188). Nothing was persisted, so retrying after
+            # the merge is safe rather than duplicating memories.
+            abandon_landing(config, landing)
+            raise ToolError(
+                f"{exc}. Nothing was recorded either — no memories, no status change, "
+                "and the phase checkpoints are kept, so the re-run resumes rather than "
+                "re-paying for the model calls. Those pages have to reach this source's "
+                f"own branch ({landing.branch}) — merging into the default branch does "
+                "not move it — after which call enrich_prepare again. Do not pass "
+                "force: it is not needed (the source is still `raw`) and it discards "
+                "the checkpoints."
+            ) from exc
         except IngestError as exc:
             abandon_landing(config, landing)
             raise ToolError(str(exc)) from exc

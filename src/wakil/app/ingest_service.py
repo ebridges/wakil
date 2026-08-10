@@ -46,6 +46,7 @@ from sqlalchemy.orm import Session
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
 from wakil.config.settings import WorkspaceConfig, workspace_date, workspace_today
+from wakil.integrations import git
 from wakil.integrations.web import fetch_article
 from wakil.knowledge.wikilinks import WIKILINK_RE as _WIKILINK_RE
 from wakil.knowledge.wikilinks import normalize_target as _normalize_link_path
@@ -101,6 +102,30 @@ RAW_DIRS = {
 
 class IngestError(RuntimeError):
     pass
+
+
+class MissingUpdateTargetsError(IngestError):
+    """Enrichment produced no file writes because every target it resolved
+    lives on a branch that isn't merged into this working tree (#188).
+
+    Raised before anything is persisted so the run really is a no-op: the
+    remediation is to make those pages reachable and re-run, and a
+    partially-applied run would make that re-run duplicate every candidate
+    memory it had already written. Leaving the source `raw` is also what
+    keeps the re-run from needing `--force`, which would clear the phase
+    checkpoints. Carries the targets structured so the CLI can render them
+    and the MCP layer can relay them."""
+
+    def __init__(self, targets: list["_MissingUpdateTarget"]) -> None:
+        self.targets = targets
+        detail = "; ".join(
+            f"{t.name} -> {t.path}" + (f" (on {', '.join(t.branches)})" if t.branches else "")
+            for t in targets
+        )
+        super().__init__(
+            "Nothing was written for this source. Entity resolution resolved targets "
+            f"that aren't in the working tree: {detail}"
+        )
 
 
 @dataclass
@@ -219,6 +244,20 @@ class EntityUpdate:
 
 
 @dataclass
+class _MissingUpdateTarget:
+    """An `action=update` resolution whose target isn't in the working tree.
+
+    Kept structured rather than folded into `warnings` so the CLI/MCP layer
+    can decide the exit code: a run that produced nothing *because* its
+    targets live on an unmerged branch is a failure, not a quiet success
+    (#188)."""
+
+    name: str
+    path: str
+    branches: list[str] = field(default_factory=list)
+
+
+@dataclass
 class EnrichmentProposal:
     source_id: int
     title: str
@@ -244,6 +283,10 @@ class EnrichmentProposal:
     # carry a real date of its own (issue #77) — never left as a
     # placeholder like "(date not recorded)" in an append-only Timeline.
     source_captured_date: str | None = None
+    # Update targets entity resolution asked for that the working tree
+    # doesn't have -- typically because an earlier, unmerged ingest branch
+    # created them (#188).
+    missing_update_targets: list[_MissingUpdateTarget] = field(default_factory=list)
 
 
 @dataclass
@@ -2455,10 +2498,27 @@ def _run_entity_updates(
             continue
         target = config.root_path / resolution.target_note_path
         if not target.is_file():
+            # Entity resolution matched against the index, which knows about
+            # pages earlier sources created; the writer only sees the working
+            # tree. Capturing a cluster of related sources before reviewing
+            # any PRs is wakil's own model, so the target commonly lives on
+            # an earlier, unmerged ingest branch (#188). Say which one.
+            elsewhere = git.branches_containing(config.root_path, resolution.target_note_path)
+            proposal.missing_update_targets.append(
+                _MissingUpdateTarget(
+                    name=resolution.name,
+                    path=resolution.target_note_path,
+                    branches=elsewhere,
+                )
+            )
+            located = (
+                f" — it exists on {', '.join(elsewhere)}, which hasn't been merged yet"
+                if elsewhere
+                else " — that file doesn't exist on disk"
+            )
             proposal.warnings.append(
                 f"{resolution.name}: entity resolution says update "
-                f"{resolution.target_note_path}, but that file doesn't exist on disk — "
-                "skipped"
+                f"{resolution.target_note_path}{located} — skipped"
             )
             continue
         try:
@@ -2500,7 +2560,15 @@ def _run_entity_updates(
     warnings_before = len(proposal.warnings)
     _revise_candidates(config, client, text, proposal, candidates)
 
-    if checkpoint_hash is not None:
+    # Not checkpointed when a target was missing: that is not a clean
+    # completion (ADR 0020's own rule), and the staleness key covers only the
+    # source text, context, and model — nothing about which candidates were
+    # reachable. Saving here meant the post-merge re-run this file tells the
+    # user to do returned the cached payload and never revised the page that
+    # had just become available: zero model calls, exit 0, nothing written,
+    # source flipped to `enriched`. That is the silent no-op #188 is about,
+    # reached by following #188's own remediation.
+    if checkpoint_hash is not None and not proposal.missing_update_targets:
         _save_checkpoint(
             config,
             proposal.source_id,
@@ -2904,6 +2972,26 @@ def apply_enrichment(config: WorkspaceConfig, proposal: EnrichmentProposal) -> E
     files_written = _write_new_proposed_files(config, proposal)
     updated_files, stale_updates_skipped = _apply_entity_updates(config, proposal)
     files_written += updated_files
+
+    # Before the session, so this really is a no-op: nothing reached disk (that
+    # is what the empty `files_written` means) and nothing reaches the database
+    # either. Committing here instead would record the memories and flip the
+    # source to `enriched` — which would both duplicate those memories on the
+    # re-run and force it to pass `--force`, since `prepare_enrichment` only
+    # demands that of an already-enriched source. Leaving the status `raw`
+    # keeps the re-run plain, and a plain re-run keeps the phase checkpoints
+    # (only `--force` clears them), so it resumes instead of re-paying for the
+    # model calls (#188).
+    # Only when at least one target is *recoverable* — i.e. actually sits on
+    # some branch. A resolution pointing at a path that exists nowhere (a
+    # wrong model-produced path, or a stale index row for a deleted note —
+    # the case the warning in `_run_entity_updates` was originally written
+    # for) can never be resolved by merging, so hard-aborting on it is a
+    # permanent dead end whose only escape is `--force`, which the message
+    # correctly tells the user not to use. Those stay warnings.
+    recoverable = [t for t in proposal.missing_update_targets if t.branches]
+    if not files_written and recoverable:
+        raise MissingUpdateTargetsError(recoverable)
 
     with open_session(config) as session:
         workspace_id, user_id = _require_workspace_ids(session, config)
