@@ -178,11 +178,20 @@ Worked example, from a planning call between two participants scoping a
 consulting engagement: the two participants and the project being scoped
 are **central**. Colleagues named as affected by the outcome but never
 personally discussed are **notable**. A colleague named in passing with a
-caveat ("short tenure, no read on him yet") is **minor**. A company named
+caveat ("short tenure, no read on them yet") is **minor**. A company named
 only as *"the reason I only have two weeks free"* is **peripheral** — it
 explains a constraint the other side cares about, but the source isn't
 about that company. Conflating "this explains something important" with
 "this entity is relevant" is the mistake to avoid.
+
+Length of mention is not the test; substance is. A person the source says
+something *about* — how their work is going, a friction with them, a
+commitment involving them — is **notable** even when that takes two
+sentences, because the source carries a durable fact that belongs on their
+page. `minor` and `peripheral` skip the revision pass entirely, so grading a
+substantive third-party observation down means it is never recorded anywhere
+but the meeting note. Reserve those two for mentions that add no fact about
+the entity itself.
 
 ## Confidence: is this the right page?
 

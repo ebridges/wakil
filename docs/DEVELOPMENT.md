@@ -211,6 +211,16 @@ Two things to take from this. First, **a skill's instruction budget is real** �
 
 Stopping after two rounds was deliberate, per this file's own entry on the personal-reflection heuristic: when each round of tuning trades one failure for another, the approach is the problem, not the tuning. The remaining regression is on a picky file-enumeration rubric item and is documented in the PR rather than tuned against.
 
+### A SKILL.md edit's eval blast radius is that skill's own scenarios, and nothing else
+
+**Established:** 2026-08-10 · **Source:** issue #204, `tests/evals/test_skill_evals.py`, measured against a same-day full-suite baseline
+
+The instruction-budget entry above says to "budget an eval run for scenarios you did *not* touch". That means other scenarios **of the same skill** — it is easy to read as suite-wide, and acting on the wider reading wastes a lot of time and money. `test_skill_eval_scenario` calls `load_skill(skill_name, workspace)` once per case and hands that single skill to `run_scenario`; nothing composes two skills into one prompt. So editing `transcript/SKILL.md` cannot change how a `note-revision` or `kb-commit` scenario behaves — there is no shared channel for it to travel through.
+
+This matters because the full suite churns hard between runs and invites false conclusions. A same-day before/after here: 16 failures baseline, and a partial re-run with five *new* failures and roughly eight *recoveries*, all in skills the change never touched. Read as a regression signal that is alarming; read correctly it is the ~45–53% flakiness this file already documents, restated. Scope the run to the edited skill (`-m eval -k "<skill>-"`) and sample it several times — six runs of one skill's scenarios cost a fraction of one full sweep and are a far better signal.
+
+Corollary worth checking before you rely on an eval at all: **a skill can have no `eval.json`.** `entity-resolve/` ships only a `SKILL.md`, so prose changes there are unmeasured no matter how the suite is invoked, and the `entity-resolution-*` scenarios belong to a different skill with a confusingly similar name.
+
 ### An eval must put a production signal in the channel production puts it in
 
 **Established:** 2026-08-09 · **Source:** the [#202 review](https://github.com/ebridges/wakil/pull/202), `src/wakil/skills/transcript/eval.json`
