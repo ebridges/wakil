@@ -1558,6 +1558,7 @@ def _correct_proposed_note_type(
     schema: EntitySchema,
     proposal: "EnrichmentProposal",
     today: str,
+    config: WorkspaceConfig,
 ) -> ProposedFile:
     """When a create-resolution's subject matches proposed_note's own
     subject (see `_proposed_note_subject_slug`) but entity-resolution
@@ -1599,14 +1600,23 @@ def _correct_proposed_note_type(
     )
     frontmatter_yaml = yaml.safe_dump(new_metadata, sort_keys=False, allow_unicode=True)
     new_content = f"---\n{frontmatter_yaml}---\n\n{post.content}"
-    new_path = f"{schema.directory}/{Path(proposed_note.path).name}"
+    # The fourth mover of a proposed note's path, and the one outside
+    # `_sanitize_note`. It needs both of that function's guarantees or this
+    # path keeps the two defects the others just closed: an unchecked
+    # destination discards the whole run in `apply_enrichment`, and an
+    # un-retargeted self-link dangles.
+    root = config.root_path.resolve()
+    routed = Path(f"{schema.directory}/{Path(proposed_note.path).name}")
+    new_path = str(_free_target(root, routed, proposal))
 
     proposal.warnings.append(
         f"Corrected the proposed note's type from '{old_type}' to "
         f"'{resolution.entity_type}' (moving it from {proposed_note.path} to {new_path}) "
         "to match entity-resolution's decision for the same subject"
     )
-    return ProposedFile(path=new_path, content=new_content)
+    return _retarget_self_links(
+        ProposedFile(path=proposed_note.path, content=new_content), new_path
+    )
 
 
 def _is_source_self_mirror(resolution: EntityResolution, proposal: EnrichmentProposal) -> bool:
@@ -1650,6 +1660,7 @@ def _suppress_duplicate_of_proposed_note(
     taken: set[str],
     today: str,
     proposed_note_slug: str | None,
+    config: WorkspaceConfig,
 ) -> bool:
     """Suppress `resolution` when its subject duplicates proposal.proposed_note
     (see issue #36). Returns True when suppressed, in which case the caller
@@ -1662,7 +1673,7 @@ def _suppress_duplicate_of_proposed_note(
     if proposal.proposed_note is not None:
         old_path = proposal.proposed_note.path
         proposal.proposed_note = _correct_proposed_note_type(
-            proposal.proposed_note, resolution, schema, proposal, today
+            proposal.proposed_note, resolution, schema, proposal, today, config
         )
         if proposal.proposed_note.path != old_path:
             taken.discard(old_path)
@@ -1789,7 +1800,7 @@ def _build_stub_entities(
             )
             continue
         if _suppress_duplicate_of_proposed_note(
-            resolution, schema, proposal, taken, today, proposed_note_slug
+            resolution, schema, proposal, taken, today, proposed_note_slug, config
         ):
             kept_resolutions.append(resolution)
             continue
@@ -3846,6 +3857,25 @@ def _sanitize_note(
         # under sources/, not drafts/" failure.
         directory = _schema_directory_for_note(config, note) or config.generated_directory
         candidate = _unused_path(root, Path(directory), slugify(proposal.title))
+        # This branch used to move the note silently, which contradicted this
+        # function's own docstring and, since #187 stopped routing here to
+        # `drafts/`, dropped the page beside real pages of its type instead of
+        # in a marked "needs attention" bucket. The collision case is the one
+        # that matters: a same-slug page under the canonical directory is
+        # quite possibly the same entity, which is #186's failure mode.
+        if not valid:
+            proposal.warnings.append(
+                f"The proposed note's path {note.path!r} was unusable (outside the "
+                f"knowledge base, or not a .md file), so it was placed at "
+                f"{candidate.as_posix()} instead. Model-proposed paths derive from "
+                f"ingested text, so a repeat of this is worth looking at."
+            )
+        else:
+            proposal.warnings.append(
+                f"{note.path} already exists, so the proposed note was placed at "
+                f"{candidate.as_posix()} instead. Check whether the existing page is "
+                f"the same subject — if it is, merge them rather than keeping both."
+            )
         return _retarget_self_links(note, str(candidate))
 
     # Each corrector below decides a path and records its own warning; the

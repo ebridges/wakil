@@ -4748,3 +4748,72 @@ def test_a_genuinely_different_entity_still_gets_its_stub(workspace):
 
     assert len(stubs) == 1
     assert "retrieval-augmented-generation" in stubs[0].path
+
+
+def test_the_fallback_branch_warns_rather_than_moving_silently(workspace, kb_path):
+    """`proposal.warnings` is what the preview and the MCP payload render, so
+    a silent move meant nothing told the user a near-duplicate page had been
+    created next to a real one — #186's failure mode, through #187's door."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    (kb_path / "concepts").mkdir(exist_ok=True)
+    (kb_path / "concepts" / "taken.md").write_text("mine\n", encoding="utf-8")
+    proposal = EnrichmentProposal(source_id=1, title="Taken")
+    note = _note("concepts/taken.md", type_="concept", name="Taken")
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert sanitized.path != "concepts/taken.md"
+    assert any("already exists" in w for w in proposal.warnings)
+    assert any("same subject" in w for w in proposal.warnings)
+
+
+def test_a_path_escape_correction_is_reported(workspace):
+    """The one correction most worth seeing: a proposed path is model output
+    derived from untrusted ingested text, so a repeatedly-escaping model
+    should be visible in the preview."""
+    from wakil.app.ingest_service import _sanitize_note
+
+    proposal = EnrichmentProposal(source_id=1, title="Escape")
+    note = _note("../../outside.md", type_="concept", name="Escape")
+
+    sanitized = _sanitize_note(workspace, note, proposal)
+
+    assert sanitized.path.startswith("concepts/")
+    assert any("unusable" in w for w in proposal.warnings)
+
+
+def test_the_type_correction_mover_frees_its_path_and_carries_links(workspace, kb_path):
+    """The fourth mover of a proposed note's path, and the one outside
+    `_sanitize_note`. Without the same two guarantees, an occupied
+    destination discards the whole run in `apply_enrichment` after four
+    model calls, and the note's self-link dangles."""
+    from wakil.app.ingest_service import _correct_proposed_note_type
+    from wakil.llm.schemas import EntityResolution
+    from wakil.schema.loader import load_entity_schemas
+
+    (kb_path / "people").mkdir(exist_ok=True)
+    (kb_path / "people" / "ada-lovelace.md").write_text("mine\n", encoding="utf-8")
+
+    proposal = EnrichmentProposal(source_id=1, title="Ada Lovelace")
+    note = _note(
+        "concepts/ada-lovelace.md",
+        type_="concept",
+        name="Ada Lovelace",
+        body="See [[concepts/ada-lovelace.md|this]].",
+    )
+    resolution = EntityResolution(
+        name="Ada Lovelace", entity_type="person", action="create", confidence=0.9
+    )
+    schema = load_entity_schemas(workspace.root_path)["person"]
+
+    corrected = _correct_proposed_note_type(
+        note, resolution, schema, proposal, "2026-08-09", workspace
+    )
+
+    assert corrected.path.startswith("people/")
+    assert corrected.path != "people/ada-lovelace.md"  # destination was taken
+    assert not (kb_path / corrected.path).exists()
+    assert f"[[{corrected.path}|this]]" in corrected.content
+    assert "[[concepts/ada-lovelace.md" not in corrected.content
+    assert (kb_path / "people" / "ada-lovelace.md").read_text() == "mine\n"
