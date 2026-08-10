@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZMNY1GG229DD3HEXTE3Y15S",
+  "strategy": "manual-commit",
+  "branch": "fix/capture-authored-markdown",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "README.md",
+    "src/wakil/app/ingest_service.py",
+    "src/wakil/mcp/tools.py",
+    "tests/unit/test_ingest_service.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 3116,
+    "cache_creation_tokens": 18298801,
+    "cache_read_tokens": 738171525,
+    "output_tokens": 822451,
+    "api_call_count": 1543
+  }
+}
