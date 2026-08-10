@@ -185,3 +185,27 @@ def test_high_confidence_proposed_note_is_not_flagged(capsys):
     assert "LOW-CONFIDENCE" not in out
     assert "Flagged for review" not in out
     assert "confidence 0.90" in out
+
+
+def test_capture_preview_warns_when_the_path_is_owned_but_the_file_is_gone(capsys):
+    """apply refuses on the Source row, so a preview that only warns when the
+    file is present leaves a `--yes` run aborting with no stated reason."""
+    from wakil.app.ingest_service import CaptureProposal, ProposedFile
+    from wakil.ui.console import print_capture_proposal
+
+    console.width = 200
+    print_capture_proposal(
+        CaptureProposal(
+            source_type="transcript",
+            origin="meeting.txt",
+            title="Second Take",
+            text="x",
+            content_hash="abc",
+            raw_file=ProposedFile(path="sources/transcripts/2026-08-04-call.md", content="x"),
+            collision=None,
+            collision_source_id=3,
+        )
+    )
+    out = capsys.readouterr().out.replace("\n", "")
+    assert "raw capture of source" in out
+    assert "#3" in out

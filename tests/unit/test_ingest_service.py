@@ -4368,3 +4368,131 @@ def test_the_timeline_fallback_date_is_local_not_utc(workspace):
     assert workspace_date(workspace, datetime(2026, 8, 4, 0, 49)) == "2026-08-03"
     # And an aware one.
     assert workspace_date(workspace, datetime(2026, 8, 4, 0, 49, tzinfo=UTC)) == "2026-08-03"
+
+# --------------------------------------------------------------------------
+# Destination-path collisions (issue #173)
+
+
+def _existing_transcript_at(workspace, kb_path: Path, transcript: Path) -> str:
+    """Run one capture and leave its file on disk, so a second capture of the
+    same shape collides. The resulting file is *owned* by a Source row."""
+    first = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    apply_capture(workspace, first)
+    return first.raw_file.path
+
+
+def _handplaced_transcript_at(workspace, kb_path: Path, transcript: Path) -> str:
+    """A file already sitting at the computed destination that no Source row
+    owns -- #173's actual scenario (a hand-cleaned transcript left at its
+    final path), and the only collision `--overwrite` still resolves."""
+    peek = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    target = kb_path / peek.raw_file.path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("An earlier, hand-cleaned copy.\n", encoding="utf-8")
+    return peek.raw_file.path
+
+
+def test_capture_records_a_collision_instead_of_sliding_to_a_suffix(
+    workspace, kb_path, transcript
+):
+    """Issue #173: capture silently picked `<name>-1.md`, producing a real,
+    easy-to-miss duplicate rather than a hard stop."""
+    taken = _existing_transcript_at(workspace, kb_path, transcript)
+
+    # A different input that computes the same destination path.
+    twin = kb_path / transcript.name.replace(".txt", "-copy.txt")
+    twin.write_text("Jane: a different conversation entirely.\n", encoding="utf-8")
+    monkey = prepare_capture(workspace, "transcript", _capture_client(), file=twin)
+    # Force the same destination the first capture already occupies.
+    monkey.raw_file = ProposedFile(path=taken, content=monkey.raw_file.content)
+
+    # The forced destination is source #1's own capture, so the owned-path
+    # refusal is the one that fires — deliberately ahead of the plain
+    # "already exists" branch, whose remedy (`--overwrite`) is refused here.
+    # Either way the point of #173 holds: a hard stop, not a silent `-1`.
+    with pytest.raises(IngestError, match="raw capture of source"):
+        apply_capture(workspace, monkey)
+    assert not (kb_path / taken.replace(".md", "-1.md")).exists()
+
+
+def test_build_raw_file_flags_the_collision_on_the_proposal(workspace, kb_path, transcript):
+    taken = _existing_transcript_at(workspace, kb_path, transcript)
+    same_shape = kb_path / transcript.name
+    same_shape.write_text("Jane: same filename, different words.\n", encoding="utf-8")
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+
+    assert proposal.collision == taken
+    assert proposal.raw_file.path == taken  # no silent -1
+    assert not proposal.raw_file.path.endswith("-1.md")
+    # The colliding file belongs to the first capture's source, so the
+    # proposal has to carry that id -- the preview promises a replacement
+    # otherwise, and apply then refuses.
+    assert proposal.collision_source_id is not None
+
+
+def test_capture_overwrite_replaces_an_unowned_file(workspace, kb_path, transcript):
+    taken = _handplaced_transcript_at(workspace, kb_path, transcript)
+    same_shape = kb_path / transcript.name
+    same_shape.write_text("Jane: replacement content.\n", encoding="utf-8")
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+    assert proposal.collision == taken
+    assert proposal.collision_source_id is None
+    proposal.overwrite = True
+    result = apply_capture(workspace, proposal)
+
+    assert "replacement content" in (kb_path / taken).read_text(encoding="utf-8")
+    assert result.replaced is True
+
+
+def test_capture_overwrite_refuses_a_file_another_source_owns(workspace, kb_path, transcript):
+    """`--overwrite` replaces the file but cannot rehome the Source row that
+    points at it. Two rows on one `raw_text_path` makes `wakil enrich <old id>`
+    read the new text and file its memories under the old source."""
+    taken = _existing_transcript_at(workspace, kb_path, transcript)
+    before = (kb_path / taken).read_text(encoding="utf-8")
+    same_shape = kb_path / transcript.name
+    same_shape.write_text("Jane: replacement content.\n", encoding="utf-8")
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+    owner_id = proposal.collision_source_id
+    assert owner_id is not None
+    proposal.overwrite = True
+
+    with pytest.raises(IngestError, match=f"raw capture of source #{owner_id}"):
+        apply_capture(workspace, proposal)
+
+    # Neither the file nor the source table moved.
+    assert (kb_path / taken).read_text(encoding="utf-8") == before
+    with open_session(workspace) as session:
+        owners = session.scalars(select(Source.id).where(Source.raw_text_path == taken)).all()
+    assert list(owners) == [owner_id]
+
+
+def test_sanitize_note_still_dedupes_silently(workspace, kb_path):
+    """Regression guard: `_unused_path`'s other caller genuinely wants silent
+    disambiguation -- a model-proposed note path that collides is routed to a
+    free name, not turned into a hard error."""
+    from wakil.app.ingest_service import _unused_path
+
+    (kb_path / "drafts").mkdir(exist_ok=True)
+    (kb_path / "drafts" / "taken.md").write_text("x\n", encoding="utf-8")
+    assert str(_unused_path(kb_path, Path("drafts"), "taken")) == "drafts/taken-1.md"
+
+
+def test_capture_refuses_an_owned_path_even_when_the_file_is_gone(workspace, kb_path, transcript):
+    """The refusal is on the Source row, not the file, so the preview has to
+    warn on the row too — gating the warning behind an on-disk collision left
+    this case aborting with no explanation at all."""
+    taken = _existing_transcript_at(workspace, kb_path, transcript)
+    (kb_path / taken).unlink()
+
+    same_shape = kb_path / transcript.name
+    same_shape.write_text("Jane: a second take of the same call.\n", encoding="utf-8")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+
+    assert proposal.collision is None  # nothing on disk to collide with
+    assert proposal.collision_source_id is not None
+    with pytest.raises(IngestError, match="raw capture of source"):
+        apply_capture(workspace, proposal)

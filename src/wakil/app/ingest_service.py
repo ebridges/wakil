@@ -165,6 +165,15 @@ class CaptureProposal:
     # value the author wrote is exactly the kind of invisible behaviour #172
     # was about.
     warnings: list[str] = field(default_factory=list)
+    # Set when the computed destination is already occupied (#173). Capture
+    # used to silently pick `<name>-1.md` instead, producing a near-duplicate
+    # nobody noticed. Surfaced in the preview and refused at apply time.
+    collision: str | None = None
+    # Set when an existing Source row already claims the computed destination.
+    # `--overwrite` replaces the file but cannot rehome that row, so the two
+    # would end up sharing one `raw_text_path` — see `apply_capture`.
+    collision_source_id: int | None = None
+    overwrite: bool = False
 
 
 @dataclass
@@ -172,6 +181,9 @@ class CaptureResult:
     source_id: int
     ingest_run_id: int
     raw_file_path: str
+    # True when the write replaced an existing file rather than creating one,
+    # so the result line reports a destructive write as one (#173).
+    replaced: bool = False
 
 
 @dataclass
@@ -414,6 +426,7 @@ def prepare_capture(
         # the note.
         proposal.abstract = authored_abstract or metadata.abstract
     proposal.raw_file = _build_raw_file(config, proposal, slug_source)
+    proposal.collision_source_id = _source_owning_path(config, proposal.raw_file.path)
     return proposal
 
 
@@ -424,6 +437,12 @@ def _authored_text(metadata: dict, *keys: str) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _source_owning_path(config: WorkspaceConfig, path: str) -> int | None:
+    """The id of the source whose raw capture already lives at `path`, if any."""
+    with open_session(config) as session:
+        return session.scalar(select(Source.id).where(Source.raw_text_path == path))
 
 
 def _generate_capture_metadata(
@@ -453,8 +472,29 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
         raise IngestError(f"Source already ingested (source id {proposal.duplicate_of})")
 
     target = config.root_path / proposal.raw_file.path
-    if target.exists():
-        raise IngestError(f"Refusing to overwrite existing file: {proposal.raw_file.path}")
+    replacing = target.exists()
+    # Owned-path first, deliberately: --overwrite replaces the file but cannot
+    # rehome the Source row that points at it, and two rows sharing one
+    # `raw_text_path` means `wakil enrich <old id>` reads the *new* text and
+    # files its memories under the old source (#173). Checking `exists()` first
+    # told the user to re-run with --overwrite and the re-run then said
+    # --overwrite won't help — same precedence `print_capture_proposal` uses.
+    owner_id = _source_owning_path(config, proposal.raw_file.path)
+    if owner_id is not None:
+        raise IngestError(
+            f"{proposal.raw_file.path} is already the raw capture of source #{owner_id} "
+            f"(see `wakil sources show {owner_id}`). Writing there would leave two "
+            f"sources pointing at one file, so `--overwrite` won't clear this. Rename "
+            f"the input so it lands on a different path, or move source #{owner_id}'s "
+            f"file aside first."
+        )
+    if replacing and not proposal.overwrite:
+        raise IngestError(
+            f"{proposal.raw_file.path} already exists. Re-run with --overwrite to replace "
+            f"it, or point at a different input. (If this is the same recording captured "
+            f"twice, check `wakil sources list` first.)"
+        )
+
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(proposal.raw_file.content, encoding="utf-8")
 
@@ -494,7 +534,11 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
             # constraint is what actually closes that window; this is just
             # surfacing it the same way an early duplicate-of hit is.
             session.rollback()
-            target.unlink(missing_ok=True)
+            # Only roll back a file this call created. Under --overwrite the
+            # write replaced content that was already on disk, and deleting it
+            # would turn a lost race into data loss.
+            if not replacing:
+                target.unlink(missing_ok=True)
             existing_id = session.scalar(
                 select(Source.id).where(
                     Source.workspace_id == workspace_id,
@@ -519,7 +563,10 @@ def apply_capture(config: WorkspaceConfig, proposal: CaptureProposal) -> Capture
         index_notes(session, workspace_id, config.root_path, prune=not config.is_linked_worktree)
         session.commit()
         return CaptureResult(
-            source_id=source.id, ingest_run_id=run.id, raw_file_path=proposal.raw_file.path
+            source_id=source.id,
+            ingest_run_id=run.id,
+            raw_file_path=proposal.raw_file.path,
+            replaced=replacing,
         )
 
 
@@ -3618,7 +3665,14 @@ def _build_raw_file(
     # content-free input (e.g. an all-punctuation title).
     slug = slugify(slug_source)
     base = f"{proposal.meeting_date or created}-{slug}"
-    path = _unused_path(config.root_path, directory, base)
+    # Deliberately not `_unused_path` here: silently sliding to `<base>-1.md`
+    # is how two near-duplicate transcripts for one recording ended up in a
+    # vault, one of them invisibly shadowed (#173). Record the collision and
+    # let `apply_capture` refuse. `_unused_path`'s other caller
+    # (`_sanitize_note`) legitimately does want silent disambiguation.
+    path = directory / f"{base}.md"
+    if (config.root_path / path).exists():
+        proposal.collision = str(path)
 
     if proposal.source_type == "transcript":
         metadata = _transcript_metadata(config, proposal, created)
