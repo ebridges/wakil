@@ -42,15 +42,39 @@ class ProposalCache:
         self._entries[proposal_id] = _Entry(kind=kind, payload=payload)
         return proposal_id
 
-    def pop(self, kind: str, proposal_id: str) -> Any:
+    def peek(self, kind: str, proposal_id: str) -> Any:
+        """Read a proposal without consuming it.
+
+        Use this when the caller still has retryable work to do before the
+        proposal is actually spent — taking a lock, resolving a branch,
+        checking the tree is clean. `pop`ping first meant a *transient*
+        failure (the workspace lock being held, a tree the human dirtied
+        during review) destroyed an enrichment proposal that cost two model
+        calls, while telling the client to retry something it could no
+        longer retry.
+        """
         self._evict_expired()
-        entry = self._entries.pop(proposal_id, None)
+        entry = self._entries.get(proposal_id)
         if entry is None or entry.kind != kind:
             raise ProposalNotFoundError(
                 f"No pending {kind} proposal with id {proposal_id!r} — it may have "
                 "expired or already been applied. Call the matching *_prepare tool again."
             )
         return entry.payload
+
+    def claim(self, kind: str, proposal_id: str) -> Any:
+        """Consume a peeked proposal, once it is past the point of no return.
+
+        Raises `ProposalNotFoundError` if it is already gone, which is what
+        keeps `peek` single-use under concurrency: two threads can both `peek`
+        the same id while queued on the workspace lock, and without this the
+        second would apply a proposal the first had already applied. (The MCP
+        SDK dispatches sync tools on worker threads, so this is reachable
+        inside one server.)
+        """
+        payload = self.peek(kind, proposal_id)
+        del self._entries[proposal_id]
+        return payload
 
     def _evict_expired(self) -> None:
         cutoff = time.monotonic() - self._ttl
