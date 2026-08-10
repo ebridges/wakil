@@ -5125,3 +5125,62 @@ def test_backfill_skips_archived_sources(workspace, kb_path, transcript):
     ]
     archive_source(workspace, source_id)
     assert plan_abstract_backfill(workspace, _capture_client()) == []
+
+
+def test_enrich_refuses_an_archived_source(workspace, kb_path, transcript):
+    """Archiving frees the path check, so a redo can take over the archived
+    source's `raw_text_path`. Enriching the archived row would then read the
+    new source's text and file its memories under the old one — the silent
+    misattribution capture and relink both refuse."""
+    from wakil.app.ingest_service import archive_source, prepare_enrichment
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    archive_source(workspace, source_id, reason="wrong recording")
+
+    with pytest.raises(IngestError, match="is archived"):
+        prepare_enrichment(workspace, source_id, _capture_client())
+
+
+def test_relink_refuses_a_root_dotfile_and_a_non_markdown_target(workspace, kb_path, transcript):
+    """`.env` at the KB root has an empty directory prefix, so the
+    directories-only check let it through."""
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    original = proposal.raw_file.path
+
+    (kb_path / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    (kb_path / "notes.txt").write_text("plain text\n", encoding="utf-8")
+
+    with pytest.raises(IngestError, match="dot-file"):
+        relink_source(workspace, source_id, ".env")
+    with pytest.raises(IngestError, match="not a Markdown file"):
+        relink_source(workspace, source_id, "notes.txt")
+    assert get_source(workspace, source_id).raw_text_path == original
+
+
+def test_an_ambiguous_rename_is_declined_not_coin_flipped(workspace, kb_path, transcript):
+    """Two identical new paths for one removed file: `sorted(rglob)` order
+    decided which won. Declining is what the function's own docstring says
+    it does — `wakil sources relink` covers the ambiguous case."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    old_path = proposal.raw_file.path
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    body = (kb_path / old_path).read_bytes()
+    for name in ("2026-07-09-copy-a.md", "2026-07-09-copy-b.md"):
+        (kb_path / "sources" / "transcripts" / name).write_bytes(body)
+    (kb_path / old_path).unlink()
+
+    with open_session(workspace) as session:
+        result = index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    assert result.sources_relinked == []
+    assert get_source(workspace, source_id).raw_text_path == old_path

@@ -168,18 +168,27 @@ def _follow_renamed_raw_captures(
     new note, and guessing would silently repoint a source at the wrong file.
     `wakil sources relink` covers that case explicitly.
     """
-    gone = {
-        note.content_hash: path
-        for path, note in existing.items()
-        if path not in seen and note.content_hash
-    }
+    # Both sides are hash -> *list*, so an ambiguous hash can be recognised
+    # rather than resolved by whichever path the filesystem walk yielded last.
+    # Two byte-identical captures, or one copied to two new paths, otherwise
+    # repointed a source by coin flip — the thing the docstring above says
+    # this function refuses to do.
+    gone: dict[str, list[str]] = {}
+    for path, note in existing.items():
+        if path not in seen and note.content_hash:
+            gone.setdefault(note.content_hash, []).append(path)
     if not gone:
         return
     known = set(existing)
+    arrived: dict[str, list[str]] = {}
+    for path, md in parsed.items():
+        if path not in known and md.content_hash in gone:
+            arrived.setdefault(md.content_hash, []).append(path)
+
     moves = {
-        gone[md.content_hash]: path
-        for path, md in parsed.items()
-        if path not in known and md.content_hash in gone
+        gone[content_hash][0]: paths[0]
+        for content_hash, paths in arrived.items()
+        if len(paths) == 1 and len(gone[content_hash]) == 1
     }
     if not moves:
         return

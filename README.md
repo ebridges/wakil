@@ -455,14 +455,17 @@ the content hash is unique per workspace at the database level; freeing that
 too needs a schema change and is tracked as
 [#226](https://github.com/ebridges/wakil/issues/226).
 
-`backfill-abstract` skips archived sources — archiving means stop spending
-model calls here. (`wakil enrich <archived-id>` still works; whether it should
-is [#216](https://github.com/ebridges/wakil/issues/216).)
+`backfill-abstract` skips archived sources, and `wakil enrich <archived-id>`
+refuses outright — archiving means stop spending attention here, and since
+archiving frees the path, a newer source may since have taken over that
+capture. Unarchive first if you really mean to enrich it. What archived
+should mean for query grounding is still open
+([#216](https://github.com/ebridges/wakil/issues/216)).
 
 `wakil sources relink <id> <path>` points a source at a file it holds itself:
 the path must be inside the knowledge base, outside wakil's own state
-(`.wakil/`, `.git/`, and other dot-directories), and not already another live
-source's capture.
+(`.wakil/`, `.git/`, dot-directories and dot-files), a `.md` file, and not
+already another live source's capture.
 
 ## Entities: compiled pages
 

@@ -845,11 +845,22 @@ def relink_source(config: WorkspaceConfig, source_id: int, new_path: str) -> Sou
     # and `.wakil/` holds the config and the SQLite database. `enrich` feeds
     # `raw_text_path` straight into a model prompt, and this tool is
     # agent-callable over MCP. Same exclusion `discover_markdown_files` uses.
+    # The leaf is checked too, not just the directories: `.env` at the KB root
+    # has an empty prefix tuple and slipped through. And every capture wakil
+    # writes is a `.md`, so anything else is not a raw capture whatever else
+    # it is — which matters because `enrich` reads this file into a model
+    # prompt and this tool is agent-callable.
     relative_parts = target.relative_to(root).parts
-    if any(part.startswith(".") or part in SKIPPED_DIRS for part in relative_parts[:-1]):
+    if any(part.startswith(".") or part in SKIPPED_DIRS for part in relative_parts):
         raise IngestError(
             f"{new_path} is inside a directory wakil doesn't treat as knowledge base "
-            "content. A source's raw capture has to be a note, not tooling state."
+            "content, or is itself a dot-file. A source's raw capture has to be a "
+            "note, not tooling state."
+        )
+    if target.suffix != ".md":
+        raise IngestError(
+            f"{new_path} is not a Markdown file. Every raw capture wakil writes is "
+            "`.md`, and `enrich` reads this file into a model prompt."
         )
     if not target.is_file():
         raise IngestError(f"No file at {new_path} — nothing to relink to.")
@@ -1296,6 +1307,19 @@ def prepare_enrichment(
         if source.status == "enriched" and not force:
             raise IngestError(
                 f"Source {source_id} is already enriched; pass --force to re-analyze."
+            )
+        if source.archived_at is not None:
+            # Not merely "stop spending attention here" — this closes a hole
+            # this PR would otherwise open. Archiving frees the path check, so
+            # a redo can legitimately take over the same `raw_text_path` while
+            # the archived row still points at it. Enriching the archived
+            # source would then read the *new* source's text and file its
+            # memories and timeline entries under the old one: the silent
+            # misattribution `apply_capture` and `relink_source` both refuse.
+            raise IngestError(
+                f"Source {source_id} is archived; unarchive it first "
+                f"(`wakil sources unarchive {source_id}`) if you really mean to enrich it. "
+                f"Its raw capture may since have been taken over by a newer source."
             )
         metadata = json.loads(source.metadata_json or "{}")
         # Fallback for a Timeline heading with no real date of its own
