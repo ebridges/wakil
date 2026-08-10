@@ -3323,8 +3323,8 @@ def _split_authored_markdown(raw: str) -> ParsedInput:
     if raw.lstrip().startswith("---"):
         warning = (
             "Read the leading `---` block as content, not frontmatter "
-            "(its keys don't look like frontmatter keys). The file was "
-            "captured verbatim."
+            "(its keys don't look like frontmatter keys). Nothing was "
+            "parsed away — but for a transcript, normal cleanup still ran."
         )
     return ParsedInput(metadata={}, body=raw, h1=_leading_h1(raw), warning=warning)
 
@@ -3362,10 +3362,12 @@ def _is_frontmatter(metadata: dict) -> bool:
     including vault-specific ones this code has never heard of. The residue
     is a block of all-lowercase single-word speaker labels (`alice: hi`),
     which is read as frontmatter; and a file whose real frontmatter uses
-    capitalised keys, which is captured verbatim. Both are called out in the
-    preview -- the second via `ParsedInput.warning` -- and the verbatim
-    direction is the safe one: it restores the pre-#172 double-wrap rather
-    than moving content out of the body.
+    capitalised keys, which is captured as content. Only the second is
+    signalled (`ParsedInput.warning`) -- the first is indistinguishable from
+    frontmatter here, and is visible on the CLI only because the preview
+    renders the whole file (#235). The content direction is the safe one: it
+    restores the pre-#172 double-wrap rather than moving content out of the
+    body.
     """
     return bool(metadata) and all(
         isinstance(key, str) and _FRONTMATTER_KEY_RE.fullmatch(key) for key in metadata
@@ -3573,6 +3575,7 @@ _KNOWN_FIELD_VALUES = {
     "source_file": "file_url",
     "context": "context",
 }
+
 
 def _build_raw_file(
     config: WorkspaceConfig, proposal: CaptureProposal, slug_source: str

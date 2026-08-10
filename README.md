@@ -251,8 +251,10 @@ tags — that file is treated as authored:
   owns for a raw capture (`type`, `source_type`, `status`, and the `origin`/
   `url` provenance), and except any value the `source` schema rejects, which
   falls back to the generated one with a warning in the preview;
-- no second frontmatter block or H1 is added, and the destination filename
-  comes from the note's own title rather than the input's basename;
+- no second frontmatter block is added, and the destination filename comes
+  from the note's own title rather than the input's basename. A file that
+  opens with its own H1 keeps that one and gets no second heading; a
+  frontmatter-only file still gets wakil's generated `# <filename>` heading;
 - an authored `meeting_date`/`date` beats the date wakil infers from the
   filename or the transcript's opening lines, which also changes the
   destination filename. `captured` is *not* read as a meeting date — it
@@ -268,8 +270,8 @@ dump with section headings still gets the normal cleanup. Nor does a leading
 frontmatter when it parses to a mapping whose keys all look like frontmatter
 keys (lowercase, no spaces — your own vault's `attendees:`/`summary:` count
 just as much as wakil's `title:`). A scratch note or a stretch of dialogue
-between two `---` rules is captured verbatim instead of being parsed away,
-and the preview says so.
+between two `---` rules is kept as content instead of being parsed away, and
+the preview says so — though a transcript still gets the normal cleanup pass.
 
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:
