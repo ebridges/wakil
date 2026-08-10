@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01KZMGZGRZVZAF99FDQTMKF21J",
+  "strategy": "manual-commit",
+  "branch": "wt/synthesis-accuracy",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "skills/mcp-coordinator/SKILL.md",
+    "src/wakil/app/ingest_service.py",
+    "src/wakil/skills/note-revision/SKILL.md",
+    "tests/unit/test_ingest_service.py",
+    "tests/unit/test_mcp_tools.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 47,
+    "cache_creation_tokens": 20715,
+    "cache_read_tokens": 17631699,
+    "output_tokens": 11231,
+    "api_call_count": 25
+  }
+}
