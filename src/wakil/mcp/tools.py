@@ -447,10 +447,6 @@ def ingest_prepare(
         "origin": proposal.origin,
         "meeting_date": proposal.meeting_date,
         "raw_file_path": proposal.raw_file.path,
-        # An authored value wakil declined to use. ADR 0019 moved capture's
-        # review moment off the CLI preview and onto the coordinating skill,
-        # so a warning that only reaches the preview reaches nobody here.
-        "warnings": proposal.warnings,
         # A coordinating agent needs to see this before calling apply, which
         # will refuse. Deliberately no `overwrite` parameter on `ingest_apply`:
         # overwriting a knowledge-base file with no human present is exactly
@@ -461,7 +457,10 @@ def ingest_prepare(
         "collision_source_id": proposal.collision_source_id,
         # An authored value wakil declined to use, or a truncation notice: the
         # abstract about to be written into this file's frontmatter may
-        # describe only the part of the source that was read.
+        # describe only the part of the source that was read. ADR 0019 moved
+        # capture's review moment off the CLI preview and onto the
+        # coordinating skill, so a warning that only reaches the preview
+        # reaches nobody here.
         "warnings": proposal.warnings,
     }
 

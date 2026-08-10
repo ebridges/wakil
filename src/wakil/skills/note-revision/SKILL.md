@@ -54,9 +54,9 @@ is the single worst failure mode this skill exists to prevent.
       forward every attachment/URL reference the same way — see "Attachment
       and raw URL fidelity" below.
 - [ ] Step 5: **Scan your draft for `he`, `him`, `his`, `she`, `her`.**
-      Rewrite any that aren't licensed by the subject's own `pronouns:`/
-      `gender:` field or by an explicit statement in the source. See
-      "Pronouns: don't infer them" below.
+      Rewrite any that aren't licensed by the subject's own `pronouns:`
+      field or by an explicit statement in the source. See "Pronouns: don't
+      infer them" below.
 - [ ] Step 6: **Diff your draft against the current page before saving.**
       If the new version is shorter, or drops a fact/frontmatter key that
       was there before, stop — you are very likely clobbering, not
@@ -222,7 +222,7 @@ portion provided" — never as a property of the source.
 
 **A gendered pronoun is a factual claim about a person and needs a source,
 exactly like a date does.** Only two things are that source: the person's own
-`pronouns:`/`gender:` field (the `person` schema carries one), or an explicit
+`pronouns:` field (declared by the `person` schema), or an explicit
 statement in the source you're merging — the person stating their own, or a
 participant stating them by name. When a source supplies them and the page has
 none, **write the `pronouns:` field** as part of this revision, cited like any

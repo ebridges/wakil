@@ -530,6 +530,11 @@ def _generate_capture_metadata(
     text: str,
     context: str | None,
     warnings: list[str],
+    unanalyzed: str = (
+        "The title and abstract written into this capture's frontmatter describe "
+        "only the part that was read — split the file and capture the parts "
+        "separately if that matters."
+    ),
 ) -> CaptureMetadata:
     """The one model call capture makes (docs/adr/0010): title + abstract,
     grounded in the captured text itself rather than just the filename.
@@ -542,14 +547,7 @@ def _generate_capture_metadata(
     just wrong in one run's output.
     """
     today = workspace_today(config)
-    source_text, warning = _cut_to_budget(
-        text,
-        unanalyzed=(
-            "The title and abstract written into this capture's frontmatter describe "
-            "only the part that was read — split the file and capture the parts "
-            "separately if that matters."
-        ),
-    )
+    source_text, warning = _cut_to_budget(text, unanalyzed=unanalyzed)
     if warning is not None:
         warnings.append(warning)
     prompt = build_capture_metadata_prompt(
@@ -707,6 +705,14 @@ def plan_abstract_backfill(
                 text,
                 metadata.get("context"),
                 warnings,
+                # The source is already captured and indexed here, so
+                # "split the file and re-capture" isn't available without
+                # discarding the row.
+                unanalyzed=(
+                    "The backfilled title and abstract describe only the part that "
+                    "was read; the rest of this source is unaffected and still "
+                    "enriches in full."
+                ),
             )
             items.append(
                 AbstractBackfillItem(
@@ -1221,9 +1227,27 @@ _TRUNCATION_NOTICE = (
     "anything is absent from this source -- you cannot see all of it.]"
 )
 
+# The guide gets its own marker. Reusing the source one told the model the
+# *source* had been cut, with another document's character counts, on every
+# run in a workspace whose RESOLVER.md is oversized — hedging complete
+# transcripts as partially read, which is the mirror image of #176. And "do
+# not reason about absence" is the wrong instruction to attach to routing
+# rules: a rule that isn't there genuinely doesn't apply.
+_GUIDE_TRUNCATION_NOTICE = (
+    "\n\n[GUIDANCE TRUNCATED: this workspace guidance file was cut at {shown:,} of "
+    "{total:,} characters. Rules past that point are not shown; follow the ones "
+    "above. This says nothing about the source document, which is delivered "
+    "separately and in full unless its own marker says otherwise.]"
+)
+
 
 def _cut_to_budget(
-    text: str, *, unanalyzed: str, cap: int = MAX_SOURCE_CHARS, label: str = "Source"
+    text: str,
+    *,
+    unanalyzed: str,
+    cap: int = MAX_SOURCE_CHARS,
+    label: str = "Source",
+    notice: str = _TRUNCATION_NOTICE,
 ) -> tuple[str, str | None]:
     """Cut text to a prompt budget, saying so in both directions.
 
@@ -1242,8 +1266,7 @@ def _cut_to_budget(
         f"roughly the last {100 - int(100 * cap / len(text))}% of it was not read. "
         f"{unanalyzed}"
     )
-    notice = _TRUNCATION_NOTICE.format(shown=cap, total=len(text))
-    return text[:cap] + notice, warning
+    return text[:cap] + notice.format(shown=cap, total=len(text)), warning
 
 
 def _truncate_source(text: str, proposal: "EnrichmentProposal") -> str:
@@ -4012,6 +4035,7 @@ def load_workspace_guides(
                 text,
                 cap=GUIDE_MAX_CHARS,
                 label="RESOLVER.md",
+                notice=_GUIDE_TRUNCATION_NOTICE,
                 unanalyzed=(
                     "Routing rules past that point were not applied; move the rules that "
                     "matter most to the top of the file."

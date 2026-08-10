@@ -5275,7 +5275,12 @@ def test_resolver_guide_truncation_is_not_silent(workspace, kb_path):
     warnings: list[str] = []
     guides = load_workspace_guides(workspace, warnings)
 
-    assert "SOURCE TRUNCATED" in guides["RESOLVER.md"]
+    # Its *own* marker: reusing the source one told the model the source had
+    # been cut, with this file's character counts, on every run — hedging
+    # complete transcripts as partially read.
+    assert "GUIDANCE TRUNCATED" in guides["RESOLVER.md"]
+    assert "SOURCE TRUNCATED" not in guides["RESOLVER.md"]
+    assert "absent from this source" not in guides["RESOLVER.md"]
     assert guides["RESOLVER.md"][:GUIDE_MAX_CHARS] == ("rule. " * (GUIDE_MAX_CHARS // 2))[
         :GUIDE_MAX_CHARS
     ]
