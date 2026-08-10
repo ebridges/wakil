@@ -19,7 +19,10 @@
         "Updates the `updated:` frontmatter field to reflect this revision rather than leaving it at 2026-07-01.",
         "Surfaces the draft diff for confirmation before writing, then names note-conformance (likely to run `wakil schema migrate --dry-run --type person` as its mechanical pass) and kb-commit as the next steps, rather than claiming the page is already saved."
       ],
-      "related_skills": ["note-conformance", "kb-commit"]
+      "related_skills": [
+        "note-conformance",
+        "kb-commit"
+      ]
     },
     {
       "id": "conflicting-figures-resist-clobbering",
@@ -39,7 +42,10 @@
         "Attributes both the 40% and 25% figures to Jane Doe as self-reported claims, not to Acme Corp or to any external verified source.",
         "Surfaces the flagged conflict and diff for confirmation before writing anything, rather than auto-applying either the old or the new figure."
       ],
-      "related_skills": ["note-conformance", "kb-commit"]
+      "related_skills": [
+        "note-conformance",
+        "kb-commit"
+      ]
     },
     {
       "id": "split-entity-handoff-to-note-routing",
@@ -59,7 +65,10 @@
         "References Jane Doe's page using wikilink form (e.g. [[people/jane-doe]]) rather than a relative Markdown link if it links to her from elsewhere.",
         "Surfaces the diff for Jane Doe's page for confirmation before writing, rather than claiming the update and the new Acme Claims AI setup are already done."
       ],
-      "related_skills": ["note-routing", "entity-resolution"]
+      "related_skills": [
+        "note-routing",
+        "entity-resolution"
+      ]
     },
     {
       "id": "no-existing-note-handoff-to-content-synthesis",
@@ -78,7 +87,10 @@
         "Does NOT proceed to Step 3 classification (additive vs. contradicting vs. duplicate) for Acme Corp, since Step 1 -- reading the existing note in full -- has no existing note to read.",
         "Does NOT lose track of Jane Doe as the source of the claim -- if mentioning her, attributes the vendor-selection statement to Jane Doe rather than treating it as an unattributed fact."
       ],
-      "related_skills": ["content-synthesis", "note-routing"]
+      "related_skills": [
+        "content-synthesis",
+        "note-routing"
+      ]
     },
     {
       "id": "attached-companion-document-resolved-in-place",
@@ -98,7 +110,45 @@
         "Attributes the resolution to Jane Doe, or the call itself, rather than presenting it as an unattributed fact.",
         "Surfaces the draft diff for confirmation before writing, rather than claiming the prep document is already updated."
       ],
-      "related_skills": ["transcript", "note-conformance"]
+      "related_skills": [
+        "transcript",
+        "note-conformance"
+      ]
+    },
+    {
+      "id": "no-pronoun-inference-and-no-invented-detail",
+      "query": "The 1:1 transcript with Sam Okafor is at sources/transcripts/2026-08-04-sam-okafor.md. The other side of the call failed to transcribe. Update Sam's page with what we got.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/sam-okafor.md": "---\ntype: person\nname: Sam Okafor\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-07-01\n---\n\n# Sam Okafor\n\n## Compiled Truth\n\nSam is a staff engineer on the platform team.\n\n## Timeline / Log\n\n- 2026-07-01: Joined the platform team.\n",
+          "sources/transcripts/2026-08-04-sam-okafor.md": "---\ntype: source\ntitle: 1:1 with Sam Okafor\ncaptured: 2026-08-04\norigin: transcript\n---\n\n# 1:1 with Sam Okafor\n\n**Edward Bridges**: How's the migration going?\n\n**Sam Okafor**: *[inaudible]*\n\n**Edward Bridges**: That makes sense. Let's revisit next week.\n\n**Sam Okafor**: *[inaudible]*\n"
+        }
+      },
+      "expected_behavior": [
+        "Writes about Sam Okafor without using he/him or she/her pronouns -- the page has no `pronouns:` field and the transcript states no gender, so it uses they/them or restructures around the name.",
+        "Does not infer a gender from the name 'Sam Okafor' or from the staff-engineer role.",
+        "Describes the transcription gap only in terms the source supports (Sam's turns are marked inaudible), without inventing specifics such as a call duration, a segment count, verbatim noise tokens, or the behaviour of a particular transcription tool.",
+        "Does not assert that a topic is absent from the recording; at most notes that Sam's responses were not captured."
+      ]
+    },
+    {
+      "id": "records-source-attested-pronouns",
+      "query": "The 1:1 transcript with Priya Raman is at sources/transcripts/2026-08-04-priya-raman.md. Update Priya's page.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/priya-raman.md": "---\ntype: person\nname: Priya Raman\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-07-01\n---\n\n# Priya Raman\n\n## Compiled Truth\n\nPriya leads the data platform team.\n\n## Timeline / Log\n\n- 2026-07-01: Took over the data platform team.\n",
+          "sources/transcripts/2026-08-04-priya-raman.md": "---\ntype: source\ntitle: 1:1 with Priya Raman\ncaptured: 2026-08-04\norigin: transcript\n---\n\n# 1:1 with Priya Raman\n\n**Priya Raman**: Quick thing before we start — I go by she/her, the directory still has it wrong.\n\n**Edward Bridges**: Noted, I'll get that fixed.\n\n**Priya Raman**: Thanks. On the migration: we're cutting over on the 20th.\n"
+        }
+      },
+      "expected_behavior": [
+        "Adds a `pronouns:` frontmatter field to people/priya-raman.md recording she/her, since the source states it explicitly and the page had none.",
+        "Uses she/her in the revised prose, rather than defaulting to they/them once the source has attested the pronouns.",
+        "Attributes the pronouns to the source the same way it would any other fact, rather than presenting them as previously-known page content.",
+        "Still carries forward the existing Compiled Truth and Timeline content -- the revision adds, it does not replace."
+      ],
+      "related_skills": []
     }
   ]
 }

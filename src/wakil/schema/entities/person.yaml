@@ -7,6 +7,10 @@ page_shape: compiled-truth-timeline
 fields:
   name: {required: true, kind: string}
   aliases: {required: false, kind: list}
+  # The only thing that licenses a gendered pronoun in generated prose. Without
+  # a declared field the rule in note-revision/entity-compile had no supply
+  # side at all and could only ever resolve to they/them (#176).
+  pronouns: {required: false, kind: string}
   company: {required: false, kind: ref, ref_type: company}
   role: {required: false, kind: string}
   status: {required: true, kind: enum, values: [active, former, candidate, prospect, contact]}

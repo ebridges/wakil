@@ -186,10 +186,12 @@ class CaptureProposal:
     # H1 suppresses the generated one so the note is never double-wrapped.
     authored_metadata: dict = field(default_factory=dict)
     authored_h1: str | None = None
-    # Authored values wakil declined to use (a wakil-owned key, or one the
-    # `source` schema rejects). Shown in the preview -- silently dropping a
-    # value the author wrote is exactly the kind of invisible behaviour #172
-    # was about.
+    # Anything wakil did that the preview has to show before the confirm:
+    # authored values it declined to use (a wakil-owned key, or one the
+    # `source` schema rejects, #172), and a source cut to the model's budget
+    # (#176). Silently dropping a value the author wrote, or silently
+    # describing a fraction of the file as if it were the file, is exactly
+    # the invisible behaviour those issues are about.
     warnings: list[str] = field(default_factory=list)
     # Set when the computed destination is already occupied (#173). Capture
     # used to silently pick `<name>-1.md` instead, producing a near-duplicate
@@ -227,6 +229,7 @@ class AbstractBackfillItem:
     old_title: str | None
     title: str
     abstract: str
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -471,13 +474,15 @@ def prepare_capture(
     # An authored title/abstract is the user's own, so the model's doesn't
     # replace it (working agreement item 12) -- and when the file supplies
     # both, the capture-time call (ADR 0010) has nothing left to contribute,
-    # so don't pay for it at all.
+    # so don't pay for it at all (and nothing is truncated, so no notice).
     authored_title = _authored_text(proposal.authored_metadata, "title", "name")
     authored_abstract = _authored_text(proposal.authored_metadata, "abstract")
     if authored_title and authored_abstract:
         proposal.title, proposal.abstract = authored_title, authored_abstract
     else:
-        metadata = _generate_capture_metadata(config, client, kind, origin, text, context)
+        metadata = _generate_capture_metadata(
+            config, client, kind, origin, text, context, proposal.warnings
+        )
         proposal.title = authored_title or metadata.title
         # Keep the DB row and the file's frontmatter agreeing: `_build_raw_file`
         # would otherwise write the authored abstract while `Source` kept the
@@ -524,12 +529,29 @@ def _generate_capture_metadata(
     origin: str,
     text: str,
     context: str | None,
+    warnings: list[str],
+    unanalyzed: str = (
+        "The title and abstract written into this capture's frontmatter describe "
+        "only the part that was read — split the file and capture the parts "
+        "separately if that matters."
+    ),
 ) -> CaptureMetadata:
     """The one model call capture makes (docs/adr/0010): title + abstract,
-    grounded in the captured text itself rather than just the filename."""
+    grounded in the captured text itself rather than just the filename.
+
+    This cut used to be a bare `text[:MAX_SOURCE_CHARS]`, which is #176's bug
+    in a second place — and a worse place, because the abstract this call
+    produces is written into the source file's frontmatter and stays there.
+    An abstract of the first 24k characters of a two-hour transcript, filed as
+    an abstract of the transcript, is wrong in the knowledge base rather than
+    just wrong in one run's output.
+    """
     today = workspace_today(config)
+    source_text, warning = _cut_to_budget(text, unanalyzed=unanalyzed)
+    if warning is not None:
+        warnings.append(warning)
     prompt = build_capture_metadata_prompt(
-        source_type, origin, text[:MAX_SOURCE_CHARS], today, context=context
+        source_type, origin, source_text, today, context=context
     )
     try:
         return complete_with_contract(
@@ -674,6 +696,7 @@ def plan_abstract_backfill(
                 text = _load_source_text(config, source)
             except IngestError:
                 continue
+            warnings: list[str] = []
             generated = _generate_capture_metadata(
                 config,
                 client,
@@ -681,6 +704,15 @@ def plan_abstract_backfill(
                 source.origin or "",
                 text,
                 metadata.get("context"),
+                warnings,
+                # The source is already captured and indexed here, so
+                # "split the file and re-capture" isn't available without
+                # discarding the row.
+                unanalyzed=(
+                    "The backfilled title and abstract describe only the part that "
+                    "was read; the rest of this source is unaffected and still "
+                    "enriches in full."
+                ),
             )
             items.append(
                 AbstractBackfillItem(
@@ -689,6 +721,7 @@ def plan_abstract_backfill(
                     old_title=source.title,
                     title=generated.title,
                     abstract=generated.abstract,
+                    warnings=warnings,
                 )
             )
     return items
@@ -1183,6 +1216,72 @@ def _apply_extraction_checkpoint(proposal: "EnrichmentProposal", payload: dict) 
     )
 
 
+# Marker appended to a truncated source before it reaches the model. Without
+# it, a long transcript was silently cut and the model then correctly reported
+# that content was "not present in the transcript" -- a true statement about
+# the input it received, read by the operator as a false claim about their
+# recording (#176). Absence can only be asserted about what was actually seen.
+_TRUNCATION_NOTICE = (
+    "\n\n[SOURCE TRUNCATED: you have been given the first {shown:,} of {total:,} "
+    "characters. The remainder was not included. Do not state or imply that "
+    "anything is absent from this source -- you cannot see all of it.]"
+)
+
+# The guide gets its own marker. Reusing the source one told the model the
+# *source* had been cut, with another document's character counts, on every
+# run in a workspace whose RESOLVER.md is oversized — hedging complete
+# transcripts as partially read, which is the mirror image of #176. And "do
+# not reason about absence" is the wrong instruction to attach to routing
+# rules: a rule that isn't there genuinely doesn't apply.
+_GUIDE_TRUNCATION_NOTICE = (
+    "\n\n[GUIDANCE TRUNCATED: this workspace guidance file was cut at {shown:,} of "
+    "{total:,} characters. Rules past that point are not shown; follow the ones "
+    "above. This says nothing about the source document, which is delivered "
+    "separately and in full unless its own marker says otherwise.]"
+)
+
+
+def _cut_to_budget(
+    text: str,
+    *,
+    unanalyzed: str,
+    cap: int = MAX_SOURCE_CHARS,
+    label: str = "Source",
+    notice: str = _TRUNCATION_NOTICE,
+) -> tuple[str, str | None]:
+    """Cut text to a prompt budget, saying so in both directions.
+
+    The cut itself is unchanged; what's new is that it stops being silent.
+    The model is told its view is partial so it doesn't reason about absence,
+    and the caller gets a warning to show the operator so a short summary of a
+    long recording is explicable rather than mysterious. `unanalyzed` names
+    what the operator loses, which differs per call site; `cap`/`label` let
+    the workspace-guide cut share this rather than growing a second, silent
+    truncation of its own.
+    """
+    if len(text) <= cap:
+        return text, None
+    warning = (
+        f"{label} truncated to {cap:,} of {len(text):,} characters for the model — "
+        f"roughly the last {100 - int(100 * cap / len(text))}% of it was not read. "
+        f"{unanalyzed}"
+    )
+    return text[:cap] + notice.format(shown=cap, total=len(text)), warning
+
+
+def _truncate_source(text: str, proposal: "EnrichmentProposal") -> str:
+    truncated, warning = _cut_to_budget(
+        text,
+        unanalyzed=(
+            "Anything the enrichment says about the end of this source is unsupported. "
+            "If the later material matters, capture it as a second source."
+        ),
+    )
+    if warning is not None:
+        proposal.warnings.append(warning)
+    return truncated
+
+
 def _populate_proposal_from_models(
     config: WorkspaceConfig,
     client: ModelClient,
@@ -1198,9 +1297,9 @@ def _populate_proposal_from_models(
     """Run both DAG model calls (extraction, then entity resolution),
     mutating `proposal` in place with their results -- mirrors this file's
     `_run_extraction`/`_run_entity_resolution` mutate-in-place convention."""
-    guides = load_workspace_guides(config)
+    guides = load_workspace_guides(config, proposal.warnings)
     related_pairs = [(hit.ref, hit.title) for hit in related_notes]
-    source_text = text[:MAX_SOURCE_CHARS]
+    source_text = _truncate_source(text, proposal)
 
     # DAG node 1: extraction judgment (the <kind> skill + ExtractionOutput).
     # The raw *capture* path (sources/transcripts/...), not source.origin's
@@ -3911,7 +4010,9 @@ def _relative_origin(config: WorkspaceConfig, file: Path) -> str:
 # Frontmatter and workspace guidance
 
 
-def load_workspace_guides(config: WorkspaceConfig) -> dict[str, str]:
+def load_workspace_guides(
+    config: WorkspaceConfig, warnings: list[str] | None = None
+) -> dict[str, str]:
     """RESOLVER.md (routing) excerpt, when present.
 
     Page shape and metadata guidance no longer comes from a workspace
@@ -3924,9 +4025,24 @@ def load_workspace_guides(config: WorkspaceConfig) -> dict[str, str]:
     path = config.root_path / "RESOLVER.md"
     if path.is_file():
         with contextlib.suppress(OSError):
-            guides["RESOLVER.md"] = path.read_text(encoding="utf-8", errors="replace")[
-                :GUIDE_MAX_CHARS
-            ]
+            text = path.read_text(encoding="utf-8", errors="replace")
+            # The second recorded instance of the budget-cap shape (see
+            # docs/DEVELOPMENT.md). This one loses the user's own routing
+            # rules, silently, and docs/TROUBLESHOOTING.md was reduced to
+            # advising "keep the guide under ~4,000 chars" because nothing
+            # said when you had gone past it.
+            guides["RESOLVER.md"], warning = _cut_to_budget(
+                text,
+                cap=GUIDE_MAX_CHARS,
+                label="RESOLVER.md",
+                notice=_GUIDE_TRUNCATION_NOTICE,
+                unanalyzed=(
+                    "Routing rules past that point were not applied; move the rules that "
+                    "matter most to the top of the file."
+                ),
+            )
+            if warning is not None and warnings is not None:
+                warnings.append(warning)
     return guides
 
 

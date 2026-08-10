@@ -5184,3 +5184,115 @@ def test_an_ambiguous_rename_is_declined_not_coin_flipped(workspace, kb_path, tr
 
     assert result.sources_relinked == []
     assert get_source(workspace, source_id).raw_text_path == old_path
+
+# --------------------------------------------------------------------------
+# Source truncation is no longer silent (issue #176)
+
+
+def test_a_short_source_is_untouched():
+    from wakil.app.ingest_service import _truncate_source
+
+    proposal = EnrichmentProposal(source_id=1, title="Short")
+    assert _truncate_source("brief text", proposal) == "brief text"
+    assert proposal.warnings == []
+
+
+def test_a_truncated_source_warns_the_operator_and_tells_the_model():
+    """Issue #176's root cause: a ~28-minute transcript exceeded
+    MAX_SOURCE_CHARS and was silently cut, so the model correctly reported
+    that content was 'not present in the transcript' -- a true statement
+    about the input it received, read as a false claim about the recording."""
+    from wakil.app.ingest_service import MAX_SOURCE_CHARS, _truncate_source
+
+    proposal = EnrichmentProposal(source_id=1, title="Long")
+    long_text = "x" * (MAX_SOURCE_CHARS * 2)
+
+    result = _truncate_source(long_text, proposal)
+
+    # The model is told its view is partial, so it can't reason about absence.
+    assert "SOURCE TRUNCATED" in result
+    assert "Do not state or imply that anything is absent" in result
+    assert result.startswith("x" * 100)
+    # And the operator can see it happened, with the scale of the loss.
+    assert len(proposal.warnings) == 1
+    assert "truncated" in proposal.warnings[0]
+    assert f"{MAX_SOURCE_CHARS:,}" in proposal.warnings[0]
+
+
+def test_truncation_notice_is_appended_not_substituted():
+    """The budget still has to be respected -- the notice is extra, and the
+    analyzed prefix must be exactly what it was before."""
+    from wakil.app.ingest_service import MAX_SOURCE_CHARS, _truncate_source
+
+    proposal = EnrichmentProposal(source_id=1, title="Long")
+    long_text = "abcdefghij" * (MAX_SOURCE_CHARS // 5)
+    result = _truncate_source(long_text, proposal)
+    assert result[:MAX_SOURCE_CHARS] == long_text[:MAX_SOURCE_CHARS]
+
+
+def test_capture_metadata_truncation_is_not_silent_either(workspace, kb_path, monkeypatch):
+    """The same cut, one call site away, and this one is durable: the abstract
+    the capture-metadata call produces is written into the source file's
+    frontmatter and stays there. #176 fixed only the enrichment path."""
+    from wakil.app.ingest_service import MAX_SOURCE_CHARS
+
+    long_input = kb_path / "2026-07-09-long-meeting.txt"
+    long_input.write_text("Jane: " + "words and more words. " * 3000, encoding="utf-8")
+    assert len(long_input.read_text(encoding="utf-8")) > MAX_SOURCE_CHARS
+
+    seen: list[str] = []
+    real_prompt = ingest_service.build_capture_metadata_prompt
+
+    def _capture_prompt(source_type, origin, text, today, context=None):
+        seen.append(text)
+        return real_prompt(source_type, origin, text, today, context=context)
+
+    monkeypatch.setattr(ingest_service, "build_capture_metadata_prompt", _capture_prompt)
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=long_input)
+
+    # The model is told its view is partial, exactly as on the enrichment path.
+    assert "SOURCE TRUNCATED" in seen[0]
+    assert seen[0][:MAX_SOURCE_CHARS] == long_input.read_text(encoding="utf-8")[:MAX_SOURCE_CHARS]
+    # And the operator sees it before confirming a capture whose frontmatter
+    # abstract describes only part of the file.
+    assert len(proposal.warnings) == 1
+    assert "frontmatter" in proposal.warnings[0]
+    assert f"{MAX_SOURCE_CHARS:,}" in proposal.warnings[0]
+
+
+def test_a_short_capture_produces_no_truncation_warning(workspace, kb_path, transcript):
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    assert proposal.warnings == []
+
+
+def test_resolver_guide_truncation_is_not_silent(workspace, kb_path):
+    """The second recorded instance of the budget-cap shape, and the one
+    docs/DEVELOPMENT.md cites as instance #1 — it was still a bare slice, so
+    the rule named a precedent that was itself unfixed."""
+    from wakil.app.ingest_service import GUIDE_MAX_CHARS, load_workspace_guides
+
+    (kb_path / "RESOLVER.md").write_text("rule. " * (GUIDE_MAX_CHARS // 2), encoding="utf-8")
+    warnings: list[str] = []
+    guides = load_workspace_guides(workspace, warnings)
+
+    # Its *own* marker: reusing the source one told the model the source had
+    # been cut, with this file's character counts, on every run — hedging
+    # complete transcripts as partially read.
+    assert "GUIDANCE TRUNCATED" in guides["RESOLVER.md"]
+    assert "SOURCE TRUNCATED" not in guides["RESOLVER.md"]
+    assert "absent from this source" not in guides["RESOLVER.md"]
+    assert guides["RESOLVER.md"][:GUIDE_MAX_CHARS] == ("rule. " * (GUIDE_MAX_CHARS // 2))[
+        :GUIDE_MAX_CHARS
+    ]
+    assert len(warnings) == 1
+    assert "RESOLVER.md truncated" in warnings[0]
+    assert "move the rules that matter most to the top" in warnings[0]
+
+
+def test_a_short_resolver_guide_is_untouched(workspace, kb_path):
+    from wakil.app.ingest_service import load_workspace_guides
+
+    (kb_path / "RESOLVER.md").write_text("one short rule.\n", encoding="utf-8")
+    warnings: list[str] = []
+    assert load_workspace_guides(workspace, warnings)["RESOLVER.md"] == "one short rule.\n"
+    assert warnings == []

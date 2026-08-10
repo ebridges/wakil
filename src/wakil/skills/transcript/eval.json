@@ -44,6 +44,23 @@
         "Does not simply relabel the entire sentence as type=opinion without addressing the fact/interpretation split within it"
       ],
       "related_skills": []
+    },
+    {
+      "id": "no-absence-claims-on-a-truncated-source",
+      "query": "Extract the knowledge from the transcript at sources/transcripts/2026-08-04-long-call.md.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-08-04-long-call.md": "---\ntype: source\ntitle: Platform review\ncaptured: 2026-08-04\norigin: transcript\n---\n\n# Platform review\n\n**Ana**: The abstract for this recording says we cover the back-office database as the hardest area to pick up cold.\n\n**Ben**: Right, let's start with the routing layer though.\n\n**Ana**: Fine. Routing first.\n\n\n[SOURCE TRUNCATED: you have been given the first 24,000 of 61,400 characters. The remainder was not included. Do not state or imply that anything is absent from this source -- you cannot see all of it.]"
+        }
+      },
+      "expected_behavior": [
+        "Does not claim that the back-office database discussion is missing, absent, or not present in the transcript, even though the excerpt ends before reaching it.",
+        "Summarises what the excerpt does cover (the routing layer being taken first) rather than characterising what it omits.",
+        "If it mentions the excerpt being partial at all, attributes that to the truncation rather than to the recording itself.",
+        "Does not invent content for the un-shown remainder.",
+        "Treats the [SOURCE TRUNCATED] marker at the end of the transcript file as a statement from the tool about its own input, not as transcript content to summarise or attribute to a speaker."
+      ]
     }
   ]
 }

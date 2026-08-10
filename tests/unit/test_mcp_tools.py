@@ -380,3 +380,22 @@ def test_sources_relink_archive_unarchive_over_mcp(workspace, transcript, kb_pat
 
     with pytest.raises(tools.ToolError):
         tools.sources_archive(workspace, source_id + 1000)
+
+
+def test_ingest_prepare_returns_warnings(workspace, kb_path, monkeypatch):
+    """The whole mechanism the coordinator skill's truncation instruction
+    depends on. Without a test, a `CaptureProposal` refactor can drop the key
+    and the suite stays green while the skill silently stops seeing it."""
+    from wakil.app.ingest_service import MAX_SOURCE_CHARS
+
+    monkeypatch.setattr(
+        "wakil.mcp.tools.resolve_client", lambda: FakeClient([CAPTURE_METADATA_JSON])
+    )
+    long_input = kb_path / "long-call.txt"
+    long_input.write_text("Jane: " + "words and more words. " * 3000, encoding="utf-8")
+
+    cache = ProposalCache()
+    payload = tools.ingest_prepare(workspace, cache, "transcript", file_path=str(long_input))
+
+    assert any("truncated" in w for w in payload["warnings"])
+    assert f"{MAX_SOURCE_CHARS:,}" in payload["warnings"][0]
