@@ -444,3 +444,13 @@ But the third session found the actual mechanism: `ps aux | grep 'wakil.*mcp ser
 Worth knowing because the symptom points somewhere misleading: the operator's first hypothesis (and the issue's original title) was about two *sessions*, which suggests scheduling discipline as the fix. The actual fix was `kill`ing forgotten background servers, and the durable fix is the advisory lock (ADR 0021), which now names the holding pid and argv in its error so this is diagnosable in one step rather than via `ps`.
 
 Two adjacent facts that make this harder to spot: `wakil mcp serve` has no "which workspace am I serving" indicator in `wakil status`, and a stale server's writes look exactly like wakil's own (correct commit conventions, correct branch naming), so nothing about the resulting history reads as foreign.
+
+### `resolution.name` is not necessarily the `name:` a stub page ends up carrying
+
+**Date:** 2026-08-07 · **Source:** issue #186, `_populate_type_frontmatter`/`_build_stub_or_skip` in `src/wakil/app/ingest_service.py`
+
+`_build_stub_or_skip` derives a stub's *path* from `slugify(resolution.name)`, so it is natural to assume `resolution.name` is also what lands in the file's `name:` frontmatter. It isn't. `_populate_type_frontmatter` treats `resolution.name` as a **fallback**: `proposed_frontmatter.pop(label_field) or fallback_label`. If the model supplied a `name`/`title` in `proposed_frontmatter`, that wins, and the written page's label can differ from the name its own filename was built from.
+
+This is what made #186 hard to see. Two concept pages were written for one entity with byte-identical `type:` and `name:` frontmatter but different paths, and every existing guard missed it because they all compare paths or `resolution.name`: `_build_stub_or_skip`'s `taken` set (exact path), `_suppress_duplicate_of_proposed_note` (exact slug equality between `resolution.name` and the note's own label), and `_validate_proposed_files` (exact path string). Meanwhile `_reslug_proposed_note` had rewritten the proposed note's filename into a near-neighbour of the stub's, so even the paths looked plausibly distinct.
+
+The fix keys deduplication on `(type, slugify(name))` read back out of the **built content** of each file, not on any upstream variable. The general lesson: in the enrichment DAG, a page's identity is what its own frontmatter says once assembled — if you need to compare two proposed pages, parse them, don't compare the inputs you think produced them.
