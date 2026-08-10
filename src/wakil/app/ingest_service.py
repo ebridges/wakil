@@ -3279,7 +3279,8 @@ def _split_authored_markdown(raw: str) -> ParsedInput:
     """Parse an input's own frontmatter and *leading* H1.
 
     Unparseable YAML is not an error: the file is simply treated as
-    unauthored prose, exactly as before.
+    unauthored prose, exactly as before. Neither is a leading `---` block
+    that parses fine but isn't frontmatter -- see `_is_frontmatter`.
     """
     try:
         post = frontmatter_lib.loads(raw)
@@ -3287,7 +3288,41 @@ def _split_authored_markdown(raw: str) -> ParsedInput:
         body = post.content
     except Exception:
         metadata, body = {}, raw
+    if not _is_frontmatter(metadata):
+        # Not this file's frontmatter, so `post.content` is not this file's
+        # body -- keep the input verbatim rather than trusting the split.
+        metadata, body = {}, raw
     return ParsedInput(metadata=metadata, body=body, h1=_leading_h1(body))
+
+
+def _is_frontmatter(metadata: dict) -> bool:
+    """Does a parsed leading `---` block actually look like frontmatter?
+
+    `python-frontmatter` doesn't raise on a leading `---` that was never a
+    fence -- it splits on it regardless of what sits between, which loses
+    content in both directions:
+
+    - A block parsing to a *non-mapping* ("a scratch note to self") yields
+      `metadata == {}` and a `.content` that has already dropped that text.
+      Capture would write the shortened body out with no warning, and with
+      no `legacy_text` fallback either, so a re-ingest lands as a second,
+      shorter source (working-agreement item 12).
+    - A block parsing to a *mapping* (`Speaker 1: hello`) moves transcript
+      dialogue into frontmatter, and -- because that counts as authored --
+      skips `clean_transcript` for the rest of the file. `validate_frontmatter`
+      tolerates unknown keys by design, so nothing downstream objects.
+
+    A transcript opening with a `---` rule is a plausible hand-cleaned
+    artifact, i.e. squarely this feature's input population. Requiring one
+    recognised key admits every #172 input (`title`/`type`/`origin`/`tags`/
+    `meeting_date`/`company`) and rejects both shapes above; anything else
+    falls back to the pre-#172 behaviour of capturing the file verbatim.
+    """
+    return any(
+        key.lower().replace("-", "_") in _FRONTMATTER_MARKER_KEYS
+        for key in metadata
+        if isinstance(key, str)
+    )
 
 
 def _leading_h1(body: str) -> str | None:
@@ -3315,8 +3350,17 @@ def _authored_slug_source(parsed: ParsedInput) -> str | None:
 
 
 def _authored_meeting_date(parsed: ParsedInput) -> str | None:
-    """An explicit date the author already set beats anything inferred."""
-    for key in ("meeting_date", "date", "captured"):
+    """An explicit *meeting* date the author already set beats anything
+    inferred.
+
+    Deliberately not `captured`: that is when the file was captured, not when
+    the meeting happened -- `_KNOWN_FIELD_VALUES` maps it to `created`, and
+    `source.yaml`'s header says the same. Reading it here overrode a correct
+    inferred date (and with it the destination filename) with today's, and
+    `meeting_date` is durable: it seeds `Source.metadata_json` and the
+    Timeline heading fallback (#77).
+    """
+    for key in ("meeting_date", "date"):
         value = parsed.metadata.get(key)
         if isinstance(value, datetime):
             # `datetime` subclasses `date`, so isoformat() would carry a time
@@ -3482,6 +3526,30 @@ _KNOWN_FIELD_VALUES = {
     "source_file": "file_url",
     "context": "context",
 }
+
+# Keys that mark a leading `---` block as this file's frontmatter rather than
+# a horizontal rule the YAML parser happened to split on (`_is_frontmatter`,
+# which is defined above but only runs at capture time). The two constants
+# above cover what capture itself reads and writes; the literals are the rest
+# of `schema/entities/source.yaml`'s fields and origin sub-schema fields,
+# which an authored file legitimately carries and capture merges through
+# untouched.
+_FRONTMATTER_MARKER_KEYS = (
+    frozenset(_KNOWN_FIELD_VALUES)
+    | _WAKIL_OWNED_FRONTMATTER
+    | frozenset(
+        {
+            "tags",
+            "company",
+            "recording_url",
+            "author",
+            "published",
+            "description",
+            "readwise_id",
+            "readwise_updated",
+        }
+    )
+)
 
 
 def _build_raw_file(

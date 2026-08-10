@@ -253,13 +253,21 @@ tags — that file is treated as authored:
   falls back to the generated one with a warning in the preview;
 - no second frontmatter block or H1 is added, and the destination filename
   comes from the note's own title rather than the input's basename;
+- an authored `meeting_date`/`date` beats the date wakil infers from the
+  filename or the transcript's opening lines, which also changes the
+  destination filename. `captured` is *not* read as a meeting date — it
+  records when the file was captured;
 - the timestamp-cleanup pass is skipped, so markers like `**[00:36]**` survive
   verbatim;
 - if the file supplies both a title and an abstract, the capture-time model
   call is skipped entirely.
 
 A heading partway down the file doesn't count — only a leading H1 — so an ASR
-dump with section headings still gets the normal cleanup.
+dump with section headings still gets the normal cleanup. Nor does a leading
+`---` that isn't really a frontmatter fence: a block is only read as
+frontmatter when at least one of its keys is one the `source` schema knows,
+so a scratch note or a stretch of dialogue between two `---` rules is
+captured verbatim instead of being parsed away.
 
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:

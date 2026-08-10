@@ -378,6 +378,10 @@ def ingest_prepare(
         "origin": proposal.origin,
         "meeting_date": proposal.meeting_date,
         "raw_file_path": proposal.raw_file.path,
+        # An authored value wakil declined to use. ADR 0019 moved capture's
+        # review moment off the CLI preview and onto the coordinating skill,
+        # so a warning that only reaches the preview reaches nobody here.
+        "warnings": proposal.warnings,
     }
 
 

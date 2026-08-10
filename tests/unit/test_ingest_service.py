@@ -4120,3 +4120,50 @@ def test_a_partially_authored_file_still_calls_the_model(workspace, kb_path):
     )
     assert proposal.title == "Authored Title"
     assert proposal.abstract == "Model abstract."
+
+
+# --------------------------------------------------------------------------
+# #194 review round 2
+
+
+def test_a_leading_rule_that_is_not_frontmatter_is_captured_verbatim(workspace, kb_path):
+    """`python-frontmatter` splits on a leading `---` whatever follows it. A
+    block parsing to a non-mapping left `metadata == {}` -- so the file read
+    as unauthored, correctly -- while `.content` had already dropped the
+    block's text, deleting it from the capture with no warning."""
+    path = kb_path / "scratch.md"
+    path.write_text(
+        "---\nJust a scratch note to self about this recording\n---\n\n[00:01] hello there\n"
+    )
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    assert "Just a scratch note to self about this recording" in proposal.raw_file.content
+    assert "hello there" in proposal.raw_file.content
+
+
+def test_dialogue_between_leading_rules_is_not_read_as_frontmatter(workspace, kb_path):
+    """The same split in the other direction: a block that happens to parse
+    as a mapping moved two turns of dialogue into frontmatter, and counting
+    as authored suppressed `clean_transcript` for the rest of the file."""
+    path = kb_path / "spk.md"
+    path.write_text(
+        "---\nSpeaker 1: hello there everyone\nSpeaker 2: hi\n---\n\n[00:01] and then\n"
+    )
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    parsed = frontmatter.loads(proposal.raw_file.content)
+    assert "Speaker 1" not in parsed.metadata
+    assert "Speaker 1: hello there everyone" in proposal.raw_file.content
+    assert "[00:01]" not in proposal.raw_file.content  # cleanup still ran
+
+
+def test_an_authored_captured_is_not_used_as_the_meeting_date(workspace, kb_path):
+    """`captured` is when wakil captured the file, not when the meeting
+    happened -- reading it here discarded the correctly inferred date and
+    with it the destination filename."""
+    path = kb_path / "2026-07-09-real-meeting.md"
+    path.write_text("---\ntitle: Weekly sync\ncaptured: '2026-08-09'\n---\n\nBody.\n")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    assert proposal.meeting_date == "2026-07-09"
+    assert proposal.raw_file.path == "sources/transcripts/2026-07-09-weekly-sync.md"
