@@ -1172,10 +1172,55 @@ def test_drift_during_the_commit_records_where_the_commit_actually_went(git_kb, 
     with open_session(git_kb) as session:
         source = session.get(Source, source_id)
         assert source is not None
-        # Points at the branch that actually holds the capture, not the one
-        # `_assert_commit_landed` just proved wrong.
-        assert source.git_branch == "main"
-        assert source.git_branch != landing.branch
+        # Cleared, not repointed at `main`. `git_branch` is what the next run
+        # resumes onto and then commits and pushes to, so recording the
+        # default branch there would turn the next `wakil enrich` into a
+        # direct push of rewritten notes to `origin/main` with no PR — worse
+        # than the stale pointer this path exists to fix. Clearing is safe
+        # here precisely because the commit is on the default branch, so the
+        # fresh branch the next run cuts from it already has the capture.
+        assert source.git_branch is None
         changes = session.scalars(select(GitChange)).all()
         # The durable commit is recorded, and against the right branch.
         assert [(c.commit_sha, c.branch_name) for c in changes] == [(sha, "main")]
+
+
+def test_a_drifted_commit_on_a_wakil_branch_is_still_recorded(git_kb, monkeypatch):
+    """Clearing is for the default branch. If the commit landed on another
+    *wakil ingest* branch, that is a legitimate resume target and keeping it
+    is what stops the next run from cutting a branch without the capture."""
+    root = git_kb.root_path
+    source_id = _insert_source(git_kb, "Race A Wakil Branch")
+    landing = prepare_landing(
+        git_kb, source_id=source_id, title="Race A Wakil Branch", local=False
+    )
+    assert landing.branch is not None
+    (root / "drafts").mkdir(exist_ok=True)
+    (root / "drafts" / "rw.md").write_text("x\n")
+
+    other = "wakil/ingest/2026-08-09-other-process"
+    real_commit = git.stage_and_commit
+
+    def drift_then_commit(r, paths, message):
+        _git(root, "switch", "-q", "-c", other)
+        return real_commit(r, paths, message)
+
+    monkeypatch.setattr("wakil.app.git_service.git.stage_and_commit", drift_then_commit)
+
+    with pytest.raises(BranchDriftError):
+        land_ingestion(
+            git_kb,
+            landing,
+            source_id=source_id,
+            files=["drafts/rw.md"],
+            title="Race A Wakil Branch",
+            summary=None,
+            ingest_run_id=None,
+            kind="source",
+            phase="capture",
+        )
+
+    with open_session(git_kb) as session:
+        source = session.get(Source, source_id)
+        assert source is not None
+        assert source.git_branch == other

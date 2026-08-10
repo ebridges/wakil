@@ -279,14 +279,19 @@ def land_ingestion(
         # commit sends the next `wakil enrich` to check out a branch with no
         # raw capture on it, which fails with "Could not read raw capture" --
         # verbatim the #180 symptom the early `_remember_source_branch` above
-        # exists to prevent. Pointing the source at the branch that does hold
-        # the capture can mean pointing it at the default branch; that is
-        # still strictly better than a branch known not to have it, and the
-        # error tells the user to move the commit where it belongs.
+        # exists to prevent.
+        #
+        # But only a *wakil* branch gets recorded. Recording the branch that
+        # holds the commit can mean recording the default branch, and
+        # `Source.git_branch` is what the next run resumes onto and then
+        # commits and pushes to — so that would turn the next `wakil enrich`
+        # into a direct push of rewritten notes to `origin/main` with no PR,
+        # which ADR 0003 exists to prevent. Clearing it is safe in exactly
+        # that case: the commit is on the default branch, so the fresh branch
+        # the next run cuts from it already contains the capture.
         actual = _branch_holding(config, sha)
         _record_change(config, files, sha, actual, None, title, ingest_run_id, kind)
-        if actual is not None:
-            _remember_source_branch(config, source_id, actual)
+        _remember_source_branch(config, source_id, _resumable_branch(config, actual))
         raise
 
     # Record the commit now, not after the PR. It is durable in git from this
@@ -469,6 +474,17 @@ def _assert_commit_landed(config: WorkspaceConfig, branch: str, sha: str) -> Non
         )
 
 
+def _resumable_branch(config: WorkspaceConfig, branch: str | None) -> str | None:
+    """`branch` if it is safe for a later run to resume onto, else None.
+
+    A source's `git_branch` is resumed onto and then committed and pushed to,
+    so recording the default branch there would make the next run push to it
+    directly. Only a wakil ingest branch qualifies."""
+    if branch is None or not branch.startswith("wakil/ingest/"):
+        return None
+    return branch
+
+
 def _branch_holding(config: WorkspaceConfig, sha: str) -> str | None:
     """The branch a drifted commit actually landed on, if we can name one.
 
@@ -512,13 +528,15 @@ def _forget_source_pr(config: WorkspaceConfig, source_id: int) -> None:
         session.commit()
 
 
-def _remember_source_branch(config: WorkspaceConfig, source_id: int, branch: str) -> None:
-    """Record the branch this source is landing on.
+def _remember_source_branch(config: WorkspaceConfig, source_id: int, branch: str | None) -> None:
+    """Record the branch this source is landing on, or None to clear it.
 
-    Overwrites deliberately. It used to refuse when a value was already
-    present, so once `_resume_source_branch` fell through to a fresh
-    follow-up branch, the DB kept pointing at the dead one forever and every
-    later run resolved differently (#180)."""
+    Overwrites deliberately, including with None. It used to refuse when a
+    value was already present, so once `_resume_source_branch` fell through
+    to a fresh follow-up branch, the DB kept pointing at the dead one forever
+    and every later run resolved differently (#180). Clearing is what the
+    drift path wants when the commit landed somewhere a later run must not
+    resume onto — the next run then cuts a fresh branch."""
     with open_session(config) as session:
         row = session.get(Source, source_id)
         if row is not None:
