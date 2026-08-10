@@ -1,3 +1,4 @@
+import hashlib
 import json
 import threading
 import zipfile
@@ -11,6 +12,7 @@ from sqlalchemy import select
 
 from wakil.app import ingest_service
 from wakil.app.ingest_service import (
+    _LEGACY_BRACKET_TS_RE,
     EnrichmentProposal,
     EntityUpdate,
     IngestError,
@@ -4058,32 +4060,55 @@ def test_an_authored_date_with_a_time_component_is_still_honoured(workspace, kb_
     assert proposal.raw_file.path.startswith("sources/transcripts/2026-08-03-")
 
 
+# Digests of what `main` actually wrote for the two inputs below, pinned as
+# literals. Deriving them from the current `clean_transcript` -- even via
+# `_LEGACY_BRACKET_TS_RE` -- would move both sides of the comparison together
+# and let the test pass with the legacy check removed entirely. Regenerate
+# only against a real pre-#179 checkout, never against HEAD.
+PRE_179_MD_HASH = "7f7604b18400c1377b3d826794a014fd6684fa08528d6a5555022a24fe61fafe"
+PRE_179_TXT_HASH = "c23ae864a19ce2f1e7bea4ecf9949d452e50ede66afb2b32c6b11e40d4a33669"
+
+
+def _seed_source(config, content_hash: str, title: str = "Kickoff") -> None:
+    with open_session(config) as session:
+        workspace_id, _ = _require_workspace_ids(session, config)
+        session.add(
+            Source(
+                workspace_id=workspace_id,
+                source_type="transcript",
+                title=title,
+                content_hash=content_hash,
+            )
+        )
+        session.commit()
+
+
 def test_a_file_ingested_before_the_frontmatter_fix_still_dedups(workspace, kb_path):
     """The hash basis changed from the raw file to its body, so without a
     legacy check every `.md` the affected user already ingested would capture
     a second time -- and the overwrite guard wouldn't catch it either, since
     the slug now comes from the authored title."""
-    import hashlib
-
     body = "---\ntitle: 'Kickoff'\n---\n\n# Kickoff\n\n**[00:36]** — Hello there.\n"
     path = kb_path / "kickoff.md"
     path.write_text(body)
-
-    with open_session(workspace) as session:
-        workspace_id, _ = _require_workspace_ids(session, workspace)
-        session.add(
-            Source(
-                workspace_id=workspace_id,
-                source_type="transcript",
-                title="Kickoff",
-                # What the pre-#172 code hashed: the raw file, cleaned.
-                content_hash=hashlib.sha256(clean_transcript(body).encode()).hexdigest(),
-            )
-        )
-        session.commit()
+    _seed_source(workspace, PRE_179_MD_HASH)
 
     proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
     assert proposal.duplicate_of is not None
+
+
+def test_the_legacy_hash_basis_is_frozen_at_the_pre_179_cleaner(workspace, kb_path):
+    """`legacy_text` has to be what the cleaner *used to* produce. Computing
+    it with the current `_BRACKET_TS_RE` makes it equal the new hash for every
+    emphasised-marker file -- i.e. inert for exactly the population it exists
+    for."""
+    body = "---\ntitle: 'Kickoff'\n---\n\n# Kickoff\n\n**[00:36]** — Hello there.\n"
+
+    legacy = clean_transcript(body, bracket_re=_LEGACY_BRACKET_TS_RE)
+    assert hashlib.sha256(legacy.encode()).hexdigest() == PRE_179_MD_HASH
+    # The lookarounds are the whole point of #179, so the two must disagree.
+    assert clean_transcript(body) != legacy
+    assert "****" in legacy and "**[00:36]**" in clean_transcript(body)
 
 
 def test_a_fully_authored_file_skips_the_capture_model_call(workspace, kb_path):
@@ -4167,3 +4192,60 @@ def test_an_authored_captured_is_not_used_as_the_meeting_date(workspace, kb_path
 
     assert proposal.meeting_date == "2026-07-09"
     assert proposal.raw_file.path == "sources/transcripts/2026-07-09-weekly-sync.md"
+
+
+# --------------------------------------------------------------------------
+# #194 review round 3
+
+
+def test_a_txt_transcript_ingested_before_the_marker_fix_still_dedups(workspace, kb_path):
+    """#179 moved the cleaner's bracket pattern, which changes the content
+    hash of *every* transcript input, not just authored `.md`. Otter-style
+    `.txt` exports routinely use `**[00:36]**` turn labels."""
+    path = kb_path / "otter-export.txt"
+    path.write_text("**Alice**\n**[00:36]** Hello there.\n**[01:02]** Bye.\n")
+    _seed_source(workspace, PRE_179_TXT_HASH, title="Otter export")
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+    assert proposal.duplicate_of is not None
+
+
+def test_frontmatter_using_only_vault_specific_keys_is_still_authored(workspace, kb_path):
+    """A marker-key allowlist could only ever recognise wakil's own
+    vocabulary, so a hand-cleaned Obsidian note keyed on `attendees`/`summary`
+    reproduced #172 verbatim -- two frontmatter blocks, two H1s, and the
+    scratch basename as the slug."""
+    path = kb_path / "obsidian.md"
+    path.write_text(
+        "---\nattendees:\n  - Jane\nsummary: A cleaned-up call\n---\n\n"
+        "# 2026-08-03 Call with Jane\n\n**[00:36]** — Hello.\n"
+    )
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+    content = proposal.raw_file.content
+
+    assert content.count("\n---\n") == 1, "expected exactly one frontmatter block"
+    assert len([line for line in content.splitlines() if line.startswith("# ")]) == 1
+    assert "obsidian" not in proposal.raw_file.path
+    parsed = frontmatter.loads(content)
+    assert parsed["summary"] == "A cleaned-up call"
+    assert parsed["attendees"] == ["Jane"]
+
+
+def test_a_rejected_leading_block_says_so_in_the_preview(workspace, kb_path):
+    """Capturing the file verbatim is the safe direction, but it shouldn't
+    have to be inferred from the output."""
+    path = kb_path / "spk2.md"
+    path.write_text("---\nSpeaker 1: hello there\n---\n\n[00:01] and then\n")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    assert any("frontmatter" in warning for warning in proposal.warnings)
+
+
+def test_a_file_with_no_leading_block_gets_no_such_warning(workspace, kb_path):
+    """The warning is about a `---` block that was declined, not about every
+    unauthored file."""
+    path = kb_path / "plain.md"
+    path.write_text("[00:36] Jane: hello.\n[00:42] Bob: hi.\n")
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=path)
+
+    assert not any("frontmatter" in warning for warning in proposal.warnings)

@@ -292,13 +292,18 @@ def prepare_capture(
                 raise IngestError(f"Could not read {file}: {exc}") from exc
             if file.suffix.lower() == ".srt":
                 text = strip_srt(raw)
+                legacy_source = text
             elif file.suffix.lower() == ".md":
                 # Only `.md` can meaningfully carry frontmatter/an H1; a
                 # `.txt`/`.srt` dump is machine output either way.
                 parsed = _split_authored_markdown(raw)
                 text = parsed.body
+                # Pre-#172 there was no frontmatter split, so the cleaner saw
+                # the whole file.
+                legacy_source = raw
             else:
                 text = raw
+                legacy_source = raw
             if kind == "transcript":
                 # An authored `.md` is a human artifact whose `**[00:36]**`
                 # markers are deliberate -- cleaning it deletes real content
@@ -306,10 +311,15 @@ def prepare_capture(
                 # pass.
                 if parsed is None or not parsed.is_authored_markdown:
                     text = clean_transcript(text)
-                else:
-                    # What this same file would have hashed to before #172,
-                    # for the dedup check below.
-                    legacy_text = clean_transcript(raw)
+                # What this same input hashed to before this change, for the
+                # dedup check below. Computed for *every* transcript file
+                # type, not just authored `.md`: #179 moved the cleaner's
+                # bracket pattern, so a `.txt`/`.srt` export using `**[00:36]**`
+                # turn labels also hashes differently now than when it was
+                # first captured.
+                legacy_text = clean_transcript(
+                    legacy_source, bracket_re=_LEGACY_BRACKET_TS_RE
+                )
                 meeting_date = infer_meeting_date(file, text)
             elif parsed is not None:
                 legacy_text = raw
@@ -367,6 +377,8 @@ def prepare_capture(
         authored_metadata=parsed.metadata if parsed is not None else {},
         authored_h1=parsed.h1 if parsed is not None else None,
     )
+    if parsed is not None and parsed.warning is not None:
+        proposal.warnings.append(parsed.warning)
 
     with open_session(config) as session:
         # Also match the pre-#172 hash basis. That basis was the *raw* file
@@ -3089,19 +3101,30 @@ def strip_srt(raw: str) -> str:
 # turn label, and stripping just the brackets' contents left a bare `****`
 # behind (#179). An unemphasised `[00:36]` is still ASR noise and still goes.
 _BRACKET_TS_RE = re.compile(r"(?<![*_])[\[(]\d{1,2}:\d{2}(:\d{2})?([,.]\d{1,3})?[\])](?![*_])")
+# Frozen history, not a variant to keep in sync: the pattern as it stood
+# before #179 added the lookarounds above. `prepare_capture` reproduces the
+# content hash a transcript already in `sources/` was stored under, and that
+# hash is a function of what the cleaner *used to* do -- computing it from
+# the current pattern makes the check silently inert for exactly the files
+# it exists to recognise (emphasised turn labels), and makes any test of it
+# self-confirming. Never "fix" this to match `_BRACKET_TS_RE`.
+_LEGACY_BRACKET_TS_RE = re.compile(r"[\[(]\d{1,2}:\d{2}(:\d{2})?([,.]\d{1,3})?[\])]")
 _LEADING_TS_RE = re.compile(r"^\s*\d{1,2}:\d{2}(:\d{2})?([,.]\d{1,3})?\s*[-–>]*\s*")
 
 
-def clean_transcript(raw: str) -> str:
+def clean_transcript(raw: str, *, bracket_re: re.Pattern[str] = _BRACKET_TS_RE) -> str:
     """Light, deterministic transcript cleanup.
 
     Removes timestamp noise and normalizes whitespace without touching the
     spoken content — the raw capture must stay faithful to the source, so no
     model rewriting happens here.
+
+    `bracket_re` is only ever overridden with `_LEGACY_BRACKET_TS_RE`, to
+    recompute a pre-#179 content hash for the dedup check.
     """
     cleaned_lines: list[str] = []
     for line in raw.splitlines():
-        line = _BRACKET_TS_RE.sub("", line)
+        line = bracket_re.sub("", line)
         line = _LEADING_TS_RE.sub("", line)
         line = re.sub(r"[ \t]+", " ", line).rstrip()
         if line or (cleaned_lines and cleaned_lines[-1]):
@@ -3261,6 +3284,10 @@ class ParsedInput:
     metadata: dict
     body: str
     h1: str | None
+    # Set when a leading `---` block was rejected by `_is_frontmatter`, so
+    # "I captured your file verbatim" is visible in the preview rather than
+    # inferred from the output.
+    warning: str | None = None
 
     @property
     def is_authored_markdown(self) -> bool:
@@ -3288,11 +3315,26 @@ def _split_authored_markdown(raw: str) -> ParsedInput:
         body = post.content
     except Exception:
         metadata, body = {}, raw
-    if not _is_frontmatter(metadata):
-        # Not this file's frontmatter, so `post.content` is not this file's
-        # body -- keep the input verbatim rather than trusting the split.
-        metadata, body = {}, raw
-    return ParsedInput(metadata=metadata, body=body, h1=_leading_h1(body))
+    if _is_frontmatter(metadata):
+        return ParsedInput(metadata=metadata, body=body, h1=_leading_h1(body))
+    # Not this file's frontmatter, so `post.content` is not this file's body
+    # -- keep the input verbatim rather than trusting the split.
+    warning = None
+    if raw.lstrip().startswith("---"):
+        warning = (
+            "Read the leading `---` block as content, not frontmatter "
+            "(its keys don't look like frontmatter keys). The file was "
+            "captured verbatim."
+        )
+    return ParsedInput(metadata={}, body=raw, h1=_leading_h1(raw), warning=warning)
+
+
+# A frontmatter key by convention: lowercase, no whitespace. Deliberately a
+# shape test rather than a list of known field names -- the point is to admit
+# a user's own vault vocabulary (`attendees:`, `summary:`) as readily as
+# wakil's, without duplicating `source.yaml` or going stale when a kb-local
+# override adds a field.
+_FRONTMATTER_KEY_RE = re.compile(r"^[a-z][a-z0-9_.-]*$")
 
 
 def _is_frontmatter(metadata: dict) -> bool:
@@ -3313,15 +3355,20 @@ def _is_frontmatter(metadata: dict) -> bool:
       tolerates unknown keys by design, so nothing downstream objects.
 
     A transcript opening with a `---` rule is a plausible hand-cleaned
-    artifact, i.e. squarely this feature's input population. Requiring one
-    recognised key admits every #172 input (`title`/`type`/`origin`/`tags`/
-    `meeting_date`/`company`) and rejects both shapes above; anything else
-    falls back to the pre-#172 behaviour of capturing the file verbatim.
+    artifact, i.e. squarely this feature's input population.
+
+    Requiring *every* key to be frontmatter-shaped rejects both shapes above
+    while admitting any hand-authored file whose keys follow the convention,
+    including vault-specific ones this code has never heard of. The residue
+    is a block of all-lowercase single-word speaker labels (`alice: hi`),
+    which is read as frontmatter; and a file whose real frontmatter uses
+    capitalised keys, which is captured verbatim. Both are called out in the
+    preview -- the second via `ParsedInput.warning` -- and the verbatim
+    direction is the safe one: it restores the pre-#172 double-wrap rather
+    than moving content out of the body.
     """
-    return any(
-        key.lower().replace("-", "_") in _FRONTMATTER_MARKER_KEYS
-        for key in metadata
-        if isinstance(key, str)
+    return bool(metadata) and all(
+        isinstance(key, str) and _FRONTMATTER_KEY_RE.fullmatch(key) for key in metadata
     )
 
 
@@ -3526,31 +3573,6 @@ _KNOWN_FIELD_VALUES = {
     "source_file": "file_url",
     "context": "context",
 }
-
-# Keys that mark a leading `---` block as this file's frontmatter rather than
-# a horizontal rule the YAML parser happened to split on (`_is_frontmatter`,
-# which is defined above but only runs at capture time). The two constants
-# above cover what capture itself reads and writes; the literals are the rest
-# of `schema/entities/source.yaml`'s fields and origin sub-schema fields,
-# which an authored file legitimately carries and capture merges through
-# untouched.
-_FRONTMATTER_MARKER_KEYS = (
-    frozenset(_KNOWN_FIELD_VALUES)
-    | _WAKIL_OWNED_FRONTMATTER
-    | frozenset(
-        {
-            "tags",
-            "company",
-            "recording_url",
-            "author",
-            "published",
-            "description",
-            "readwise_id",
-            "readwise_updated",
-        }
-    )
-)
-
 
 def _build_raw_file(
     config: WorkspaceConfig, proposal: CaptureProposal, slug_source: str

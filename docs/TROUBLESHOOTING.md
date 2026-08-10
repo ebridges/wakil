@@ -24,7 +24,9 @@ source (commit SHA, PR #, or session detail) for traceability.
 
 **Root cause:** `loads` splits on the fences first and parses second; a parse that yields no mapping is discarded rather than treated as an error. The `except` only ever catches *malformed YAML* (`title: [unclosed`), which is the rarer case.
 
-**Fix:** Trust the split only when the parsed mapping has at least one recognised frontmatter key (`_is_frontmatter` / `_FRONTMATTER_MARKER_KEYS`); otherwise fall back to `metadata, body = {}, raw`. **General lesson:** any `frontmatter_lib.loads` on *user-supplied* text needs this guard. The codebase's other ~13 call sites are safe only because they parse wakil-written notes, which always open with a real frontmatter block — that assumption is worth re-checking before pointing one of them at an input file.
+**Fix:** Trust the split only when the parsed mapping is non-empty and every key is frontmatter-shaped (`_is_frontmatter` / `_FRONTMATTER_KEY_RE`); otherwise fall back to `metadata, body = {}, raw`. A key-name allowlist was tried first and rejected — it can only recognise wakil's own vocabulary, so a hand-authored note keyed on `attendees:`/`summary:` reproduced the original #172 symptom.
+
+**General lesson:** any `frontmatter_lib.loads` on *user-supplied* text needs this guard. The other call sites in `ingest_service.py` are safe only because they parse wakil-written notes, which always open with a real frontmatter block. One call site outside it is **not** safe and shares the exposure: `read_markdown_file` (`src/wakil/knowledge/markdown.py`) runs the identical `loads` over every `.md` in the vault via `index_notes`, so a hand-authored note opening with a `---` rule is partially invisible to `wakil search` (see #231).
 
 ### `git-cliff`'s `postprocessors` run per release body, and `trim` eats each body's leading newline
 
