@@ -281,17 +281,21 @@ def land_ingestion(
         # verbatim the #180 symptom the early `_remember_source_branch` above
         # exists to prevent.
         #
-        # But only a *wakil* branch gets recorded. Recording the branch that
-        # holds the commit can mean recording the default branch, and
-        # `Source.git_branch` is what the next run resumes onto and then
-        # commits and pushes to — so that would turn the next `wakil enrich`
-        # into a direct push of rewritten notes to `origin/main` with no PR,
-        # which ADR 0003 exists to prevent. Clearing it is safe in exactly
-        # that case: the commit is on the default branch, so the fresh branch
-        # the next run cuts from it already contains the capture.
-        actual = _branch_holding(config, sha)
-        _record_change(config, files, sha, actual, None, title, ingest_run_id, kind)
-        _remember_source_branch(config, source_id, _resumable_branch(config, actual))
+        # The pointer is *cleared*, always. Drift means HEAD is not this
+        # source's branch, so by construction the branch holding the commit
+        # belongs to someone else — the default branch (next run would push
+        # rewritten notes to `origin/main` with no PR) or, in the realistic
+        # case that `BranchDriftError`'s docstring describes, another
+        # concurrent wakil process's own ingest branch (next run would commit
+        # into *that* source's branch and adopt its PR, flipping its draft to
+        # ready). Neither is a resume target. Clearing makes the next run cut
+        # a fresh branch, and the commit is reachable from wherever it landed.
+        # The `git_changes` row below still records the true branch: that one
+        # is history, not somewhere a later run goes.
+        _record_change(
+            config, files, sha, _branch_holding(config, sha), None, title, ingest_run_id, kind
+        )
+        _remember_source_branch(config, source_id, None)
         raise
 
     # Record the commit now, not after the PR. It is durable in git from this
@@ -472,17 +476,6 @@ def _assert_commit_landed(config: WorkspaceConfig, branch: str, sha: str) -> Non
             f"likely another wakil process. The commit is durable; find it with "
             f"`git branch --contains {sha[:10]}` and move it where it belongs."
         )
-
-
-def _resumable_branch(config: WorkspaceConfig, branch: str | None) -> str | None:
-    """`branch` if it is safe for a later run to resume onto, else None.
-
-    A source's `git_branch` is resumed onto and then committed and pushed to,
-    so recording the default branch there would make the next run push to it
-    directly. Only a wakil ingest branch qualifies."""
-    if branch is None or not branch.startswith("wakil/ingest/"):
-        return None
-    return branch
 
 
 def _branch_holding(config: WorkspaceConfig, sha: str) -> str | None:

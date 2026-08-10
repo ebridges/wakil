@@ -1185,10 +1185,11 @@ def test_drift_during_the_commit_records_where_the_commit_actually_went(git_kb, 
         assert [(c.commit_sha, c.branch_name) for c in changes] == [(sha, "main")]
 
 
-def test_a_drifted_commit_on_a_wakil_branch_is_still_recorded(git_kb, monkeypatch):
-    """Clearing is for the default branch. If the commit landed on another
-    *wakil ingest* branch, that is a legitimate resume target and keeping it
-    is what stops the next run from cutting a branch without the capture."""
+def test_a_drifted_commit_onto_another_wakil_branch_is_also_cleared(git_kb, monkeypatch):
+    """Drift means HEAD is not this source's branch, so a wakil branch we
+    drifted onto is another *source's* — the realistic case. Recording it
+    would make the next run commit into that source's branch and adopt its
+    PR, flipping someone else's draft to ready."""
     root = git_kb.root_path
     source_id = _insert_source(git_kb, "Race A Wakil Branch")
     landing = prepare_landing(
@@ -1223,4 +1224,4 @@ def test_a_drifted_commit_on_a_wakil_branch_is_still_recorded(git_kb, monkeypatc
     with open_session(git_kb) as session:
         source = session.get(Source, source_id)
         assert source is not None
-        assert source.git_branch == other
+        assert source.git_branch is None
