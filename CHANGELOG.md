@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0] - 2026-08-10
+
+### ✨ Features
+
+- ✨ feat(schema): allow "contact" as a person relationship value (#169)
+- ✨ feat(git): advisory lock around the checkout→commit→return sequence (#196)
+- ✨ feat(sources): follow renamed captures, and archive dead ones (#201)
+
+### 🐛 Bug Fixes
+
+- 🐛 fix(git): give `git commit` a timeout that fits interactive signing (#193)
+- 🐛 fix(git): make landing observe reality instead of asserting it (#195)
+- 🐛 fix(ingest): honor an input file's own frontmatter and H1 (#194)
+- 🐛 fix(ingest): derive user-visible dates from the local timezone (#197)
+- 🐛 fix(ingest): refuse a destination collision instead of silently suffixing (#198)
+- 🐛 fix(enrich): auto-correct proposal routing, dedupe pages by identity (#199)
+- 🐛 fix(enrich): fail loudly when every update target is off this branch (#200)
+- 🐛 fix(enrich): stop truncating sources silently; tighten synthesis rules (#202)
+
+### 📝 Documentation
+
+- 📝 docs(readme): mention the automated pr-reviewer CI comment (#185)
+- 📝 docs(adr): add 0000-template.md for new ADRs (#191)
+- 📝 docs(process): add a triage policy for pr-reviewer feedback (#222)
+
 ## [0.2.1] - 2026-07-30
 
 ### 📝 Documentation
