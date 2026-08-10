@@ -18,7 +18,6 @@ session or agent) land on the same branch/PR the capture step started,
 instead of opening a second, disconnected PR.
 """
 
-import contextlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -33,6 +32,7 @@ from wakil.integrations.github import (
     GhError,
     comment_on_pull_request,
     create_pull_request,
+    find_pull_request,
     gh_available,
     mark_pull_request_ready,
 )
@@ -56,6 +56,16 @@ class GitServiceError(RuntimeError):
     pass
 
 
+class BranchDriftError(GitServiceError):
+    """HEAD is not the branch this landing resolved.
+
+    Distinct from other landing failures because the response has to be
+    different: an ordinary push/`gh` failure should return the tree to the
+    default branch, but drift means another process owns this working tree,
+    and switching under it is the clobber we are trying to prevent (#182).
+    """
+
+
 @dataclass
 class CommitOutcome:
     branch: str | None  # branch this change landed on, if any
@@ -70,10 +80,19 @@ class LandingContext:
     """What `prepare_landing` resolved, for `land_ingestion` to commit onto.
 
     `local=True` means no git operations at all — the caller should skip
-    `land_ingestion` entirely (the `--local` escape hatch)."""
+    `land_ingestion` entirely (the `--local` escape hatch).
+
+    Note there is no `original_branch`. It used to hold whatever branch the
+    shell happened to be on when `prepare_landing` ran, and `land_ingestion`
+    switched back to it at the end — minutes later for the CLI, and across an
+    unbounded gap for MCP's prepare/apply split. That made `wakil enrich`
+    "return to" a stale, unrelated branch from an earlier command (#181).
+    `ensure_clean_for_branch` already guarantees a clean tree at prepare
+    time, so the incidental branch carries no information wakil needs; the
+    landing now returns to the repo's default branch instead.
+    """
 
     branch: str | None
-    original_branch: str | None
     local: bool
 
 
@@ -88,7 +107,7 @@ def ingest_branch_name(root, title: str) -> str:
     base = f"wakil/ingest/{date}-{slugify(title, max_length=40)}"
     name = base
     counter = 1
-    while git.branch_exists(root, name):
+    while git.require_branch_exists(root, name):
         name = f"{base}-{counter}"
         counter += 1
     return name
@@ -100,7 +119,10 @@ def ensure_clean_for_branch(config: WorkspaceConfig) -> None:
     info = git.inspect_git(config.root_path)
     if not info.is_repo:
         raise GitServiceError("Workspace is not a git repository; use --local to write locally.")
-    changed = git.changed_files(config.root_path)
+    try:
+        changed = git.status_lines(config.root_path)
+    except git.GitError as exc:
+        raise GitServiceError(f"Could not read the working tree's status: {exc}") from exc
     if changed:
         listing = "\n".join(f"  {line}" for line in changed[:10])
         raise GitServiceError(
@@ -148,9 +170,8 @@ def prepare_landing(
     branch/PR can be resumed.
     """
     if local:
-        return LandingContext(branch=None, original_branch=None, local=True)
+        return LandingContext(branch=None, local=True)
     ensure_clean_for_branch(config)
-    original_branch = git.inspect_git(config.root_path).branch
     state = _load_source_git_state(config, source_id) if source_id is not None else None
     if state is not None and state.git_branch:
         branch = _resume_source_branch(config, state)
@@ -160,16 +181,31 @@ def prepare_landing(
         # placeholder until the enrichment proposal exists.
         branch_title = (state.title if state is not None else None) or title
         branch = _create_fresh_branch(config, branch_title, follow_up=state is not None)
-    return LandingContext(branch=branch, original_branch=original_branch, local=False)
+    if source_id is not None:
+        # Record the branch now, while it's still true. Waiting until after
+        # the commit meant a source whose capture failed mid-landing kept a
+        # NULL git_branch, and the next run resolved a different branch with
+        # nothing to reconcile against.
+        _remember_source_branch(config, source_id, branch)
+    return LandingContext(branch=branch, local=False)
 
 
 def abandon_landing(config: WorkspaceConfig, context: LandingContext) -> None:
     """Nothing was written for this landing context (e.g. enrichment
-    proposed no files) — return to the original branch if we switched away
-    from it. No-op for a local context."""
+    proposed no files) — return to the default branch. No-op for a local
+    context.
+
+    Subject to the same drift rule `land_ingestion` follows: if HEAD is no
+    longer the branch this context resolved, another process owns the working
+    tree and switching under it is the clobber #182 is about. The windows
+    here are the long ones — `_prepare_enrichment_or_exit`'s failure path is
+    reached after four model calls, and MCP's `enrich_prepare` failure paths
+    span the unbounded prepare/apply gap — so a stale return is exactly what
+    would land on someone else's tree.
+    """
     if context.local:
         return
-    _return_to_branch(config.root_path, context.original_branch)
+    _return_to_default(config, context.branch)
 
 
 def land_ingestion(
@@ -204,14 +240,22 @@ def land_ingestion(
     if summary:
         message += f"\n\n{summary}"
 
-    # Record the branch *before* attempting the commit. When a commit fails
-    # and the user finishes it by hand (issue #171's recovery path), this row
-    # is the only thing that lets a later `wakil enrich <id>` resume onto the
-    # same branch. Recording it afterwards meant `Source.git_branch` stayed
-    # NULL, the next run cut a fresh branch off the default, and
-    # `_load_source_text` then failed with "Could not read raw capture" —
-    # because the capture only exists on the branch that was abandoned.
-    _remember_source_branch(config, source_id, context.branch)
+    landed_on = _assert_on_branch(
+        config,
+        context.branch,
+        what="commit",
+        state="The written files are still on disk; nothing was committed.",
+    )
+    # Record before committing, not after, and record the *observed* branch.
+    # Two reasons, both about the next run: the capture flow can't record at
+    # prepare time (the Source row doesn't exist yet, so `prepare_landing`
+    # gets source_id=None), and a landing that fails mid-commit otherwise
+    # leaves git_branch NULL -- so the next run cuts a fresh branch off the
+    # default with nothing to reconcile against (#180), and
+    # `_load_source_text` then fails with "Could not read raw capture",
+    # because the capture only exists on the branch that was abandoned. That
+    # is also what makes #171's finish-by-hand recovery actually resumable.
+    _remember_source_branch(config, source_id, landed_on)
     try:
         sha = git.stage_and_commit(config.root_path, files, message)
     except git.GitError as exc:
@@ -222,21 +266,120 @@ def land_ingestion(
         # cost reported in issue #171.
         raise GitServiceError(str(exc)) from exc
 
+    # The pre-commit assertion only narrows the window; HEAD can still move
+    # between it and the commit itself. Verifying the sha actually landed on
+    # the branch we claim is what makes `landed_on` an observation rather than
+    # a label -- which is the whole thesis of this change (#181).
     try:
-        pr_url = _land_pr(config, source_id, context.branch, title, summary, files, kind, phase)
-    except GitServiceError:
-        _return_to_branch(config.root_path, context.original_branch)
+        _assert_commit_landed(config, landed_on, sha)
+    except BranchDriftError:
+        # The commit is durable, just not where we said. Record what actually
+        # happened before raising: leaving the `git_changes` row unwritten and
+        # `Source.git_branch` still naming a branch that provably lacks this
+        # commit sends the next `wakil enrich` to check out a branch with no
+        # raw capture on it, which fails with "Could not read raw capture" --
+        # verbatim the #180 symptom the early `_remember_source_branch` above
+        # exists to prevent.
+        #
+        # The pointer is *cleared*, always. Drift means HEAD is not this
+        # source's branch, so by construction the branch holding the commit
+        # belongs to someone else — the default branch (next run would push
+        # rewritten notes to `origin/main` with no PR) or, in the realistic
+        # case that `BranchDriftError`'s docstring describes, another
+        # concurrent wakil process's own ingest branch (next run would commit
+        # into *that* source's branch and adopt its PR, flipping its draft to
+        # ready). Neither is a resume target. Clearing makes the next run cut
+        # a fresh branch, and the commit is reachable from wherever it landed.
+        # The `git_changes` row below still records the true branch: that one
+        # is history, not somewhere a later run goes.
+        _record_change(
+            config, files, sha, _branch_holding(config, sha), None, title, ingest_run_id, kind
+        )
+        _remember_source_branch(config, source_id, None)
         raise
 
-    _record_change(config, files, sha, context.branch, pr_url, title, ingest_run_id, kind)
-    _return_to_branch(config.root_path, context.original_branch)
+    # Record the commit now, not after the PR. It is durable in git from this
+    # point; a push/`gh` failure used to leave a real commit with no
+    # `git_changes` row at all, and re-running could not recover because
+    # `stage_and_commit` fails outright when there is nothing left to commit.
+    _record_change(config, files, sha, landed_on, None, title, ingest_run_id, kind)
+
+    try:
+        pr_url = _land_pr(config, source_id, landed_on, title, summary, files, kind, phase)
+    except BranchDriftError:
+        # Deliberately no _return_to_default here: the whole point of
+        # detecting drift is that someone else owns this tree.
+        raise
+    except GitServiceError:
+        _return_to_default(config, landed_on)
+        raise
+
+    if pr_url:
+        _attach_pr_to_change(config, sha, pr_url, ingest_run_id)
+    returned_to = _return_to_default(config, landed_on)
     return CommitOutcome(
-        branch=context.branch,
+        branch=landed_on,
         commit_sha=sha,
         message=message,
         pr_url=pr_url,
-        returned_to=context.original_branch,
+        returned_to=returned_to,
     )
+
+
+def assert_landing_intact(config: WorkspaceConfig, context: LandingContext) -> None:
+    """Check the tree is still ours *before* writing to it.
+
+    `land_ingestion` asserts HEAD before the commit, but by then
+    `apply_capture`/`apply_enrichment` have already written — and
+    `_apply_entity_updates` rewrites *existing* notes. Under drift that meant
+    wakil edited the user's notes into another process's working tree and only
+    then refused to commit: the refusal was correct and far too late, since
+    the clobber `BranchDriftError` exists to prevent had already happened on
+    disk (working agreement item 12).
+
+    No-op for a local context, which owns no branch.
+    """
+    if context.local or context.branch is None:
+        return
+    _assert_on_branch(
+        config,
+        context.branch,
+        what="write to the knowledge base",
+        state="Nothing has been written yet.",
+    )
+
+
+def _assert_on_branch(config: WorkspaceConfig, expected: str, *, what: str, state: str) -> str:
+    """HEAD must actually be `expected` before wakil writes history.
+
+    `land_ingestion` used to commit to whatever HEAD happened to be and then
+    *print* `context.branch` — so "Committed abc123 on wakil/ingest/…" was a
+    label, not an observation, and enrichment output could land silently on
+    `main` (#181).
+
+    On a mismatch this raises `BranchDriftError` rather than switching back.
+    HEAD moving mid-landing means another process is in this working tree
+    (#182), and switching under it would clobber its work. The advisory lock
+    is what prevents the drift; this is what makes it loud.
+
+    `state` describes what is already durable at this call site. It is a
+    parameter rather than a fixed sentence because the same assertion runs
+    before the commit and again before the push, and telling a user "nothing
+    was committed" after the commit succeeded is the same
+    label-instead-of-observation defect this function exists to fix.
+    """
+    try:
+        observed = git.current_branch(config.root_path)
+    except git.GitError as exc:
+        raise GitServiceError(f"Refusing to {what}: could not read HEAD ({exc}).") from exc
+    if observed != expected:
+        raise BranchDriftError(
+            f"Refusing to {what}: expected to be on {expected!r}, but HEAD is on "
+            f"{observed!r}. Something moved this working tree since the branch was "
+            f"resolved — most likely another wakil process (check with "
+            f"`ps ax | grep 'wakil'`). {state}"
+        )
+    return observed
 
 
 @dataclass
@@ -262,7 +405,14 @@ def _resume_source_branch(config: WorkspaceConfig, state: "_SourceGitState") -> 
     # Only called when state.git_branch is truthy (see prepare_landing's guard).
     assert state.git_branch is not None
     name = state.git_branch
-    if git.branch_exists(root, name):
+    try:
+        exists = git.require_branch_exists(root, name)
+    except git.GitError as exc:
+        raise GitServiceError(
+            f"Could not check whether branch {name!r} exists ({exc}). Refusing to guess: "
+            f"treating this as 'missing' would cut a second branch for source {state.id}."
+        ) from exc
+    if exists:
         try:
             git.checkout(root, name)
         except git.GitError as exc:
@@ -276,30 +426,121 @@ def _resume_source_branch(config: WorkspaceConfig, state: "_SourceGitState") -> 
         return name
     # Branch is gone entirely -- most likely its PR was merged and GitHub
     # deleted it. Don't error: start a follow-up branch/PR for this source.
+    #
+    # Forget the recorded PR at the same time. It belongs to the branch we are
+    # abandoning, and `_land_pr` trusts a truthy `git_pr_url` unconditionally:
+    # keeping it would flip that (probably merged) PR to ready, comment on it,
+    # and record it against a commit it does not contain -- while the
+    # follow-up branch silently got no PR at all, losing the reviewable-diff
+    # boundary ADR 0003 exists to provide.
+    _forget_source_pr(config, state.id)
     return _create_fresh_branch(config, state.title or f"source-{state.id}", follow_up=True)
 
 
 def _create_fresh_branch(config: WorkspaceConfig, title: str, follow_up: bool = False) -> str:
     root = config.root_path
-    base = git.resolve_default_branch(root)
-    branch_title = f"{title} revision" if follow_up else title
-    name = ingest_branch_name(root, branch_title)
     try:
+        base = git.require_default_branch(root)
+    except git.GitError as exc:
+        raise GitServiceError(str(exc)) from exc
+    branch_title = f"{title} revision" if follow_up else title
+    try:
+        name = ingest_branch_name(root, branch_title)
         git.create_branch_from(root, name, base)
     except git.GitError as exc:
         raise GitServiceError(str(exc)) from exc
     return name
 
 
-def _remember_source_branch(config: WorkspaceConfig, source_id: int, branch: str) -> None:
+def _assert_commit_landed(config: WorkspaceConfig, branch: str, sha: str) -> None:
+    """The commit must actually be on `branch`.
+
+    Closes the window between the pre-commit HEAD assertion and the commit
+    itself: if HEAD moved in between, the commit landed elsewhere and every
+    downstream use of the branch name -- the `git_changes` row,
+    `CommitOutcome.branch`, the CLI's "Committed <sha> on <branch>" -- would
+    be a label again, which is verbatim the #181 report through a smaller
+    window.
+    """
+    try:
+        tip = git.rev_parse(config.root_path, branch)
+    except git.GitError as exc:
+        raise GitServiceError(
+            f"Committed {sha[:10]} but could not verify which branch it landed on ({exc}). "
+            f"Check `git branch --contains {sha[:10]}` before pushing."
+        ) from exc
+    if tip != sha:
+        raise BranchDriftError(
+            f"Commit {sha[:10]} did not land on {branch!r} — that branch is at "
+            f"{tip[:10]}. Something moved this working tree during the commit, most "
+            f"likely another wakil process. The commit is durable; find it with "
+            f"`git branch --contains {sha[:10]}` and move it where it belongs."
+        )
+
+
+def _branch_holding(config: WorkspaceConfig, sha: str) -> str | None:
+    """The branch a drifted commit actually landed on, if we can name one.
+
+    Prefers the current branch when it holds the commit — that is the branch
+    the other process left the tree on, and the one whose working tree has
+    the capture in it."""
+    try:
+        holders = git.branches_with_commit(config.root_path, sha)
+    except git.GitError:
+        return None
+    if not holders:
+        return None
+    try:
+        current = git.current_branch(config.root_path)
+    except git.GitError:
+        return holders[0]
+    return current if current in holders else holders[0]
+
+
+def _attach_pr_to_change(
+    config: WorkspaceConfig, sha: str, pr_url: str, ingest_run_id: int | None
+) -> None:
+    """Fill in the PR URL on the `git_changes` row recorded at commit time."""
+    with open_session(config) as session:
+        change = session.scalar(select(GitChange).where(GitChange.commit_sha == sha))
+        if change is not None:
+            change.pr_url = pr_url
+        if ingest_run_id is not None:
+            run = session.get(IngestRun, ingest_run_id)
+            if run is not None:
+                run.created_pr_url = pr_url
+        session.commit()
+
+
+def _forget_source_pr(config: WorkspaceConfig, source_id: int) -> None:
+    """Clear a recorded PR that no longer corresponds to the source's branch."""
     with open_session(config) as session:
         row = session.get(Source, source_id)
-        if row is not None and not row.git_branch:
+        if row is not None:
+            row.git_pr_url = None
+        session.commit()
+
+
+def _remember_source_branch(config: WorkspaceConfig, source_id: int, branch: str | None) -> None:
+    """Record the branch this source is landing on, or None to clear it.
+
+    Overwrites deliberately, including with None. It used to refuse when a
+    value was already present, so once `_resume_source_branch` fell through
+    to a fresh follow-up branch, the DB kept pointing at the dead one forever
+    and every later run resolved differently (#180). Clearing is what the
+    drift path wants when the commit landed somewhere a later run must not
+    resume onto — the next run then cuts a fresh branch."""
+    with open_session(config) as session:
+        row = session.get(Source, source_id)
+        if row is not None:
             row.git_branch = branch
         session.commit()
 
 
 def _remember_source_pr(config: WorkspaceConfig, source_id: int, pr_url: str) -> None:
+    if not pr_url:
+        # A falsy URL round-trips as "no PR yet" and opens a second one.
+        return
     with open_session(config) as session:
         row = session.get(Source, source_id)
         if row is not None:
@@ -307,12 +548,35 @@ def _remember_source_pr(config: WorkspaceConfig, source_id: int, pr_url: str) ->
         session.commit()
 
 
-def _return_to_branch(root, original_branch: str | None) -> None:
-    if not original_branch:
-        return
-    # Best-effort; leave on the ingest branch rather than crash post-commit.
-    with contextlib.suppress(git.GitError):
-        git.checkout(root, original_branch)
+def _return_to_default(config: WorkspaceConfig, expected: str | None = None) -> str | None:
+    """Leave the working tree on the repo's default branch.
+
+    `expected` is the branch this landing owns. When HEAD is something else,
+    another process took the tree and this returns without switching — the
+    rule is "return once the work is durable in git *and the tree is still
+    ours*, stay put otherwise", and the second clause has to live here rather
+    than in each caller. The windows are wide: `_land_pr` asserts HEAD before
+    the push, but the push plus a 120-second `gh` timeout run after that.
+
+    Best-effort otherwise: a failure here leaves the session on the ingest
+    branch, which is recoverable, whereas raising would fail a command whose
+    work is already committed and pushed. Returns the branch actually ended
+    up on, so the caller reports an observation rather than an intention."""
+    root = config.root_path
+    try:
+        current = git.current_branch(root)
+        if expected is not None and current != expected:
+            return current
+        target = git.require_default_branch(root)
+        if current != target:
+            git.checkout(root, target)
+        return git.current_branch(root)
+    except git.GitError:
+        pass
+    try:
+        return git.current_branch(root)  # report wherever we actually ended up
+    except git.GitError:
+        return None
 
 
 def _phase_comment(phase: str, title: str, summary: str | None, files: list[str]) -> str:
@@ -343,6 +607,17 @@ def _land_pr(
     info = git.inspect_git(config.root_path)
     if not info.remote_url:
         return None
+    # `gh` infers the repo from cwd and (without --head) the branch from HEAD,
+    # so a drifted HEAD would push/open against someone else's branch (#180).
+    _assert_on_branch(
+        config,
+        branch,
+        what="push and open a PR",
+        state=(
+            f"The commit itself succeeded and is on {branch!r} — it just has not been "
+            "pushed and has no PR yet. Re-run once the other process has finished."
+        ),
+    )
     try:
         git.push_branch(config.root_path, branch)
     except git.GitError as exc:
@@ -350,6 +625,16 @@ def _land_pr(
 
     state = _load_source_git_state(config, source_id)
     existing_pr = state.git_pr_url if state else None
+    if not existing_pr:
+        # Ask GitHub, not just wakil's own DB. A PR can exist without being
+        # recorded here (an interrupted earlier run, a hand-opened PR), and
+        # discovering that at `gh pr create` time is a hard failure.
+        try:
+            existing_pr = find_pull_request(config.root_path, branch)
+        except GhError as exc:
+            raise GitServiceError(str(exc)) from exc
+        if existing_pr:
+            _remember_source_pr(config, source_id, existing_pr)
     if existing_pr:
         try:
             if phase == "enrichment":
@@ -367,10 +652,16 @@ def _land_pr(
     body_lines += ["- [ ] Proposed note placement and links are correct"]
     draft = phase == "capture"
     try:
+        base = git.require_default_branch(config.root_path)
+    except git.GitError as exc:
+        raise GitServiceError(str(exc)) from exc
+    try:
         pr_url = create_pull_request(
             config.root_path,
             commit_message(kind, f"add {title}"),
             "\n".join(body_lines),
+            head=branch,
+            base=base,
             draft=draft,
         )
     except GhError as exc:

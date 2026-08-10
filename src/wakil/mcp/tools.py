@@ -16,10 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from wakil.app.git_service import (
+    BranchDriftError,
     CommitOutcome,
     GitServiceError,
     LandingContext,
     abandon_landing,
+    assert_landing_intact,
     land_ingestion,
     prepare_landing,
 )
@@ -327,8 +329,11 @@ def _land(
         # Name the branch: a failed landing deliberately leaves HEAD on the
         # ingest branch (so staged work isn't stranded), and saying nothing
         # about that moves the caller's tree silently.
-        branch = git_integration.inspect_git(config.root_path).branch
-        location = f" HEAD is on {branch}; changes may be staged there."
+        if isinstance(exc, BranchDriftError):
+            location = ""  # the exception already names both branches
+        else:
+            branch = git_integration.inspect_git(config.root_path).branch
+            location = f" HEAD is on {branch}; changes may be staged there."
         raise ToolError(
             f"Landing failed: {exc} (written files are still on disk for manual review)."
             f"{location}"
@@ -398,6 +403,10 @@ def ingest_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str
     except GitServiceError as exc:
         raise ToolError(str(exc)) from exc
 
+    try:
+        assert_landing_intact(config, landing)
+    except GitServiceError as exc:
+        raise ToolError(str(exc)) from exc
     try:
         result = apply_capture(config, proposal)
     except IngestError as exc:
@@ -502,6 +511,13 @@ def enrich_apply(config: WorkspaceConfig, cache: ProposalCache, proposal_id: str
     except ProposalNotFoundError as exc:
         raise ToolError(str(exc)) from exc
 
+    try:
+        # The prepare/apply gap is unbounded (ADR 0018), and
+        # `apply_enrichment` rewrites existing notes -- check the tree is
+        # still ours before it does, not just before the commit.
+        assert_landing_intact(config, landing)
+    except GitServiceError as exc:
+        raise ToolError(str(exc)) from exc
     try:
         result = apply_enrichment(config, proposal)
     except IngestError as exc:

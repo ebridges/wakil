@@ -2,6 +2,15 @@
 
 Read helpers return None/empty on failure (status display must never crash);
 write helpers raise GitError so callers can surface what went wrong.
+
+That tolerance is right for *display* and wrong for *decisions*. A read whose
+answer gates a branch/commit decision has a checked sibling that raises rather
+than guessing -- `status_lines` over `changed_files`, `require_branch_exists`
+over `branch_exists`, `require_default_branch` over `resolve_default_branch`.
+Guessing here is not harmless: a failed `git status` read as "tree is clean"
+commits on top of the user's uncommitted work, and a failed `branch_exists`
+read as "no such branch" cuts a second branch for a source that already had
+one. Use the tolerant form for anything that only renders.
 """
 
 import contextlib
@@ -107,6 +116,25 @@ def _run_git(root: Path, *args: str) -> str | None:
     return result.stdout.strip()
 
 
+def _run_git_probe(root: Path, *args: str, timeout: int = 60) -> tuple[int, str]:
+    """Exit code plus output, for probes where a non-zero code is a legitimate
+    answer ("no such ref") rather than a failure. Anything git can't run at
+    all still raises -- that is not an answer.
+
+    Named "probe", not "status": it has nothing to do with `git status` (see
+    `status_lines` two definitions down), it returns an exit *status*."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GitError(f"git {args[0]} failed: {exc}") from exc
+    return result.returncode, (result.stdout or result.stderr).strip()
+
+
 def _run_git_checked(root: Path, *args: str, timeout: int = 60) -> str:
     try:
         result = subprocess.run(
@@ -126,23 +154,44 @@ def _run_git_checked(root: Path, *args: str, timeout: int = 60) -> str:
 
 
 def changed_files(root: Path) -> list[str]:
-    """Porcelain status lines, e.g. ' M notes/a.md' or '?? drafts/new.md'."""
+    """Porcelain status lines, e.g. ' M notes/a.md' or '?? drafts/new.md'.
+
+    Display-only: an empty list can mean "clean" *or* "couldn't tell". Use
+    `status_lines` when the answer gates a write."""
     porcelain = _run_git(root, "status", "--porcelain")
     return porcelain.splitlines() if porcelain else []
+
+
+def status_lines(root: Path) -> list[str]:
+    """`changed_files`, but a failed read raises instead of reporting a clean
+    tree -- which would let wakil branch and commit on top of the user's
+    uncommitted work."""
+    return _run_git_checked(root, "status", "--porcelain").splitlines()
+
+
+def current_branch(root: Path) -> str:
+    """The branch HEAD actually points at, right now. Raises on a detached
+    HEAD or an unreadable repo rather than returning a plausible guess --
+    every caller uses this to decide where a commit is about to land."""
+    name = _run_git_checked(root, "rev-parse", "--abbrev-ref", "HEAD")
+    if not name or name == "HEAD":
+        raise GitError("HEAD is detached; wakil needs a named branch to commit onto.")
+    return name
 
 
 def create_branch(root: Path, name: str) -> None:
     _run_git_checked(root, "switch", "-c", name)
 
 
-def create_branch_from(root: Path, name: str, base: str | None) -> None:
+def create_branch_from(root: Path, name: str, base: str) -> None:
     """Create and switch to `name`, branching from `base` (a local branch
     name, e.g. the repo's default branch) rather than whatever is currently
-    checked out. Falls back to branching from current HEAD when `base` is
-    None (no resolvable default branch)."""
-    if base is None:
-        _run_git_checked(root, "switch", "-c", name)
-        return
+    checked out.
+
+    `base` is required. It used to accept None and fall back to branching
+    from current HEAD, which meant an unreadable `origin/HEAD` symref quietly
+    cut a fresh "ingest" branch off whatever unrelated branch happened to be
+    checked out -- see `require_default_branch`."""
     remote_ref = f"origin/{base}"
     _run_git(root, "fetch", "origin", base)  # best-effort refresh; ignore failure
     if _run_git(root, "rev-parse", "--verify", remote_ref) is not None:
@@ -152,7 +201,22 @@ def create_branch_from(root: Path, name: str, base: str | None) -> None:
 
 
 def branch_exists(root: Path, name: str) -> bool:
+    """Display-only: False can mean "no such branch" *or* "couldn't tell"."""
     return _run_git(root, "rev-parse", "--verify", f"refs/heads/{name}") is not None
+
+
+def require_branch_exists(root: Path, name: str) -> bool:
+    """`branch_exists`, but a git failure raises instead of answering False.
+
+    A false "no" here is expensive: `_resume_source_branch` falls through to
+    cutting a *second* branch for a source that already had one, and the DB's
+    recorded branch then permanently disagrees with the branch in use."""
+    code, detail = _run_git_probe(root, "show-ref", "--verify", "--quiet", f"refs/heads/{name}")
+    if code == 0:
+        return True
+    if code == 1:
+        return False
+    raise GitError(f"git show-ref failed while checking for branch {name!r}: {detail}")
 
 
 def checkout(root: Path, name: str) -> None:
@@ -201,6 +265,41 @@ def resolve_default_branch(root: Path) -> str | None:
         if branch_exists(root, candidate):
             return candidate
     return None
+
+
+def require_default_branch(root: Path) -> str:
+    """`resolve_default_branch`, but unresolvable is an error rather than a
+    licence to branch from whatever is checked out."""
+    name = resolve_default_branch(root)
+    if not name:
+        # Phrased as what was attempted, not as a finding: both underlying
+        # reads are tolerant, so a falsy answer means "no information" rather
+        # than "definitely absent" -- see DEVELOPMENT.md on checked reads.
+        raise GitError(
+            "Could not determine the repository's default branch: could not read "
+            "origin/HEAD, and no local main/master was found. Set one with "
+            "`git remote set-head origin --auto`, or use --local."
+        )
+    return name
+
+
+def rev_parse(root: Path, ref: str) -> str:
+    """Resolve a ref to its sha. Checked: callers use this to verify where a
+    commit actually landed, so "couldn't tell" must not read as "matches"."""
+    return _run_git_checked(root, "rev-parse", "--verify", f"{ref}^{{commit}}")
+
+
+def branches_with_commit(root: Path, sha: str) -> list[str]:
+    """Local branches whose history contains `sha`, in git's own order
+    (refname-alphabetical, not tip-first — the caller picks, not the order).
+
+    Tolerant, not checked: the only caller is already reporting a failure and
+    is trying to say something more useful than "somewhere". Empty means we
+    could not tell, which the caller must not read as "nowhere"."""
+    out = _run_git(root, "branch", "--contains", sha, "--format=%(refname:short)")
+    if not out:
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
 
 
 def stage_and_commit(root: Path, paths: list[str], message: str) -> str:
