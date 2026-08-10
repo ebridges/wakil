@@ -161,3 +161,18 @@ Before assuming a killed/crashed `wakil enrich` run — or one that failed `vali
 Each of those is a silent wrong action produced by a failed read, not by a wrong answer. The fix is a pair per read: keep the tolerant form for display (`changed_files`, `branch_exists`, `resolve_default_branch`, `inspect_git`) and add a checked sibling that raises (`status_lines`, `require_branch_exists`, `require_default_branch`, `current_branch`). Where a non-zero exit is itself a legitimate answer — "no such ref" — use a tri-state probe (`_run_git_probe`) so "absent" and "couldn't run git" stay distinguishable.
 
 The generalizable rule: **before using a subprocess-wrapper's return value, ask what it returns when the subprocess fails, and whether that value is safe as an answer.** `None`-on-failure is a fine contract, but it means "no information", and code that treats it as "no" will act. This applies equally to `integrations/github.py` (a `gh` auth failure must not read as "there is no PR") and to any future wrapper of an external binary.
+
+### Instants stay UTC; calendar dates are local
+
+**Established:** 2026-08-07 · **Source:** issue #174, `workspace_today()` in `src/wakil/config/settings.py`
+
+Every user-visible date in wakil used to come from `datetime.now(UTC).date()`. For a single-user local tool that is simply wrong: a capture run at 20:49 US-Eastern is already tomorrow in UTC, so four consecutive evening ingests in one session were all stamped a day ahead of the meetings they recorded — in the auto-generated `title`, in `captured`/`created`, and in the raw file's own date-prefixed filename.
+
+The fix draws a line that any new date-producing code needs to stay on the right side of:
+
+- **A calendar date a human reads is local.** `created`/`retrieved` frontmatter, the date prefix on a raw capture's filename, Timeline entry headings, and the "today" passed into a prompt. These go through `workspace_today(config)` for "now", or `workspace_date(config, instant)` for a value that is already a timestamp (a `.whisper` archive's `dateCreated`, a `Source.retrieved_at`) — both honour the workspace's optional `timezone:` key and otherwise use the machine's local zone. Never call `.date()` on a UTC-aware datetime to get one of these; that yields the UTC day, which is the whole bug.
+
+  Two deliberate exceptions: the `wakil/ingest/<date>-<slug>` branch name is still UTC (`git_service.py`), left alone to avoid conflicting with in-flight work on that file — a branch name is not knowledge-base content. And an authored `captured:`/`date:` value in an input file is the *user's own* date, preserved verbatim rather than converted.
+- **An instant used for ordering or arithmetic stays UTC.** `storage/schema.py`'s `utcnow()` still backs every `created_at`/`retrieved_at`/`last_seen_at` column. These are timestamps, not dates: `memory_service.retrieval_rank`'s age computation and every `ORDER BY` depend on a single monotonic reference, and making them local would break both across a DST boundary.
+
+Two practical consequences worth knowing before writing the next date-touching test or helper. First, `tests/conftest.py` now pins `TZ=UTC` (with `time.tzset()`), because otherwise a test asserting a date in a filename passes in a UTC CI runner and fails on a US-Eastern laptop — pin or freeze the clock rather than asserting today's date directly. Second, `workspace_today` needs a `WorkspaceConfig`, and several enrichment helpers deep in `ingest_service.py` don't have one in scope; those take an explicit `today: str` parameter computed by a caller that does, rather than acquiring a config just to read a date. Prefer that over threading `config` through another layer.

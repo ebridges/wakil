@@ -17,7 +17,9 @@ FTS/QMD index — instead of each silently getting its own, empty one.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -60,6 +62,11 @@ class WorkspaceConfig(BaseModel):
     qmd_enabled: bool = False
     ingest_directory: str = Field(default="sources")
     generated_directory: str = Field(default="drafts")
+    # IANA name (e.g. "America/New_York"). None means the machine's local
+    # zone, which is what "today" means for a single-user local tool. Only
+    # worth setting when wakil runs on a host in a different zone than the
+    # person using it. See `workspace_today`.
+    timezone: str | None = Field(default=None)
 
     @model_validator(mode="after")
     def _default_state_root(self) -> WorkspaceConfig:
@@ -114,6 +121,59 @@ class WorkspaceConfig(BaseModel):
         data["root_path"] = str(root)
         data["state_root"] = str(state_root)
         return cls.model_validate(data)
+
+
+def workspace_today(config: WorkspaceConfig) -> str:
+    """The user's calendar date, as an ISO string.
+
+    This is what every user-visible date means: `created`/`retrieved`
+    frontmatter, the date prefix on a raw capture's filename, Timeline entry
+    headings, and the "today" passed into the capture-metadata prompt. (The
+    date in a `wakil/ingest/<date>-<slug>` branch name is still UTC — see
+    docs/DEVELOPMENT.md for why that one is left alone.)
+
+    It is deliberately *not* UTC. Everything used to be `datetime.now(UTC)`,
+    so an ingest run at 20:49 US-Eastern was stamped with tomorrow's date --
+    four consecutive evening captures in one session all came out a day ahead
+    of the meetings they recorded (#174).
+
+    Note the distinction this draws: **instants stay UTC, calendar dates are
+    local.** `storage/schema.py`'s `utcnow()` still backs every `created_at`/
+    `retrieved_at`/`last_seen_at` column, because those are timestamps for
+    ordering and age arithmetic (`memory_service.retrieval_rank` depends on
+    it), not dates a human reads.
+    """
+    return datetime.now(_workspace_zone(config)).date().isoformat()
+
+
+def workspace_date(config: WorkspaceConfig, instant: datetime) -> str:
+    """The local calendar date an *instant* falls on, ISO.
+
+    The companion to `workspace_today` for values that are already timestamps
+    rather than "now": a `.whisper` archive's `dateCreated`, a `Source`'s
+    `retrieved_at`. Both are absolute instants, and `.date()` on them yields
+    the UTC day -- so a 20:49 US-Eastern recording lands on tomorrow, which
+    is #174's exact symptom showing up somewhere `workspace_today` can't
+    reach.
+
+    A naive datetime (SQLite hands these back for UTC columns) is assumed to
+    be UTC, matching what `utcnow()` wrote.
+    """
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=UTC)
+    return instant.astimezone(_workspace_zone(config)).date().isoformat()
+
+
+def _workspace_zone(config: WorkspaceConfig) -> tzinfo | None:
+    """`None` means "the machine's local zone" to `datetime.now`, which is the
+    default we want. An unknown IANA name falls back to local rather than
+    failing a capture over a config typo."""
+    if not config.timezone:
+        return None
+    try:
+        return ZoneInfo(config.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
 
 
 def is_initialized(root: Path) -> bool:

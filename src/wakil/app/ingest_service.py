@@ -45,7 +45,7 @@ from sqlalchemy.orm import Session
 
 from wakil.app.search_service import SearchHit, search_workspace
 from wakil.app.workspace_service import index_notes, open_session
-from wakil.config.settings import WorkspaceConfig
+from wakil.config.settings import WorkspaceConfig, workspace_date, workspace_today
 from wakil.integrations.web import fetch_article
 from wakil.knowledge.wikilinks import WIKILINK_RE as _WIKILINK_RE
 from wakil.knowledge.wikilinks import normalize_target as _normalize_link_path
@@ -280,7 +280,7 @@ def prepare_capture(
         if file is None:
             raise IngestError(f"{kind} ingest needs a file path")
         if kind == "transcript" and file.suffix.lower() == ".whisper":
-            text, recorded_at = parse_whisper_transcript(file)
+            text, recorded_at = parse_whisper_transcript(file, config)
             meeting_date = infer_meeting_date(file, text) or recorded_at
         elif kind == "transcript" and file.suffix.lower() == ".json":
             text = parse_json_transcript(file)
@@ -406,7 +406,7 @@ def prepare_capture(
     if authored_title and authored_abstract:
         proposal.title, proposal.abstract = authored_title, authored_abstract
     else:
-        metadata = _generate_capture_metadata(client, kind, origin, text, context)
+        metadata = _generate_capture_metadata(config, client, kind, origin, text, context)
         proposal.title = authored_title or metadata.title
         # Keep the DB row and the file's frontmatter agreeing: `_build_raw_file`
         # would otherwise write the authored abstract while `Source` kept the
@@ -427,11 +427,16 @@ def _authored_text(metadata: dict, *keys: str) -> str | None:
 
 
 def _generate_capture_metadata(
-    client: ModelClient, source_type: str, origin: str, text: str, context: str | None
+    config: WorkspaceConfig,
+    client: ModelClient,
+    source_type: str,
+    origin: str,
+    text: str,
+    context: str | None,
 ) -> CaptureMetadata:
     """The one model call capture makes (docs/adr/0010): title + abstract,
     grounded in the captured text itself rather than just the filename."""
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     prompt = build_capture_metadata_prompt(
         source_type, origin, text[:MAX_SOURCE_CHARS], today, context=context
     )
@@ -543,7 +548,12 @@ def plan_abstract_backfill(
             except IngestError:
                 continue
             generated = _generate_capture_metadata(
-                client, source.source_type, source.origin or "", text, metadata.get("context")
+                config,
+                client,
+                source.source_type,
+                source.origin or "",
+                text,
+                metadata.get("context"),
             )
             items.append(
                 AbstractBackfillItem(
@@ -1051,7 +1061,10 @@ def prepare_enrichment(
         # (issue #77) — retrieved_at is set at capture time for every
         # source; created_at covers the rare row without it.
         captured_at = source.retrieved_at or source.created_at
-        source_captured_date = captured_at.date().isoformat() if captured_at else None
+        # An absolute instant, so `.date()` would give the UTC day -- and this
+        # one is written into an append-only Timeline heading, so a wrong date
+        # here is permanent in the user's KB.
+        source_captured_date = workspace_date(config, captured_at) if captured_at else None
         context = context or metadata.get("context")
         context_digest = context_digest or metadata.get("context_digest")
         context_referenced_paths = (
@@ -1466,6 +1479,7 @@ def _correct_proposed_note_type(
     resolution: EntityResolution,
     schema: EntitySchema,
     proposal: "EnrichmentProposal",
+    today: str,
 ) -> ProposedFile:
     """When a create-resolution's subject matches proposed_note's own
     subject (see `_proposed_note_subject_slug`) but entity-resolution
@@ -1502,7 +1516,6 @@ def _correct_proposed_note_type(
         return proposed_note
 
     existing_label = str(metadata.get("name") or metadata.get("title") or resolution.name)
-    today = datetime.now(UTC).date().isoformat()
     new_metadata = _populate_type_frontmatter(
         schema, resolution.entity_type, resolution.proposed_frontmatter, existing_label, today
     )
@@ -1557,6 +1570,7 @@ def _suppress_duplicate_of_proposed_note(
     schema: EntitySchema,
     proposal: EnrichmentProposal,
     taken: set[str],
+    today: str,
     proposed_note_slug: str | None,
 ) -> bool:
     """Suppress `resolution` when its subject duplicates proposal.proposed_note
@@ -1570,7 +1584,7 @@ def _suppress_duplicate_of_proposed_note(
     if proposal.proposed_note is not None:
         old_path = proposal.proposed_note.path
         proposal.proposed_note = _correct_proposed_note_type(
-            proposal.proposed_note, resolution, schema, proposal
+            proposal.proposed_note, resolution, schema, proposal, today
         )
         if proposal.proposed_note.path != old_path:
             taken.discard(old_path)
@@ -1652,7 +1666,7 @@ def _build_stub_entities(
     domain entity that guidance was meant to produce.
     """
     schemas = load_entity_schemas(config.root_path)
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     stubs: list[ProposedFile] = []
     taken = {proposal.proposed_note.path} if proposal.proposed_note else set()
     kept_resolutions: list[EntityResolution] = []
@@ -1681,7 +1695,7 @@ def _build_stub_entities(
             )
             continue
         if _suppress_duplicate_of_proposed_note(
-            resolution, schema, proposal, taken, proposed_note_slug
+            resolution, schema, proposal, taken, today, proposed_note_slug
         ):
             kept_resolutions.append(resolution)
             continue
@@ -1957,7 +1971,7 @@ def _synthesize_stub_content(
         )
         return
 
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     by_path = {stub.path: stub for stub in stubs}
     for revision in result.revisions:
         stub = by_path.get(revision.target_note_path)
@@ -2422,8 +2436,8 @@ def _apply_entity_revisions(
     proposal: EnrichmentProposal,
     candidates: list[_EntityCandidate],
     revisions: list[EntityRevision],
+    today: str,
 ) -> None:
-    today = datetime.now(UTC).date().isoformat()
     by_path = {res.target_note_path: content for res, _, content in candidates}
     name_by_path = {res.target_note_path: res.name for res, _, _ in candidates}
     for revision in revisions:
@@ -2508,7 +2522,7 @@ def _revise_candidates(
         )
         return
 
-    _apply_entity_revisions(proposal, candidates, result.revisions)
+    _apply_entity_revisions(proposal, candidates, result.revisions, workspace_today(config))
 
 
 def _stub_content(metadata: dict, name: str) -> str:
@@ -2920,7 +2934,7 @@ def prepare_entity_compile(config: WorkspaceConfig, client: ModelClient, slug: s
         timeline_entry=None,
         frontmatter_updates=None,
     )
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     new_content = _merge_entity_note(old_content, revision, today)
     if new_content is None:
         # Shouldn't happen — _split_note_sections above already validated
@@ -2998,7 +3012,7 @@ def prepare_entity_full_resynthesis(
         timeline_entry=None,
         frontmatter_updates=None,
     )
-    today = datetime.now(UTC).date().isoformat()
+    today = workspace_today(config)
     new_content = _merge_entity_note(old_content, revision, today)
     if new_content is None:
         # Shouldn't happen — _split_note_sections above already validated
@@ -3034,7 +3048,7 @@ def compiled_truth_text(content: str) -> str | None:
 
 
 def rebuild_entity_update_with_compiled_truth(
-    update: EntityUpdate, compiled_truth: str
+    update: EntityUpdate, compiled_truth: str, today: str
 ) -> EntityUpdate | None:
     """Re-run the deterministic merge (docs/adr/0017, Stage 1's "Edit"
     choice) with `compiled_truth` — e.g. text a user hand-edited via
@@ -3053,7 +3067,6 @@ def rebuild_entity_update_with_compiled_truth(
         timeline_entry=None,
         frontmatter_updates=None,
     )
-    today = datetime.now(UTC).date().isoformat()
     new_content = _merge_entity_note(update.old_content, revision, today)
     if new_content is None:
         return None
@@ -3152,11 +3165,19 @@ def _strip_filler_words(text: str) -> str:
 _WHISPER_EPOCH = datetime(2001, 1, 1, tzinfo=UTC)
 
 
-def _whisper_recorded_at(raw_seconds: object) -> str | None:
+def _whisper_recorded_at(raw_seconds: object, config: WorkspaceConfig) -> str | None:
+    """The local calendar date a recording was made.
+
+    Apple's `dateCreated` is an absolute instant (NSDate seconds), so
+    `.date()` on it yields the *UTC* day -- an evening US-Eastern recording
+    would be filed a day late, and `meeting_date` beats `created` for the
+    filename prefix, so the wrong date would reach both the frontmatter and
+    the path (#174).
+    """
     if not isinstance(raw_seconds, int | float):
         return None
     try:
-        return (_WHISPER_EPOCH + timedelta(seconds=raw_seconds)).date().isoformat()
+        return workspace_date(config, _WHISPER_EPOCH + timedelta(seconds=raw_seconds))
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -3195,7 +3216,7 @@ def _dialogue_from_segments(segments: list[dict], speaker_of: Callable[[dict], s
     return "\n\n".join(f"**{speaker}**: {' '.join(parts)}" for speaker, parts in turns)
 
 
-def parse_whisper_transcript(file: Path) -> tuple[str, str | None]:
+def parse_whisper_transcript(file: Path, config: WorkspaceConfig) -> tuple[str, str | None]:
     """Extract speaker-labeled dialogue from an Apple-style .whisper archive.
 
     A `.whisper` file is a zip containing `metadata.json`: diarized
@@ -3216,7 +3237,7 @@ def parse_whisper_transcript(file: Path) -> tuple[str, str | None]:
     if not dialogue:
         raise IngestError(f"{file}: transcript segments contained no text")
 
-    recorded_at = _whisper_recorded_at(data.get("dateCreated"))
+    recorded_at = _whisper_recorded_at(data.get("dateCreated"), config)
     return dialogue, recorded_at
 
 
@@ -3586,7 +3607,7 @@ def _build_raw_file(
     non-deterministic and break capture's idempotent-by-content-hash dedup
     across identical re-ingests.
     """
-    created = datetime.now(UTC).date().isoformat()
+    created = workspace_today(config)
     directory = Path(config.ingest_directory) / RAW_DIRS.get(proposal.source_type, "clippings")
     # slug_source already had any leading date stripped (for file-derived
     # captures, in prepare_capture; article titles never carry one to begin
