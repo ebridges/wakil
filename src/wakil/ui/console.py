@@ -234,8 +234,9 @@ def print_capture_proposal(proposal: CaptureProposal) -> None:
             f"[yellow]warning:[/yellow] {destination} is the raw capture of source "
             f"[bold]#{owned}[/bold]. Capture will refuse it even with "
             f"[bold]--overwrite[/bold], because both sources would then point at the "
-            f"same file. Rename the input so it lands elsewhere, or move source "
-            f"#{owned}'s file aside first."
+            f"same file. Archive source #{owned} if this capture supersedes it "
+            f"([bold]wakil sources archive {owned}[/bold]), which frees the path; "
+            f"otherwise rename the input so it lands elsewhere."
         )
     elif proposal.collision:
         if replacing:
@@ -260,6 +261,7 @@ def print_capture_result(result: CaptureResult) -> None:
     else:
         marker = f"[green]+ {result.raw_file_path}[/green]"
     console.print(f"Captured source [bold]#{result.source_id}[/bold]: {marker}")
+    print_source_relinks(result.sources_relinked)
     console.print(
         f"[dim]Analyze and link it into the knowledge base with "
         f"`wakil enrich {result.source_id}`.[/dim]"
@@ -446,6 +448,7 @@ def print_enrichment_result(result: EnrichmentResult) -> None:
         console.print(f"  [green]+ {path}[/green]")
     for skipped in result.stale_updates_skipped:
         console.print(f"  [yellow]skipped:[/yellow] {escape(skipped)}")
+    print_source_relinks(result.sources_relinked)
     console.print(
         "[dim]Review files with git diff/status; review memories with "
         "`wakil memory list --state candidate`.[/dim]"
@@ -593,11 +596,18 @@ def print_sources(sources: list[SourceSummary]) -> None:
     table.add_column("Branch")
     table.add_column("PR")
     for source in sources:
+        # `--include-archived` exists to *see* the archived ones, so the table
+        # has to say which they are — otherwise it takes a `show` per row.
+        status = (
+            f"[yellow]archived[/yellow] ({source.status})"
+            if source.archived_at
+            else _styled_source_status(source.status)
+        )
         table.add_row(
             str(source.id),
             source.source_type,
             source.title or "-",
-            _styled_source_status(source.status),
+            status,
             str(source.created_at),
             "[green]yes[/green]" if source.git_branch else "[dim]-[/dim]",
             "[green]yes[/green]" if source.git_pr_url else "[dim]-[/dim]",
@@ -607,6 +617,21 @@ def print_sources(sources: list[SourceSummary]) -> None:
 
 
 def print_source_detail(source: SourceSummary) -> None:
+    if source.archived_at:
+        # A banner rather than a table row: an archived source is not a
+        # normal one, and the point of #183 is that this must be impossible
+        # to miss when you go looking at a row that stopped making sense.
+        detail = f", superseded by #{source.superseded_by_id}" if source.superseded_by_id else ""
+        # `--reason` is arbitrary user text and a wikilink in it ("superseded,
+        # see [[projects/fnol]]") is exactly the shape docs/TROUBLESHOOTING.md
+        # records Rich silently eating.
+        reason = f"\n{escape(source.archive_reason)}" if source.archive_reason else ""
+        console.print(
+            Panel(
+                f"[bold]Archived[/bold] {source.archived_at:%Y-%m-%d}{detail}{reason}",
+                border_style="yellow",
+            )
+        )
     table = Table(title=f"Source #{source.id}", show_header=False)
     table.add_column("Field", style="bold cyan")
     table.add_column("Value")
@@ -665,6 +690,18 @@ def print_index_result(result: IndexResult) -> None:
         f"{result.unchanged} unchanged, "
         f"[red]{result.removed} removed[/red])"
     )
+    print_source_relinks(result.sources_relinked)
+
+
+def print_source_relinks(relinks) -> None:
+    """Every path that indexes reports its own repoints — `wakil index` is not
+    the only command that indexes, and a pointer wakil moved on its own
+    initiative has to be visible wherever it happens (working agreement 12)."""
+    for relink in relinks:
+        console.print(
+            f"  [cyan]source #{relink.source_id}[/cyan] now points at "
+            f"{escape(relink.new_path)} [dim](was {escape(relink.old_path)})[/dim]"
+        )
 
 
 def print_root_issues(issues: list[RootIssue], *, prefix: str = "Warning") -> None:

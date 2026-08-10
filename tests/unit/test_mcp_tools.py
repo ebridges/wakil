@@ -346,3 +346,37 @@ def test_enrich_prepare_blocks_on_invalid_proposed_note(git_kb, transcript, monk
 def test_enrich_apply_unknown_proposal_id_raises(git_kb):
     with pytest.raises(tools.ToolError, match="No pending enrichment proposal"):
         tools.enrich_apply(git_kb, ProposalCache(), "not-a-real-id")
+
+
+def test_sources_relink_archive_unarchive_over_mcp(workspace, transcript, kb_path):
+    """These three are single-call writes by design (ADR 0018 amendment), so
+    their errors are the only gate an agent gets — they have to arrive as
+    `ToolError`, not as a raw `IngestError`."""
+    from wakil.app.ingest_service import apply_capture, prepare_capture
+
+    proposal = prepare_capture(
+        workspace, "transcript", FakeClient([CAPTURE_METADATA_JSON]), file=transcript
+    )
+    source_id = apply_capture(workspace, proposal).source_id
+
+    moved = kb_path / "sources" / "transcripts" / "hand-fixed.md"
+    moved.write_text("---\ntype: source\n---\n\n# Fixed\n", encoding="utf-8")
+    relinked = tools.sources_relink(workspace, source_id, "sources/transcripts/hand-fixed.md")
+    assert relinked["raw_text_path"] == "sources/transcripts/hand-fixed.md"
+
+    # An agent-callable tool must not be able to point a source outside the
+    # workspace, or into wakil's own state.
+    with pytest.raises(tools.ToolError, match="outside the knowledge base"):
+        tools.sources_relink(workspace, source_id, "/etc/hosts")
+    with pytest.raises(tools.ToolError):
+        tools.sources_relink(workspace, source_id, "../escape.md")
+
+    archived = tools.sources_archive(workspace, source_id, reason="wrong recording")
+    assert archived["archived_at"] is not None
+    assert not any(r["id"] == source_id for r in tools.sources_list(workspace))
+
+    restored = tools.sources_unarchive(workspace, source_id)
+    assert restored["archived_at"] is None
+
+    with pytest.raises(tools.ToolError):
+        tools.sources_archive(workspace, source_id + 1000)

@@ -34,7 +34,9 @@ from wakil.app.ingest_service import (
     apply_enrichment,
     apply_entity_compile,
     clean_transcript,
+    get_source,
     infer_meeting_date,
+    list_sources,
     parse_json_transcript,
     parse_whisper_transcript,
     plan_abstract_backfill,
@@ -4873,3 +4875,312 @@ def test_a_missing_update_target_is_recorded_not_just_warned(workspace):
         "concepts/only-on-another-branch.md"
     ]
     assert any("skipped" in w for w in proposal.warnings)
+
+
+# --------------------------------------------------------------------------
+# Source lifecycle: relink and archive (issues #178, #183)
+
+
+def test_index_follows_a_renamed_raw_capture(workspace, kb_path, transcript):
+    """Issue #178: `index` noticed the move for the notes table but nothing
+    propagated it to sources.raw_text_path, so `enrich` kept failing with
+    'Could not read raw capture <old path>' and there was no way to fix it."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    old_path = proposal.raw_file.path
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    new_path = "sources/transcripts/2026-07-09-canonical-name.md"
+    (kb_path / new_path).write_bytes((kb_path / old_path).read_bytes())
+    (kb_path / old_path).unlink()
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    assert get_source(workspace, source_id).raw_text_path == new_path
+
+
+def test_index_reports_the_sources_it_repointed(workspace, kb_path, transcript):
+    """wakil changing a pointer into the user's knowledge base on its own
+    initiative has to say so — a wrong guess sends `enrich` at the wrong
+    file, and the run was previously silent about it entirely."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    old_path = proposal.raw_file.path
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    new_path = "sources/transcripts/2026-07-09-canonical-name.md"
+    (kb_path / new_path).write_bytes((kb_path / old_path).read_bytes())
+    (kb_path / old_path).unlink()
+
+    with open_session(workspace) as session:
+        result = index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    assert [(r.source_id, r.old_path, r.new_path) for r in result.sources_relinked] == [
+        (source_id, old_path, new_path)
+    ]
+
+
+def test_index_does_not_guess_when_the_file_was_edited_as_well_as_moved(
+    workspace, kb_path, transcript
+):
+    """Content-identical only: repointing a source at a file that merely
+    appeared is worse than leaving it stale."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    old_path = proposal.raw_file.path
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    new_path = "sources/transcripts/2026-07-09-edited.md"
+    (kb_path / new_path).write_text(
+        (kb_path / old_path).read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8"
+    )
+    (kb_path / old_path).unlink()
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    assert get_source(workspace, source_id).raw_text_path == old_path  # unchanged, not guessed
+
+
+def test_relink_points_a_source_at_its_current_path(workspace, kb_path, transcript):
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+
+    moved = "sources/transcripts/2026-07-09-hand-fixed.md"
+    (kb_path / moved).write_text("---\ntype: source\n---\n\n# Fixed\n", encoding="utf-8")
+
+    assert relink_source(workspace, source_id, moved).raw_text_path == moved
+    with pytest.raises(IngestError, match="No file at"):
+        relink_source(workspace, source_id, "sources/transcripts/nope.md")
+
+
+def test_relink_refuses_a_target_outside_the_workspace(workspace, kb_path, transcript, tmp_path):
+    """`raw_text_path` is trusted downstream — `enrich` reads the file and puts
+    its contents in a model prompt — and the path is caller-supplied, on the
+    CLI and on the `sources_relink` MCP tool alike."""
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    original = proposal.raw_file.path
+
+    outside = tmp_path / "secrets.md"
+    outside.write_text("not part of the knowledge base\n", encoding="utf-8")
+
+    for escape_attempt in (str(outside), f"../{outside.name}"):
+        with pytest.raises(IngestError, match="outside the knowledge base"):
+            relink_source(workspace, source_id, escape_attempt)
+
+    assert get_source(workspace, source_id).raw_text_path == original
+
+
+def test_relink_stores_the_workspace_relative_path(workspace, kb_path, transcript):
+    """An absolute path inside the workspace is accepted, but normalized —
+    everything downstream joins `raw_text_path` onto the root."""
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+
+    moved = "sources/transcripts/2026-07-09-hand-fixed.md"
+    (kb_path / moved).write_text("---\ntype: source\n---\n\n# Fixed\n", encoding="utf-8")
+
+    result = relink_source(workspace, source_id, str(kb_path / moved))
+    assert result.raw_text_path == moved
+
+
+def test_archive_hides_a_source_from_the_default_listing(workspace, transcript, kb_path):
+    from wakil.app.ingest_service import archive_source, unarchive_source
+
+    first = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    dead_id = apply_capture(workspace, first).source_id
+    other = kb_path / "second.txt"
+    other.write_text("A different conversation.\n", encoding="utf-8")
+    second = prepare_capture(workspace, "transcript", _capture_client(), file=other)
+    live_id = apply_capture(workspace, second).source_id
+
+    archived = archive_source(
+        workspace, dead_id, reason="corrupted content committed", superseded_by=live_id
+    )
+    assert archived.archived_at is not None
+    assert archived.superseded_by_id == live_id
+
+    assert [s.id for s in list_sources(workspace)] == [live_id]
+    assert dead_id in [s.id for s in list_sources(workspace, include_archived=True)]
+    # `show` still works -- the row is history, not deleted.
+    assert get_source(workspace, dead_id).archive_reason == "corrupted content committed"
+
+    assert unarchive_source(workspace, dead_id).archived_at is None
+    assert dead_id in [s.id for s in list_sources(workspace)]
+
+
+def test_archive_rejects_a_self_reference_and_an_unknown_superseder(workspace, transcript):
+    from wakil.app.ingest_service import archive_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+
+    with pytest.raises(IngestError, match="cannot supersede itself"):
+        archive_source(workspace, source_id, superseded_by=source_id)
+    with pytest.raises(IngestError, match="No source with id"):
+        archive_source(workspace, source_id, superseded_by=9999)
+
+
+def test_relink_refuses_a_path_another_source_owns(workspace, kb_path, transcript):
+    """The same one-source-per-path invariant `apply_capture` enforces —
+    without it relink is a back door to the silent misattribution capture
+    refuses, and this one is agent-callable over MCP."""
+    from wakil.app.ingest_service import relink_source
+
+    first = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    owner_id = apply_capture(workspace, first).source_id
+
+    other = kb_path / "another.txt"
+    other.write_text("Jane: a different call entirely.\n", encoding="utf-8")
+    second = prepare_capture(workspace, "transcript", _capture_client(), file=other)
+    second_id = apply_capture(workspace, second).source_id
+    original = second.raw_file.path
+
+    with pytest.raises(IngestError, match=f"raw capture of source #{owner_id}"):
+        relink_source(workspace, second_id, first.raw_file.path)
+    assert get_source(workspace, second_id).raw_text_path == original
+
+    # Relinking a source to the path it already holds is a no-op, not a clash.
+    assert relink_source(workspace, second_id, original).raw_text_path == original
+
+
+def test_relink_refuses_tooling_directories(workspace, kb_path, transcript):
+    """`.wakil/` holds the config and the SQLite DB, and `enrich` reads
+    `raw_text_path` into a model prompt."""
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+
+    hidden = kb_path / ".wakil" / "notes.md"
+    hidden.parent.mkdir(exist_ok=True)
+    hidden.write_text("internal\n", encoding="utf-8")
+
+    with pytest.raises(IngestError, match="doesn't treat as knowledge base content"):
+        relink_source(workspace, source_id, ".wakil/notes.md")
+
+
+def test_archiving_unblocks_the_path_and_the_hash(workspace, kb_path, transcript):
+    """The collision error tells the user to archive and retry. Without an
+    `archived_at` filter, following that instruction hit the same error
+    again with nothing left to try."""
+    from wakil.app.ingest_service import archive_source
+
+    first = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    first_id = apply_capture(workspace, first).source_id
+
+    archive_source(workspace, first_id, reason="bad capture, redoing")
+
+    # Same destination, different content, without clobbering the fixture:
+    # the path check must no longer fire.
+    (kb_path / "redo").mkdir(exist_ok=True)
+    same_shape = kb_path / "redo" / transcript.name
+    same_shape.write_text("Jane: the corrected transcript.\n", encoding="utf-8")
+    redo = prepare_capture(workspace, "transcript", _capture_client(), file=same_shape)
+    assert redo.collision_source_id is None
+    redo.overwrite = True
+    assert apply_capture(workspace, redo).source_id != first_id
+
+    # The *hash* half deliberately still blocks: `uq_sources_workspace_content_hash`
+    # covers archived rows, so letting prepare through would only defer the
+    # failure past a paid model call to a misleading IntegrityError (#226).
+    second = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    assert second.duplicate_of == first_id
+
+
+def test_backfill_skips_archived_sources(workspace, kb_path, transcript):
+    """One paid model call per source; archiving means stop spending here."""
+    from wakil.app.ingest_service import archive_source, plan_abstract_backfill
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    with open_session(workspace) as session:
+        source = session.get(Source, source_id)
+        assert source is not None
+        source.metadata_json = json.dumps({})  # drop the abstract, so it's a candidate
+        session.commit()
+
+    assert [i.source_id for i in plan_abstract_backfill(workspace, _capture_client())] == [
+        source_id
+    ]
+    archive_source(workspace, source_id)
+    assert plan_abstract_backfill(workspace, _capture_client()) == []
+
+
+def test_enrich_refuses_an_archived_source(workspace, kb_path, transcript):
+    """Archiving frees the path check, so a redo can take over the archived
+    source's `raw_text_path`. Enriching the archived row would then read the
+    new source's text and file its memories under the old one — the silent
+    misattribution capture and relink both refuse."""
+    from wakil.app.ingest_service import archive_source, prepare_enrichment
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    archive_source(workspace, source_id, reason="wrong recording")
+
+    with pytest.raises(IngestError, match="is archived"):
+        prepare_enrichment(workspace, source_id, _capture_client())
+
+
+def test_relink_refuses_a_root_dotfile_and_a_non_markdown_target(workspace, kb_path, transcript):
+    """`.env` at the KB root has an empty directory prefix, so the
+    directories-only check let it through."""
+    from wakil.app.ingest_service import relink_source
+
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    original = proposal.raw_file.path
+
+    (kb_path / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    (kb_path / "notes.txt").write_text("plain text\n", encoding="utf-8")
+
+    with pytest.raises(IngestError, match="dot-file"):
+        relink_source(workspace, source_id, ".env")
+    with pytest.raises(IngestError, match="not a Markdown file"):
+        relink_source(workspace, source_id, "notes.txt")
+    assert get_source(workspace, source_id).raw_text_path == original
+
+
+def test_an_ambiguous_rename_is_declined_not_coin_flipped(workspace, kb_path, transcript):
+    """Two identical new paths for one removed file: `sorted(rglob)` order
+    decided which won. Declining is what the function's own docstring says
+    it does — `wakil sources relink` covers the ambiguous case."""
+    proposal = prepare_capture(workspace, "transcript", _capture_client(), file=transcript)
+    source_id = apply_capture(workspace, proposal).source_id
+    old_path = proposal.raw_file.path
+
+    with open_session(workspace) as session:
+        index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    body = (kb_path / old_path).read_bytes()
+    for name in ("2026-07-09-copy-a.md", "2026-07-09-copy-b.md"):
+        (kb_path / "sources" / "transcripts" / name).write_bytes(body)
+    (kb_path / old_path).unlink()
+
+    with open_session(workspace) as session:
+        result = index_notes(session, _require_workspace_ids(session, workspace)[0], kb_path)
+        session.commit()
+
+    assert result.sources_relinked == []
+    assert get_source(workspace, source_id).raw_text_path == old_path

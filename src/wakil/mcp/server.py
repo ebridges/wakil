@@ -3,10 +3,17 @@
 Binds to exactly one workspace for the life of the process (same model as
 every other `wakil` command's `-w/--workspace` resolution) and registers a
 small set of tools, thin wrappers over `mcp/tools.py`. Read tools return
-plain data; the two write flows (`ingest_*`, `enrich_*`) are prepare/apply
-pairs backed by `mcp/proposals.py`'s in-process cache, so a client must make
-an explicit second call to actually write anything — the MCP analogue of
-the CLI's preview-then-confirm gate.
+plain data; the two flows that write Markdown (`ingest_*`, `enrich_*`) are
+prepare/apply pairs backed by `mcp/proposals.py`'s in-process cache, so a
+client must make an explicit second call before anything lands in the
+knowledge base — the MCP analogue of the CLI's preview-then-confirm gate.
+
+The `sources_*` maintenance tools (`relink`, `archive`, `unarchive`) are
+deliberately single-call instead: they touch only operational metadata in
+SQLite, never the user's Markdown, and each is reversible by another call.
+A prepare/apply pair would be ceremony over a pointer update. That narrows
+ADR 0018's original "no tool writes without a preview call" consequence, so
+it is recorded as an amendment in the ADR itself, not just here.
 
 Also exposes `skills/mcp-coordinator/SKILL.md` (the fast-capture coordinator
 skill, docs/adr/0019) as an MCP resource so a connected client sees it with
@@ -101,9 +108,13 @@ def _register_read_tools(mcp: FastMCP, config: WorkspaceConfig) -> None:
         )
 
     @mcp.tool()
-    def sources_list(status: str | None = None, limit: int | None = 50) -> list[dict]:
+    def sources_list(
+        status: str | None = None, limit: int | None = 50, include_archived: bool = False
+    ) -> list[dict]:
         """List captured sources, most recent first."""
-        return tools.sources_list(config, status=status, limit=limit)
+        return tools.sources_list(
+            config, status=status, limit=limit, include_archived=include_archived
+        )
 
     @mcp.tool()
     def sources_show(source_id: int) -> dict:
@@ -129,6 +140,28 @@ def _register_git_tools(mcp: FastMCP, config: WorkspaceConfig) -> None:
 
 
 def _register_write_tools(mcp: FastMCP, config: WorkspaceConfig, cache: ProposalCache) -> None:
+    @mcp.tool()
+    def sources_relink(source_id: int, path: str) -> dict:
+        """Point a source at its raw capture's current path after a rename.
+
+        `path` must be inside this workspace; anything else is rejected."""
+        return tools.sources_relink(config, source_id, path)
+
+    @mcp.tool()
+    def sources_archive(
+        source_id: int, reason: str | None = None, superseded_by: int | None = None
+    ) -> dict:
+        """Retire a source without deleting it: it drops out of the default
+        listing but its row, memories, and history are kept."""
+        return tools.sources_archive(
+            config, source_id, reason=reason, superseded_by=superseded_by
+        )
+
+    @mcp.tool()
+    def sources_unarchive(source_id: int) -> dict:
+        """Undo sources_archive."""
+        return tools.sources_unarchive(config, source_id)
+
     @mcp.tool()
     def ingest_prepare(
         kind: str, file_path: str | None = None, url: str | None = None, context: str | None = None

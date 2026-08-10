@@ -32,11 +32,24 @@ DEFAULT_USER_NAME = "default"
 
 
 @dataclass
+class SourceRelink:
+    """A `sources.raw_text_path` that indexing repointed after a rename."""
+
+    source_id: int
+    old_path: str
+    new_path: str
+
+
+@dataclass
 class IndexResult:
     added: int = 0
     updated: int = 0
     unchanged: int = 0
     removed: int = 0
+    # Reported rather than applied silently: this is wakil changing a pointer
+    # into the user's own knowledge base on its own initiative, and a wrong
+    # guess sends `enrich` at the wrong file (working agreement item 12).
+    sources_relinked: list[SourceRelink] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -134,6 +147,65 @@ def _ensure_workspace(session: Session, config: WorkspaceConfig) -> Workspace:
     return workspace
 
 
+def _follow_renamed_raw_captures(
+    session: Session,
+    workspace_id: int,
+    existing: dict[str, Note],
+    parsed: dict[str, "MarkdownFile"],
+    seen: set[str],
+    result: IndexResult,
+) -> None:
+    """Repoint `sources.raw_text_path` when a raw capture is moved on disk.
+
+    `index` already noticed the rename for the `notes` table, but nothing
+    propagated it to `sources`, so a `git mv`'d capture left `enrich` failing
+    with "Could not read raw capture <old path>" and no supported way to fix
+    it (#178). A file that disappeared from one path and appeared at another
+    with an identical content hash is a move.
+
+    Content-identical only, deliberately: if the file was also *edited* while
+    being moved there is no reliable way to tell a rename from an unrelated
+    new note, and guessing would silently repoint a source at the wrong file.
+    `wakil sources relink` covers that case explicitly.
+    """
+    # Both sides are hash -> *list*, so an ambiguous hash can be recognised
+    # rather than resolved by whichever path the filesystem walk yielded last.
+    # Two byte-identical captures, or one copied to two new paths, otherwise
+    # repointed a source by coin flip — the thing the docstring above says
+    # this function refuses to do.
+    gone: dict[str, list[str]] = {}
+    for path, note in existing.items():
+        if path not in seen and note.content_hash:
+            gone.setdefault(note.content_hash, []).append(path)
+    if not gone:
+        return
+    known = set(existing)
+    arrived: dict[str, list[str]] = {}
+    for path, md in parsed.items():
+        if path not in known and md.content_hash in gone:
+            arrived.setdefault(md.content_hash, []).append(path)
+
+    moves = {
+        gone[content_hash][0]: paths[0]
+        for content_hash, paths in arrived.items()
+        if len(paths) == 1 and len(gone[content_hash]) == 1
+    }
+    if not moves:
+        return
+    for source in session.scalars(
+        select(Source).where(
+            Source.workspace_id == workspace_id, Source.raw_text_path.in_(list(moves))
+        )
+    ):
+        if source.raw_text_path is not None:
+            old_path = source.raw_text_path
+            new_path = moves[old_path]
+            source.raw_text_path = new_path
+            result.sources_relinked.append(
+                SourceRelink(source_id=source.id, old_path=old_path, new_path=new_path)
+            )
+
+
 def index_notes(
     session: Session, workspace_id: int, root: Path, *, prune: bool = True
 ) -> IndexResult:
@@ -184,6 +256,7 @@ def index_notes(
             result.unchanged += 1
 
     if prune:
+        _follow_renamed_raw_captures(session, workspace_id, existing, parsed, seen, result)
         removed_note_ids: list[int] = []
         for key, note in existing.items():
             if key not in seen:

@@ -103,7 +103,7 @@ any of them. All commands accept the global `-w`/`--workspace` option; see
 | `wakil query <question>` | [Grounded, cited answer](#query) from a model over search results + memory. |
 | `wakil ingest transcript\|article\|text <path>` | [Step 1: capture](#ingest) a raw source. |
 | `wakil enrich <source-id>` | [Step 2: analyze](#ingest) a capture and link it into the KB. |
-| `wakil sources list\|show\|backfill-abstract` | Inspect captured sources; backfill title/abstract on old ones. |
+| `wakil sources list\|show\|relink\|archive\|unarchive\|backfill-abstract` | Inspect and maintain captured sources. |
 | `wakil entities compile <slug>` | [Re-synthesize](#entities-compiled-pages) an entity page's Compiled Truth from its Timeline. |
 | `wakil schema migrate\|validate\|list\|which` | [Entity frontmatter schema](#schema-tools) tools. |
 | `wakil relationships <note-path>` | Walk the [note/memory relationship graph](#relationships) from an anchor note. |
@@ -255,9 +255,11 @@ sitting at its final path). If that path is already *another source's* raw
 capture, capture refuses even with `--overwrite` and names the owning source:
 writing there cannot move that source's pointer, so both would end up reading
 the same text and `wakil enrich <old id>` would file its memories under the
-wrong source. Rename the input so it lands on a different path, or move the
-other source's file aside. The refusal is on the source record, not the file,
-so it applies even when that source's file is no longer on disk.
+wrong source. Archive that source if this capture supersedes it (see
+[Maintaining sources](#maintaining-sources) — an archived source no longer
+holds the path), or rename the input so it lands somewhere else. The refusal
+is on the source record, not the file, so it applies even when that source's
+file is no longer on disk.
 
 Dates that appear in frontmatter and filenames (`created`, `retrieved`, a
 recording's own date, the `YYYY-MM-DD-` filename prefix) use your machine's
@@ -420,6 +422,50 @@ won't show the change until either you push the branch and open the PR
 yourself, or you re-run `wakil enrich <id>` once the commit is finished — the
 source already remembers this branch, so the next run resumes onto it and
 lands the PR from there.
+
+### Maintaining sources
+
+`wakil index` follows a raw capture that was moved on disk, repointing the
+source at its new path when the content is unchanged, and naming each
+repointed source in its output rather than changing the pointer silently. If
+the file was edited as well as moved, the move can't be inferred safely — use
+`wakil sources relink <id> <path>` rather than leaving `enrich` broken. The
+target has to be inside the knowledge base.
+
+Rename-following is part of indexing's prune pass, so it doesn't run in a
+linked git worktree: a worktree only has one branch checked out, so a file
+missing from it is usually just committed on another branch rather than
+moved, and indexing there only adds and updates. In a worktree, `wakil
+sources relink` is the way to repoint a moved capture.
+
+`wakil sources archive <id> [--reason TEXT] [--superseded-by ID]` retires a
+source without deleting it: the row, its memories, and its history stay, but
+it drops out of `wakil sources list` (pass `--include-archived` to see it) and
+`wakil sources show` renders an "archived, superseded by #N" banner. Use it
+when a capture went wrong and was redone under a new id, so an abandoned
+attempt stops looking like one that still needs attention. `unarchive`
+reverses it.
+
+Archiving frees the *path*: an archived source stops holding its
+`raw_text_path` against a new capture, so the "already the raw capture of
+source #N" refusal stops firing once you archive the attempt it names — which
+is what makes that refusal actionable rather than a dead end. Re-capturing a
+byte-identical file is still refused as a duplicate, archived or not, because
+the content hash is unique per workspace at the database level; freeing that
+too needs a schema change and is tracked as
+[#226](https://github.com/ebridges/wakil/issues/226).
+
+`backfill-abstract` skips archived sources, and `wakil enrich <archived-id>`
+refuses outright — archiving means stop spending attention here, and since
+archiving frees the path, a newer source may since have taken over that
+capture. Unarchive first if you really mean to enrich it. What archived
+should mean for query grounding is still open
+([#216](https://github.com/ebridges/wakil/issues/216)).
+
+`wakil sources relink <id> <path>` points a source at a file it holds itself:
+the path must be inside the knowledge base, outside wakil's own state
+(`.wakil/`, `.git/`, dot-directories and dot-files), a `.md` file, and not
+already another live source's capture.
 
 ## Entities: compiled pages
 

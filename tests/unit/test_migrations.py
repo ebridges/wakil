@@ -148,14 +148,22 @@ def test_migration_dedupes_existing_content_hash_collisions(kb_path: Path):
     with Session(engine) as session:
         workspace_id = session.scalar(select(Workspace.id))
         user_id = session.scalar(select(User.id))
-        survivor = Source(workspace_id=workspace_id, source_type="text", content_hash="samehash")
-        session.add(survivor)
-        session.flush()
-        survivor_id = survivor.id
-        duplicate = Source(workspace_id=workspace_id, source_type="text", content_hash="samehash")
-        session.add(duplicate)
-        session.flush()
-        duplicate_id = duplicate.id
+        # Raw inserts for the same reason the memories insert below uses one:
+        # the `sources` table is deliberately still at revision 0003 here, and
+        # the ORM class always reflects head (0008 added archived_at and
+        # friends), so `Source(...)` would emit columns this table lacks.
+        def _legacy_source() -> int:
+            session.execute(
+                text(
+                    "INSERT INTO sources (workspace_id, source_type, content_hash, status) "
+                    "VALUES (:workspace_id, 'text', 'samehash', 'new')"
+                ),
+                {"workspace_id": workspace_id},
+            )
+            return int(session.scalar(text("SELECT last_insert_rowid()")))
+
+        survivor_id = _legacy_source()
+        duplicate_id = _legacy_source()
         # Raw insert, not the Memory ORM class: the ORM model always reflects
         # the head schema, but this table is deliberately still at revision
         # 0003 here (pre-0005's `stance` column) -- using the ORM class would

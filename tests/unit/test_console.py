@@ -240,3 +240,46 @@ def test_capture_preview_warns_when_the_path_is_owned_but_the_file_is_gone(capsy
     out = capsys.readouterr().out.replace("\n", "")
     assert "raw capture of source" in out
     assert "#3" in out
+
+def _archived_source(reason: str):
+    from datetime import datetime
+
+    from wakil.app.ingest_service import SourceSummary
+
+    now = datetime(2026, 8, 4, 12, 0)
+    return SourceSummary(
+        id=1,
+        source_type="transcript",
+        title="Platform review",
+        origin="call.txt",
+        status="raw",
+        created_at=now,
+        updated_at=now,
+        git_branch=None,
+        git_pr_url=None,
+        archived_at=now,
+        archive_reason=reason,
+    )
+
+
+def test_archive_reason_is_not_mangled_by_markup(capsys):
+    """`--reason` is arbitrary user text and the reason is the one thing the
+    banner exists to carry — docs/TROUBLESHOOTING.md prescribes exactly this
+    render-and-inspect guard for the bug class."""
+    from wakil.ui.console import print_source_detail
+
+    console.width = 200
+    print_source_detail(_archived_source("superseded, see [[projects/fnol]] and [draft] notes"))
+    out = capsys.readouterr().out.replace("\n", "")
+    assert "[[projects/fnol]]" in out
+    assert "[draft]" in out
+
+
+def test_archived_rows_are_marked_in_the_listing(capsys):
+    """`--include-archived` exists to see them; a table that renders them
+    identically to live rows can't be used for that."""
+    from wakil.ui.console import print_sources
+
+    console.width = 200
+    print_sources([_archived_source("wrong recording")])
+    assert "archived" in capsys.readouterr().out
