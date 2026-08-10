@@ -40,8 +40,11 @@ connected, ask — don't guess.
    (`transcript`, `article`, or `text`) and the file path or URL.
 2. If the result has `duplicate_of` set, stop and tell the user it's
    already in the KB (cite the existing source id). Nothing else to do.
-3. Otherwise, look at the preview (`title`, `abstract`, `origin`). If
-   nothing looks wrong, call `ingest_apply` immediately — don't ask the
+3. Otherwise, look at the preview (`title`, `abstract`, `origin`) **and at
+   `warnings`**. Anything in `warnings` is a value the author wrote that
+   wakil declined to use, so report it — but it is informational, not a
+   question: don't wait for a reply. If nothing else looks wrong, call
+   `ingest_apply` immediately — don't ask the
    user to re-confirm fields that are already visible and routine. Report
    one line back: `Captured as source #<id>, branch <branch>, draft PR:
    <pr_url>` (omit `pr_url` if none was opened, e.g. no `gh`/remote

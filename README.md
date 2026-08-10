@@ -243,6 +243,36 @@ date, create date, origin, url) are filled in, the rest are left as blank
 placeholders. `--context`/`-C` accepts a few lines about the source
 (attendees, company, purpose) and is stored on the source record for step 2.
 
+If the input is a `.md` file that already carries its own YAML frontmatter, or
+opens with an H1 title — a hand-cleaned transcript with a real title, date, and
+tags — that file is treated as authored:
+
+- its frontmatter wins over wakil's generated fields, except the ones wakil
+  owns for a raw capture (`type`, `source_type`, `status`, and the `origin`/
+  `url` provenance), and except any value the `source` schema rejects, which
+  falls back to the generated one with a warning in the preview;
+- no second frontmatter block is added, and the destination filename comes
+  from the note's own title rather than the input's basename. A file that
+  opens with its own H1 keeps that one and gets no second heading; a
+  frontmatter-only file still gets wakil's generated `# <filename>` heading;
+- an authored `meeting_date`/`date` beats the date wakil infers from the
+  filename or the transcript's opening lines, which also changes the
+  destination filename. `captured` is *not* read as a meeting date — it
+  records when the file was captured;
+- the timestamp-cleanup pass is skipped, so markers like `**[00:36]**` survive
+  verbatim;
+- if the file supplies both a title and an abstract, the capture-time model
+  call is skipped entirely.
+
+A heading partway down the file doesn't count — only a leading H1 — so an ASR
+dump with section headings still gets the normal cleanup. Nor does a leading
+`---` that isn't really a frontmatter fence: a block is only read as
+frontmatter when it parses to a mapping whose keys all look like frontmatter
+keys (lowercase, no spaces — your own vault's `attendees:`/`summary:` count
+just as much as wakil's `title:`). A scratch note or a stretch of dialogue
+between two `---` rules is kept as content instead of being parsed away, and
+the preview says so — though a transcript still gets the normal cleanup pass.
+
 **Step 2 — enrichment** (`wakil enrich <source-id>`) is a fixed,
 code-sequenced pipeline of two model calls, one preview, one confirm:
 

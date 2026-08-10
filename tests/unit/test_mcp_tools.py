@@ -263,6 +263,21 @@ def test_ingest_prepare_detects_duplicate(git_kb, transcript, monkeypatch):
     assert second["duplicate_of"] is not None
 
 
+def test_ingest_prepare_surfaces_capture_warnings(git_kb, monkeypatch):
+    """ADR 0019 moved capture's review moment off the CLI preview and onto
+    the coordinating skill, so a warning that only reaches the preview
+    reaches nobody on this path."""
+    path = git_kb.root_path / "linked.md"
+    path.write_text("---\ntitle: [[people/jane]]\n---\n\nBody.\n", encoding="utf-8")
+    _ignore_in_git(git_kb.root_path, path.name)
+    monkeypatch.setattr(
+        "wakil.mcp.tools.resolve_client", lambda: FakeClient([CAPTURE_METADATA_JSON])
+    )
+
+    prepared = tools.ingest_prepare(git_kb, ProposalCache(), "text", file_path=str(path))
+    assert any("title" in warning for warning in prepared["warnings"])
+
+
 def test_ingest_apply_unknown_proposal_id_raises(git_kb):
     with pytest.raises(tools.ToolError, match="No pending capture proposal"):
         tools.ingest_apply(git_kb, ProposalCache(), "not-a-real-id")
