@@ -221,6 +221,14 @@ This matters because the full suite churns hard between runs and invites false c
 
 Corollary worth checking before you rely on an eval at all: **a skill can have no `eval.json`.** `entity-resolve/` ships only a `SKILL.md`, so prose changes there are unmeasured no matter how the suite is invoked, and the `entity-resolution-*` scenarios belong to a different skill with a confusingly similar name.
 
+### A judgment defined in both a `Field` description and a SKILL.md ships as one prompt that no eval can see
+
+**Established:** 2026-08-15 · **Source:** the [#239 review](https://github.com/ebridges/wakil/pull/239) (fix 1), `EntityResolution.relevance` in `src/wakil/llm/schemas.py`
+
+`build_system_prompt(skill, output_model)` concatenates the skill body **and** `output_model.model_json_schema()` into one `system` string, so every `Field(description=...)` on a contract is model-facing instruction sitting a few hundred tokens from the skill prose — and a field whose description defines a judgment is a second, competing copy of that judgment. `relevance` graded `minor` as "mentioned but not a focus" from ADR 0015 onward while `entity-resolve/SKILL.md` replaced that focus test with a substance test; both reached the model in the same message, and the schema copy is the one adjacent to the field being emitted. Nothing in the repo could observe it: `tests/evals/runner.py` builds `system = f"{BASE_SYSTEM}\n\n{skill.body}"` with no schema block at all, so this is the sibling entry below ("an eval must put a production signal in the channel production puts it in") in its sharpest form — a production channel the harness does not model *at all*, not merely one it models in the wrong slot.
+
+The rule: **define a judgment in exactly one place, and make it the skill body** — the channel evals actually exercise. A `Field` description should say what the field measures and point at the skill section that defines it (see the comment on `relevance` for the shape). Applies to all five `build_system_prompt` call sites, and to `confidence`/`proposed_frontmatter_confidence`/`has_update`, which carry judgment prose today.
+
 ### An eval must put a production signal in the channel production puts it in
 
 **Established:** 2026-08-09 · **Source:** the [#202 review](https://github.com/ebridges/wakil/pull/202), `src/wakil/skills/transcript/eval.json`
