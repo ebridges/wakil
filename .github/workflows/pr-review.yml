@@ -2,7 +2,7 @@ name: PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [labeled]
 
 concurrency:
   group: pr-review-${{ github.event.pull_request.number }}
@@ -16,7 +16,16 @@ permissions:
 jobs:
   claude-review:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    # Reviews are opt-in: only adding the `to-review` label starts one, so a
+    # push to an open PR no longer spends ~$2.50 unasked.
+    #
+    # This guard is also what stops the workflow re-triggering itself. The
+    # final step adds `reviewed`, which raises a second `labeled` event on the
+    # same PR; the name check drops it. Widening this condition (or reacting to
+    # `unlabeled`) reintroduces a loop that bills per iteration.
+    if: >-
+      github.event.label.name == 'to-review'
+      && github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v7
         with:
@@ -62,3 +71,27 @@ jobs:
             If the subagent finds nothing blocking, still post a short
             comment saying the review ran and found no issues, so it's
             clear the check executed rather than silently doing nothing.
+
+      # No `if:` — a step defaults to `success()`, so a review that errored or
+      # was cancelled keeps `to-review` and never gets `reviewed`. The labels
+      # mean findings were posted, not merely that the workflow fired, and a
+      # failed run stays visibly queued rather than looking done.
+      #
+      # Dropping `to-review` makes re-review one click: add the label again.
+      # Removing it raises an `unlabeled` event, which is inert here because the
+      # trigger lists `labeled` only — do not add `unlabeled` to that list, or
+      # this step starts a self-triggering loop that bills per iteration.
+      # Both edits go in one `gh` call, so this is a single API write.
+      #
+      # `--repo` is explicit on purpose: every `gh` subcommand fills unspecified
+      # context from ambient state rather than erroring, and this repo has been
+      # bitten by that twice (docs/TROUBLESHOOTING.md, the `gh release create`
+      # and `gh pr create --head` entries).
+      - name: Mark reviewed, clear the request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh pr edit ${{ github.event.pull_request.number }}
+          --repo ${{ github.repository }}
+          --add-label reviewed
+          --remove-label to-review
