@@ -1,0 +1,262 @@
+Have it remove the "to-review" label after it successfully completes
+
+---
+
+merge this PR and ensure that it will get applied on PR #239
+
+---
+
+Now run step 2 from #240 since we have an eval.json for that skill, I've added more credits to the api key
+
+---
+
+There's a new key in /Users/ebridges/Projects/wakil/env.sh
+
+---
+
+<task-notification>
+<task-id>b0d1xa958</task-id>
+<summary>Monitor event: "entity-resolve eval run 1 per-scenario results"</summary>
+<event>tests/evals/test_skill_evals.py::test_skill_eval_scenario[entity-resolve-notable-for-a-substantive-third-party-observation] FAILED                                                               [ 16%]</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>RUN 1/3</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>[notable-for-a-substantive-third-party-observation] 7/7
+[central-for-a-1on1-counterpart-discussed-through-systems] 4/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>[peripheral-with-high-confidence-for-a-constraint-only-company] 6/6
+[minor-for-a-no-read-yet-non-assessment] 4/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>[skip-a-garbled-transcription-name-rather-than-create-a-page] 6/6
+[dated-record-defers-to-the-accumulating-page-that-already-covers-it] 5/6
+RUN 2/3</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>[notable-for-a-substantive-third-party-observation] 7/7
+[central-for-a-1on1-counterpart-discussed-through-systems] 4/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>[peripheral-with-high-confidence-for-a-constraint-only-company] 6/6
+[minor-for-a-no-read-yet-non-assessment] 4/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>[skip-a-garbled-transcription-name-rather-than-create-a-page] 6/6
+[dated-record-defers-to-the-accumulating-page-that-already-covers-it] 4/6
+RUN 3/3</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>[notable-for-a-substantive-third-party-observation] 7/7
+[central-for-a-1on1-counterpart-discussed-through-systems] 5/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bq7pcu5te</task-id>
+<summary>Monitor event: "entity-resolve eval sampling: per-scenario scores and errors"</summary>
+<event>[peripheral-with-high-confidence-for-a-constraint-only-company] 6/6
+[minor-for-a-no-read-yet-non-assessment] 4/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ba5sdfb90</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ebridges-Projects-wakil/3c8213ca-416c-4339-8c04-706fb27a15cf/tasks/ba5sdfb90.output</output-file>
+<status>completed</status>
+<summary>Background command "Sample entity-resolve evals 3 times" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>RUN 1/3</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[notable-for-a-substantive-third-party-observation] 7/7</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[central-for-a-1on1-counterpart-discussed-through-systems] 5/5</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[peripheral-with-high-confidence-for-a-constraint-only-company] 6/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[minor-for-a-no-read-yet-non-assessment] 6/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[skip-a-garbled-transcription-name-rather-than-create-a-page] 6/6
+[dated-record-defers-to-the-accumulating-page-that-already-covers-it] 6/6
+RUN 2/3</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[notable-for-a-substantive-third-party-observation] 7/7</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[central-for-a-1on1-counterpart-discussed-through-systems] 5/5</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[peripheral-with-high-confidence-for-a-constraint-only-company] 6/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[minor-for-a-no-read-yet-non-assessment] 6/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[skip-a-garbled-transcription-name-rather-than-create-a-page] 6/6
+[dated-record-defers-to-the-accumulating-page-that-already-covers-it] 6/6
+RUN 3/3</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[notable-for-a-substantive-third-party-observation] 7/7</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[central-for-a-1on1-counterpart-discussed-through-systems] 5/5</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[peripheral-with-high-confidence-for-a-constraint-only-company] 6/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b90oahfbm</task-id>
+<summary>Monitor event: "post-fix eval sampling: scores and any remaining failures"</summary>
+<event>[minor-for-a-no-read-yet-non-assessment] 6/6</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>

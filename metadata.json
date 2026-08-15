@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.9.0",
+  "checkpoint_id": "01M039H7ZNMZ1B9XCQH5HCX18V",
+  "strategy": "manual-commit",
+  "branch": "wt/pr239-evalrun",
+  "checkpoints_count": 30,
+  "files_touched": [
+    "src/wakil/skills/entity-resolve/eval.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 436,
+    "cache_creation_tokens": 541543,
+    "cache_read_tokens": 55690213,
+    "output_tokens": 139649,
+    "api_call_count": 220
+  }
+}
