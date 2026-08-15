@@ -221,6 +221,14 @@ This matters because the full suite churns hard between runs and invites false c
 
 Corollary worth checking before you rely on an eval at all: **a skill can have no `eval.json`.** `entity-resolve/` ships only a `SKILL.md`, so prose changes there are unmeasured no matter how the suite is invoked, and the `entity-resolution-*` scenarios belong to a different skill with a confusingly similar name.
 
+### An eval scenario built from the skill's own worked example measures recall, not judgment
+
+**Established:** 2026-08-15 · **Source:** `entity-resolve/eval.json` (issue #240), `tests/evals/runner.py`'s `run_scenario`
+
+`run_scenario` pastes the skill body verbatim into the system prompt, so any worked example inside `SKILL.md` is *in context* while the model answers. Build a scenario around that same example and a passing grade proves only that the model can copy an answer sitting a few hundred tokens above the question. `entity-resolve/SKILL.md` ends its relevance section with a fully worked planning-call example — two central participants, a `minor` "no read on them yet" colleague, a `peripheral` company named as *"the reason I only have two weeks free"* — which is exactly the shape ADR 0015 wants calibrated, and therefore exactly the shape to *not* reuse. The scenarios keep each judgment (peripheral-by-constraint, minor-by-non-assessment) and change the situation, the wording, and the entities around it.
+
+The rule for any new `eval.json`: **for each rubric item, check whether the skill file already contains a near-verbatim instance of it.** If it does, vary the surface until only the judgment transfers — otherwise a green scenario is indistinguishable from a broken one.
+
 ### A judgment defined in both a `Field` description and a SKILL.md ships as one prompt that no eval can see
 
 **Established:** 2026-08-15 · **Source:** the [#239 review](https://github.com/ebridges/wakil/pull/239) (fix 1), `EntityResolution.relevance` in `src/wakil/llm/schemas.py`

@@ -1,0 +1,123 @@
+{
+  "skill": "entity-resolve",
+  "scenarios": [
+    {
+      "id": "notable-for-a-substantive-third-party-observation",
+      "query": "You are the entity-resolution step for the source at sources/transcripts/2026-08-03-vantage-mentoring-nadia-ferrante.md. Extraction has already run. For every person, company, project, or concept this source touches, state the entity, your action (create, update, or skip), your relevance judgment (central, notable, minor, or peripheral), and your confidence, and explain each relevance call in one or two sentences. The entity types available are: person, company, project, concept.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-08-03-vantage-mentoring-nadia-ferrante.md": "---\ntype: source\ntitle: Vantage mentoring 1:1 with Nadia Ferrante\norigin: transcript\ncaptured: 2026-08-03\ncompany: companies/vantage-archive-systems\n---\n\n# 2026-08-03-vantage-mentoring-nadia-ferrante\n\n**Participants:** the user and Nadia Ferrante (Senior Staff Engineer, Vantage Archive Systems)\n\n## Cleaned transcript\n\n### The user\nI'm collecting the unwritten knowledge about how the team works. Where would knowledge transfer be hardest if someone went out?\n\n### Nadia Ferrante\nHonestly, less than you'd think, because Lena has done a genuinely good job pairing people into small teams specifically so nothing sits with one person. That was deliberate on her part — she restructured the pods around it after the last reorg, and it's the main reason we don't have single points of failure on most of the surface area.\n\n### The user\nWhere does it not hold?\n\n### Nadia Ferrante\nThe accessions pipeline. Dev knows that process better than anyone else here — not because he's siloing it, he's actually onboarded two people onto provenance scoring this quarter, but the pipeline repo is still mostly legacy decisions he's the only one who's traced end to end. If he and I were both out at once that's a real problem.\n\n### The user\nAnything else on the team worth noting?\n\n### Nadia Ferrante\nArun runs the Thursday release. That's about it on that front.\n"
+        }
+      },
+      "expected_behavior": [
+        "Judges Dev as relevance 'notable' — the source carries a substantive, durable observation about him (deepest knowledge of the accessions pipeline repo, onboarded two people onto provenance scoring this quarter, a real knowledge-concentration risk)",
+        "Does NOT grade Dev down to 'minor' or 'peripheral' on the grounds that he is absent from the conversation, is not a participant, or is not a primary subject of the source",
+        "Judges Lena as relevance 'notable' as well — a deliberate, durable management action (restructuring pods to avoid single points of failure) is substantive entity-level information, not a passing mention",
+        "Judges Arun as relevance 'minor' or 'peripheral' — 'Arun runs the Thursday release' is a bare role reference carrying no substantive assessment, and is explicitly distinguished from the Dev and Lena mentions",
+        "Applies substance rather than length or focus as the test, and says so — explicitly reasons about whether the source carries durable entity-level information, not about how many words each person got or whether they are the source's subject",
+        "Judges Nadia Ferrante as relevance 'central' as the other participant in the conversation",
+        "Does not fabricate biographical detail about any of Dev, Lena, or Arun that the transcript does not contain (no invented titles, tenures, or full names beyond what is given)"
+      ],
+      "related_skills": ["entity-enrichment", "note-revision"]
+    },
+    {
+      "id": "central-for-a-1on1-counterpart-discussed-through-systems",
+      "query": "You are the entity-resolution step for the source at sources/transcripts/2026-08-10-vantage-mentoring-tobias-vance.md. Extraction has already run. For every entity the source touches, state the entity, your action (create, update, or skip), your relevance judgment (central, notable, minor, or peripheral), and your confidence, with a one-or-two sentence justification for each relevance call. Available entity types: person, company, project, concept.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/tobias-vance.md": "---\ntype: person\nname: Tobias Vance\ncreated: 2026-05-04\nupdated: 2026-07-28\n---\n\n# Tobias Vance\n\n## Compiled Truth\n\nStaff engineer at Vantage Archive Systems. Owns most of the catalog-relations work.\n\n## Timeline\n\n### 2026-05-04 — intro\n- Introduced during the mentoring engagement kickoff.\n",
+          "sources/transcripts/2026-08-10-vantage-mentoring-tobias-vance.md": "---\ntype: source\ntitle: Vantage mentoring 1:1 with Tobias Vance\norigin: transcript\ncaptured: 2026-08-10\ncompany: companies/vantage-archive-systems\n---\n\n# 2026-08-10-vantage-mentoring-tobias-vance\n\n**Participants:** the user and Tobias Vance (Staff Engineer, Vantage Archive Systems)\n\n## Cleaned transcript\n\n### The user\nWhere does the complexity actually live?\n\n### Tobias Vance\nThe schema. The whole catalog store was built on the assumption that every record has exactly one parent collection, and in our domain that's just false — a single item can sit in three collections at once. So instead of changing the schema they duplicate the record once per parent.\n\n### The user\nCan you remove the single-parent constraint?\n\n### Tobias Vance\nThe join table already supports it. The problem is every query that walks the hierarchy assumes one parent, and those are everywhere. I've been arguing for moving the relations into a graph store for months. It's slated to start in September.\n\n### The user\nAnd the validation path?\n\n### Tobias Vance\nIngestion has to call back into the back office to validate before it writes, because validation lives over there. Two repos, one database. It's bad architecture and I'd like to own fixing it.\n"
+        }
+      },
+      "expected_behavior": [
+        "Judges Tobias Vance as relevance 'central' — he is one of only two participants in the conversation, and a participant in a 1:1 is by definition central to it",
+        "Does NOT downgrade Tobias Vance to 'notable' or 'minor' on the grounds that the conversation is about systems, architecture, or the schema rather than about him personally",
+        "Reasons explicitly that the subject matter of a conversation does not determine the relevance of its participants — being a participant is itself the centrality signal",
+        "Resolves Tobias Vance with action 'update' against the existing page people/tobias-vance.md rather than proposing a new page for him",
+        "Assigns high confidence to the Tobias Vance identity match (a distinctly-named participant with an existing page), and keeps that confidence judgment separate from the relevance judgment",
+        "Judges the single-parent schema assumption / graph-store migration as a real entity in its own right (a concept or project) rather than folding it into the person's resolution"
+      ],
+      "related_skills": ["entity-enrichment", "note-revision"]
+    },
+    {
+      "id": "peripheral-with-high-confidence-for-a-constraint-only-company",
+      "query": "You are the entity-resolution step for the source at sources/transcripts/2026-08-12-vantage-scoping-call.md. Extraction has already run. For every entity the source touches, give the entity, your action (create, update, or skip), your relevance judgment (central, notable, minor, or peripheral), and your confidence as a number between 0 and 1. Justify the relevance and the confidence separately for each. Available entity types: person, company, project, concept.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-08-12-vantage-scoping-call.md": "---\ntype: source\ntitle: Vantage engagement scoping call\norigin: transcript\ncaptured: 2026-08-12\n---\n\n# 2026-08-12-vantage-scoping-call\n\n**Participants:** the user and Nadia Ferrante (Vantage Archive Systems)\n\n## Cleaned transcript\n\n### Nadia Ferrante\nSo the scope we landed on is the accessions pipeline audit — four weeks, written findings at the end, and a working session with the pod leads.\n\n### The user\nAgreed. One constraint on my side: I can't start until the second week of September, because I'm finishing a contract with Halberd Systems and they have me through the end of August.\n\n### Nadia Ferrante\nThat works. September is better for us anyway — the schema work starts then and the audit should land before it.\n\n### The user\nGood. I'll send the statement of work this week.\n"
+        }
+      },
+      "expected_behavior": [
+        "Judges Halberd Systems as relevance 'peripheral' — it is named only to explain why the user is unavailable until September, and the source is not substantively about that company",
+        "Assigns Halberd Systems a HIGH confidence value (roughly 0.9 or above, or explicitly described as high/near-certain) because the name is distinct and unambiguous",
+        "Explicitly treats 'peripheral relevance with high confidence' as a normal, non-contradictory combination rather than lowering one to match the other or flagging it as inconsistent",
+        "Does not reason that Halberd Systems is relevant merely because the scheduling constraint it explains is important to the engagement — distinguishes 'this explains something that matters' from 'the source concerns this entity'",
+        "Judges the accessions pipeline audit engagement being scoped as 'central', and Nadia Ferrante as 'central' as a participant",
+        "Does NOT propose action 'create' for Halberd Systems"
+      ],
+      "related_skills": ["entity-enrichment"]
+    },
+    {
+      "id": "minor-for-a-no-read-yet-non-assessment",
+      "query": "You are the entity-resolution step for the source at sources/transcripts/2026-08-14-vantage-pod-lead-sync.md. Extraction has already run. For every entity the source touches, state the entity, your action (create, update, or skip), your relevance judgment (central, notable, minor, or peripheral), and your confidence, explaining each relevance call. Available entity types: person, company, project, concept.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-08-14-vantage-pod-lead-sync.md": "---\ntype: source\ntitle: Vantage pod lead sync\norigin: transcript\ncaptured: 2026-08-14\n---\n\n# 2026-08-14-vantage-pod-lead-sync\n\n**Participants:** the user and Lena Fischbach (Engineering Manager, Vantage Archive Systems)\n\n## Cleaned transcript\n\n### The user\nHow are the two new engineers settling in?\n\n### Lena Fischbach\nCole started three weeks ago. Honestly I don't have a read on him yet — too early, he's still working through onboarding, I couldn't tell you either way.\n\n### The user\nAnd the other one?\n\n### Lena Fischbach\nMara's different. She's been here about the same time but she's already rewritten the flaky part of the ingestion test suite on her own initiative, and she pushed back on the release process in a way that was actually right. I'd put her on the schema work in September.\n"
+        }
+      },
+      "expected_behavior": [
+        "Judges Cole as relevance 'minor' — 'I don't have a read on him yet' records the speaker's absence of an assessment rather than any substantive information about Cole",
+        "Explicitly reasons that Cole's mention does not become substantive merely because his start date or onboarding status is stated",
+        "Judges Mara as relevance 'notable' — concrete, durable observations (rewrote the flaky ingestion test suite on her own initiative, pushed back correctly on the release process, being considered for the September schema work) are substantive entity-level information",
+        "Draws the contrast between the two mentions explicitly: both people are new hires mentioned in the same short exchange, and the difference in relevance comes from substance, not from length of mention or seniority",
+        "Judges Lena Fischbach as relevance 'central' as the other participant in the conversation",
+        "Does not invent a last name, title, or further detail for Cole or Mara beyond what the transcript states"
+      ],
+      "related_skills": ["entity-enrichment", "note-revision"]
+    },
+    {
+      "id": "skip-a-garbled-transcription-name-rather-than-create-a-page",
+      "query": "You are the entity-resolution step for the source at sources/transcripts/2026-08-17-vantage-pipeline-walkthrough.md. Note the ASR quality warning in the source's own header. Extraction has already run. For every person this source touches, state the entity, your action (create, update, or skip), your relevance judgment, and your confidence, and explain your action for each. Available entity types: person, company, project, concept.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "people/nadia-ferrante.md": "---\ntype: person\nname: Nadia Ferrante\ncreated: 2026-05-04\nupdated: 2026-08-03\n---\n\n# Nadia Ferrante\n\n## Compiled Truth\n\nSenior Staff Engineer at Vantage Archive Systems. Works on the accessions pipeline and provenance scoring.\n\n## Timeline\n\n### 2026-08-03 — mentoring 1:1\n- Walked through knowledge-transfer risk across the pods.\n",
+          "sources/transcripts/2026-08-17-vantage-pipeline-walkthrough.md": "---\ntype: source\ntitle: Vantage accessions pipeline walkthrough\norigin: transcript\ncaptured: 2026-08-17\n---\n\n# 2026-08-17-vantage-pipeline-walkthrough\n\n**Participants:** the user and Nadia Ferrante\n\n> ASR note: this recording transcribed poorly. Proper nouns render loosely and several names are almost certainly mis-heard.\n\n## Cleaned transcript\n\n### Nadia Ferrante\nThe pipeline repo is still mostly the architecture the original contractor left behind. A lot of that was Bahrudeen — or Bahrudin, it comes out differently every time — anyway, whoever wrote it made some questionable calls.\n\n### The user\nAnd who maintains it now?\n\n### Nadia Ferrante\nMe mostly. Our VP of Engineering wants it rewritten. She's been pushing for the graph store since the spring.\n\n### The user\nRight, I've got a session with her Thursday.\n\n### Nadia Ferrante\nAlso Ndiforchu — Diforchu? — worked on it before moving to the exhibitions dataset, so he'd know parts of it.\n"
+        }
+      },
+      "expected_behavior": [
+        "Proposes action 'skip' for the garbled name rendered as 'Bahrudeen'/'Bahrudin', treating the inconsistent transcription as identity uncertainty rather than creating a page for a possibly-wrong name",
+        "Proposes action 'skip' for the garbled name rendered as 'Ndiforchu'/'Diforchu' for the same reason — the source itself renders it two different ways in one sentence",
+        "Explicitly reasons that a skipped mention stays reviewable later, whereas a page created for a mis-heard name fragments the entity it was supposed to point at",
+        "Does NOT create a page for the VP of Engineering, whose name is never given — a role reference alone is not an identity, and the ASR warning makes guessing worse",
+        "Resolves Nadia Ferrante with action 'update' against the existing people/nadia-ferrante.md page, showing the ASR caution does not suppress a well-corroborated identity match",
+        "Does not attempt to guess or normalize the garbled names into real-looking spellings and then present that guess as a confident match"
+      ],
+      "related_skills": ["entity-enrichment"]
+    },
+    {
+      "id": "dated-record-defers-to-the-accumulating-page-that-already-covers-it",
+      "query": "You are the entity-resolution step for the source at sources/transcripts/2026-08-19-vantage-schema-kickoff.md. Extraction has already run and proposed a meeting note for this source. For every entity the source touches, state the entity, your action (create, update, or skip), your relevance judgment, and your confidence, and say explicitly whether any dated-record page should be created for this source. Available entity types: person, company, project, concept, meeting.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "projects/vantage-schema-migration.md": "---\ntype: project\nname: Vantage Schema Migration\ncreated: 2026-06-01\nupdated: 2026-08-11\n---\n\n# Vantage Schema Migration\n\n## Compiled Truth\n\nMoving the catalog-relations model off the single-parent SQL assumption onto a graph store. Slated to start September 2026.\n\n## Timeline\n\n### 2026-08-11 — scoping\n- Target start confirmed for September; sequencing agreed against the accessions pipeline audit.\n",
+          "sources/transcripts/2026-08-19-vantage-schema-kickoff.md": "---\ntype: source\ntitle: Vantage schema migration kickoff\norigin: transcript\ncaptured: 2026-08-19\n---\n\n# 2026-08-19-vantage-schema-kickoff\n\n**Participants:** the user, Nadia Ferrante, Tobias Vance\n\n## Cleaned transcript\n\n### Tobias Vance\nKickoff for the schema migration. We agreed the first milestone is the relations extract, end of September.\n\n### Nadia Ferrante\nAnd we're freezing new single-parent assumptions in the query layer from today, otherwise we're chasing a moving target.\n\n### Tobias Vance\nAgreed. I'll own the extract, Nadia owns the query-layer freeze.\n"
+        }
+      },
+      "expected_behavior": [
+        "Recognizes that the existing projects/vantage-schema-migration.md page is the accumulating page this source is really about, and resolves it with action 'update'",
+        "Declines to create a separate dated meeting/journal record for this source, on the grounds that its content already has a home on the project's own Timeline",
+        "Reaches that conclusion by checking whether an existing note of any type already covers the source's content, NOT by looking for an existing note whose name matches the source's title or date",
+        "States or implies that a dated record's title will essentially never match the name of the project or company it is actually about, so name matching is the wrong check",
+        "Resolves the participants (Nadia Ferrante, Tobias Vance) as their own entities, independently of the project resolution, rather than collapsing everything into one destination",
+        "Judges the Vantage Schema Migration project as relevance 'central' to this source"
+      ],
+      "related_skills": ["note-routing", "entity-enrichment"]
+    }
+  ]
+}
