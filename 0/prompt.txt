@@ -1,0 +1,5 @@
+sync /Users/ebridges/Projects/wakil-worktrees/transcript as well as your .claude/worktrees/pr239-fixes so that the PR has the latest fixes
+
+---
+
+Using anonymized examples from @~/Projects/kb-professional/sources/transcripts create evals for @src/wakil/skills/entity-resolve/
