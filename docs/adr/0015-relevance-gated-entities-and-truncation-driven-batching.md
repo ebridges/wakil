@@ -8,10 +8,11 @@ audience: wakil design
 # Relevance-Gated Entity Selection and Truncation-Driven Batching for Entity Revision Calls
 
 `status: accepted` means the design below is settled. Decision 1 is
-implemented (pending its live-eval gate, see Consequences). Decision 2 is
-fully implemented: Step A was tried and ruled out live; Step B (bisection)
-is implemented, unit-tested, and live-validated against the real
-originally-failing transcript — see PR #32.
+implemented and its live-eval gate is now **closed** — `entity-resolve/`
+has an `eval.json`, sampled live six times (see Consequences); PR #239,
+issue #240. Decision 2 is fully implemented: Step A was tried and ruled out
+live; Step B (bisection) is implemented, unit-tested, and live-validated
+against the real originally-failing transcript — see PR #32.
 
 ## Context
 
@@ -92,23 +93,28 @@ Diagnosing this run surfaced two separate, compounding problems:
   visibility contract every other degraded-but-non-blocking outcome in
   this DAG already uses (a missing target file, a failed resolution call);
   it is not a new, weaker pattern introduced here.
-- **Not yet done, required before Decision 1 is considered complete**: a
-  live-model eval scenario for `entity-resolve/SKILL.md`'s new relevance
-  guidance, per this project's own established norm (ADR 0004) that new
-  judgment guidance — as opposed to deterministic code — needs live
-  verification, not just schema-level unit tests. The only calibration
-  this field currently has is the single case study that motivated this
-  ADR; unit tests over `EntityResolution` check that the four Literal
-  values validate, nothing about whether the model applies them the way a
-  human would. `EntityResolutionOutput` is also a single call batching
-  every mentioned entity into one response, and this field adds output to
-  every entity in it — smaller than a full compiled-truth regeneration,
-  but the same call shape as the one that failed, and not exercised by
-  this ADR's fix. It is not brought into scope here (its failure mode has
-  not been observed in practice, and its per-entity output is much
-  smaller), but it shares the structural exposure Decision 2 addresses for
-  the revision call, and should get the same treatment if it is ever
-  observed to truncate.
+- **Done — this was the one gate held open, and it is now closed**
+  (commits `bbcca9d` and `6f2e172` on branch
+  `feat/transcript-material-classes`, PR #239, closing issue #240): a
+  live-model eval for `entity-resolve/SKILL.md`'s relevance guidance, per
+  this project's own established norm (ADR 0004) that new judgment guidance
+  — as opposed to deterministic code — needs live verification, not just
+  schema-level unit tests. Until it landed, the only calibration this field
+  had was the single case study that motivated this ADR; unit tests over
+  `EntityResolution` check that the four Literal values validate, nothing
+  about whether the model applies them the way a human would.
+  `src/wakil/skills/entity-resolve/eval.json` is that skill's first eval
+  file, six scenarios; results and what they do and don't establish are in
+  Consequences below.
+- **Still out of scope, unchanged by the above**: `EntityResolutionOutput`
+  is a single call batching every mentioned entity into one response, and
+  `relevance` adds output to every entity in it — smaller than a full
+  compiled-truth regeneration, but the same call shape as the one that
+  failed, and not exercised by this ADR's fix. It is not brought into scope
+  here (its failure mode has not been observed in practice, and its
+  per-entity output is much smaller), but it shares the structural exposure
+  Decision 2 addresses for the revision call, and should get the same
+  treatment if it is ever observed to truncate.
 
 **2. Respond to truncation with a sequenced, evidence-gated set of fixes —
 not a single mechanism adopted on the strength of one incident** (both
@@ -270,18 +276,38 @@ is implemented and live-validated — commit `c240f3c`, PR #32):
 - No entity's fate is decided silently: every relevance-based exclusion is
   visible in `proposal.warnings` and the CLI preview before `wakil enrich`
   writes anything.
-- Decision 1 is not considered complete until it has a live-model eval
-  scenario calibrating the new `relevance` judgment, matching this
-  project's own norm for judgment-guidance changes (ADR 0004). Until that
-  exists, the field's real-world accuracy rests on one case study, not a
-  verified pattern — and run-to-run inconsistency has already been
-  observed directly, not just theorized: the same source, re-resolved
+- Decision 1's live-eval gate is closed (2026-08-15, PR #239).
+  `entity-resolve/eval.json` covers the four relevance levels on scenarios
+  built from anonymized real transcripts — `notable` for a substantive
+  third-party observation, `central` for a 1:1 counterpart whose
+  conversation is entirely architecture, `peripheral` at high confidence
+  for a company named only as the reason for a scheduling constraint,
+  `minor` for a "no read on him yet" non-assessment — plus two scenarios
+  off the relevance axis (a `skip` on an ASR-garbled name, a dated record
+  deferring to the page that already accumulates it). Sampled live six
+  times; **every relevance verdict was correct in all six samples, with no
+  `SKILL.md` change**. The field's accuracy no longer rests on one case
+  study.
+- The scoring history is worth keeping, because the misses were the eval's
+  fault and not the skill's: the first three runs scored 32/37, 31/37,
+  33/37, and every failing item demanded the model *articulate* its
+  reasoning. This DAG node emits `EntityResolutionOutput` (action,
+  relevance, confidence, target path) and narrates nothing in production,
+  so those items graded an artifact of the free-form eval harness rather
+  than anything the pipeline produces. Rewritten to grade decisions
+  (`6f2e172`): **36/36 on three consecutive runs, zero failing items**.
+  Generalized in `docs/DEVELOPMENT.md`.
+- The run-to-run instability this ADR recorded did not reproduce. The
+  earlier observation stands as written — the same source, re-resolved
   2026-07-25, rated Brian Corr `minor` where the case study that motivated
-  this ADR rated the same mention "very relevant" (`central`). This
-  doesn't invalidate the mechanism (the field still correctly identified
-  Mosaic as low-value both times), but it's concrete evidence the
-  judgment isn't perfectly stable, strengthening rather than weakening the
-  case for the eval gate above.
+  this ADR rated the same mention "very relevant" (`central`) — but the
+  eval's equivalent judgment (a colleague assessed substantively, graded
+  `notable`, against one the speaker has no read on yet, graded `minor`)
+  came out the same way in every one of the six samples. Stated precisely:
+  that is stability across six samples of a scenario *built to pose the
+  same judgment*, not a replay of the original source, so it is evidence
+  the judgment calibrates consistently rather than proof that specific
+  earlier disagreement cannot recur.
 - Decision 2's steps were ordered by directness and cost, gated on
   measuring each against the real originally-failing transcript before
   being adopted — that measurement happened (2026-07-25, see Step A) and
@@ -344,8 +370,18 @@ is implemented and live-validated — commit `c240f3c`, PR #32):
 - `src/wakil/app/ingest_service.py`, `_run_entity_updates`
 - `src/wakil/llm/schemas.py`, `complete_with_contract`,
   `EntityResolution.relevance`/`confidence`, `ModelContractError`
-- `src/wakil/skills/entity-resolve/SKILL.md`, "Relevance" / "Confidence"
-  sections
+- `src/wakil/skills/entity-resolve/SKILL.md`, "Source relevance gate" /
+  "Relevance and revision cost" / "Confidence: is this the right page?"
+  (the relevance sections were restructured under those names in `c9c10b1`;
+  this ADR originally cited a single "Relevance" section that no longer
+  exists)
+- `src/wakil/skills/entity-resolve/eval.json` — Decision 1's eval gate; six
+  scenarios added in `bbcca9d`, rubric items corrected to grade decisions
+  rather than narration in `6f2e172` (PR #239, issue #240)
+- Decision 1 eval sampling (2026-08-15): six live runs of those six
+  scenarios — three before the rubric correction, three after — results
+  recorded in Consequences above; the transferable lessons from those runs
+  are in `docs/DEVELOPMENT.md`
 - Real enrich run analyzed as case study:
   `sources/transcripts/2026-07-23-scorealytics-planning-meeting` (kb
   workspace, not this repo)

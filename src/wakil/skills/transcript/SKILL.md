@@ -5,9 +5,23 @@ skill_api: 1
 ---
 
 You are analyzing a meeting transcript that has already been captured raw.
-Your job is judgment, not cleanup: what was decided, by whom, and what it
-changes.
+Your job is judgment, not cleanup: what the meeting establishes, by whom, and
+what it changes. Decisions are the most common form of that, not the only one.
 
+- Sort material per passage, not per document. One conversation interleaves
+  decisions, guidance sought, commitments in both directions, career goals,
+  self-assessed gaps, interpersonal friction, observations about people who
+  aren't present, advice sought, open questions, and pure social rapport. Each
+  has a home: decisions, action items and open questions shape the proposed
+  note's body; any per-fact claim or dated judgment, of *any* class above,
+  becomes a typed memory whether or not it also appears in the note; a durable
+  fact about a person is attributed by name, so the entity-resolution step can
+  carry it to that person's own page; social rapport produces nothing at all —
+  no memory, not even a skipped one, and no line in the note. A meeting with
+  no decision in it can still be rich, and a decision-heavy meeting still
+  carries person-signal. Reading a whole transcript through whichever register
+  dominates it, and dropping the rest, is the failure this rule exists to
+  prevent.
 - Find the resolution, not the first option. Meetings circle: an idea raised
   early is often discarded later. Anchor on where the discussion *landed* —
   the last clear statement of a decision wins over the first proposal.
@@ -15,6 +29,10 @@ changes.
   usable memory; "the routing design was discussed" is not. Use the
   user-provided context (attendees, company, purpose) to resolve first names
   and pronouns to full names.
+- Obligations run both ways. A commitment the user made to the other party is
+  as durable as one they received, and gets the same owner-and-date treatment
+  — capture only the incoming half and the meeting's follow-through is
+  recoverable from one side only.
 - Watch joint-pronoun language as a structural signal, not filler. "We hold
   them responsible," "you, me, we," "between us" usually means both parties
   share the accountability, not just the one the sentence's subject
@@ -35,6 +53,11 @@ changes.
   ("the other participant's audio failed throughout") is useful; supplying
   specifics you didn't read — verbatim noise tokens, a call duration, a tool's
   internal behaviour — is fabrication that reads as corroboration.
+- Friction between people is high-value and carries the highest fabrication
+  risk here, because it concerns third parties who aren't present to be
+  quoted. Record what a speaker actually said and attribute it to them; never
+  restate one side's account as a settled property of the absent person, and
+  never infer a motive, a history, or the other side's view from it.
 - Separate decisions from open questions. A decision has an owner and a
   next step; anything still contested belongs in a question-type memory, not
   a decision.
@@ -45,6 +68,13 @@ changes.
   upgrade a hot take to a confident, formal-register fact. `stance` (the
   claim's register/commitment level) is independent of `type`: a casual
   opinion and a casual fact are both valid.
+- A dated, grounded judgment about how someone is doing is wanted output, not
+  editorializing: "second systems project landed, design review went well,
+  estimation still shaky" is a legitimate opinion-type memory where the
+  transcript supports it. Mark it as a take, date it, keep it to what was
+  actually said. The anti-fabrication rules constrain what you may claim, not
+  whether you may form a view — don't smuggle a take in as a fact, and don't
+  suppress one you can support.
 - Date what happened. Memories describing dated events (the meeting itself,
   a committed deadline, an announced change) are event-type memories carrying
   the event's own date — not the date you are writing this.
@@ -91,3 +121,16 @@ changes.
   memories: a page-shape section like Open threads must reflect what the
   transcript actually says, never a default "unresolved" framing that
   contradicts it.
+
+**Last step, every time: scan your finished output — every memory and every
+line of the note — for `he`, `him`, `his`, `she`, `her`, and delete each one
+you cannot point to a source for.** A gendered pronoun is a factual claim
+about a person and needs a source exactly like a date does. Here you have two:
+the transcript itself and the user-provided context — the person stating their
+own, or a participant using them by name. You are not shown anyone's existing
+page, so you cannot check what it declares. A first name, a role, and what
+reads naturally are not sources. Absent one you do not know, so write as if
+you do not: they/them, or restructure around the name. Gendered pronouns
+arrive by reflex mid-sentence rather than by decision, which is why this is a
+scan and not a preference — and this step founds person pages, so a guess made
+here becomes the page's pronoun.

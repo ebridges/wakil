@@ -61,6 +61,40 @@
         "Does not invent content for the un-shown remainder.",
         "Treats the [SOURCE TRUNCATED] marker at the end of the transcript file as a statement from the tool about its own input, not as transcript content to summarise or attribute to a speaker."
       ]
+    },
+    {
+      "id": "mixed-material-one-transcript",
+      "query": "Extract the knowledge from the transcript at sources/transcripts/2026-08-10-dana-1-1.md.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-08-10-dana-1-1.md": "---\ntype: source\ntitle: 1:1 with Dana\ncaptured: 2026-08-10\norigin: transcript\n---\n\n# 1:1 with Dana\n\n**Ed**: Before we start -- how was the lake?\n\n**Dana**: Rained the whole time. Kids didn't care.\n\n**Ed**: Ha. Okay. Where did the ingest queue thing land?\n\n**Dana**: We went back and forth but we're going with the queue-based\napproach. I'll own it.\n\n**Ed**: Good. Longer term, what do you actually want to be doing?\n\n**Dana**: Honestly I want to move toward systems work. Less product surface,\nmore of the plumbing underneath it.\n\n**Ed**: What's in the way?\n\n**Dana**: Estimation, mostly. I'm not confident sizing anything bigger than a\nsprint. I get it wrong and then I'm apologising for three weeks.\n\n**Ed**: Noted. Let me get you time with the platform team -- I'll set that up\nbefore the end of the month.\n\n**Dana**: That'd help.\n\n**Ed**: Anything else on the team?\n\n**Dana**: Priya's been carrying the migration alone since March. It's a lot\nfor one person and I don't think anyone's noticed.\n"
+        }
+      },
+      "expected_behavior": [
+        "Captures the queue-based approach as the decision, with Dana as its owner.",
+        "Captures Dana's stated goal of moving toward systems work as durable material attributed to Dana -- not dropped because it is not a decision.",
+        "Captures Dana's self-assessed weakness at estimation as durable material, attributed to Dana as self-reported rather than asserted as an outside judgement.",
+        "Captures the observation about Priya carrying the migration alone, attributed to Dana as the speaker who said it, rather than stated as an established fact about Priya.",
+        "Captures the commitment Ed made -- arranging time with the platform team before the end of the month -- with Ed as its owner, not only the commitment Dana made.",
+        "Produces no memory and no note content from the opening exchange about the lake and the rain.",
+        "Uses no gendered pronoun (he/him/his/she/her) for Dana, Ed, or Priya, since the transcript never states anyone's pronouns."
+      ]
+    },
+    {
+      "id": "decision-reversal-anchors-on-where-it-landed",
+      "query": "Extract the knowledge from the transcript at sources/transcripts/2026-08-10-storage-format.md.",
+      "workspace": {
+        "base_fixture": "tests/fixtures/kb",
+        "overlay": {
+          "sources/transcripts/2026-08-10-storage-format.md": "---\ntype: source\ntitle: Storage format review\ncaptured: 2026-08-10\norigin: transcript\n---\n\n# Storage format review\n\n**Ana**: Simplest thing is Parquet on S3. Let's just do that.\n\n**Ben**: Agreed for now.\n\n**Ana**: Actually -- hold on. Parquet gives us nothing on the append path and\nthat's most of our writes. Every ingest becomes a rewrite.\n\n**Ben**: You're right. That kills it.\n\n**Ana**: So we're going with an append-only log, and we compact to columnar\non a schedule. That's the call.\n\n**Ben**: Fine by me. I'll write it up.\n"
+        }
+      },
+      "expected_behavior": [
+        "Records the append-only log with scheduled compaction as the decision the meeting reached.",
+        "Does not record 'Parquet on S3' as the decision, even though it was agreed to earlier in the transcript.",
+        "If it mentions the Parquet option at all, frames it as considered and rejected, with the append-path cost as the stated reason."
+      ]
     }
   ]
 }

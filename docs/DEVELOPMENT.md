@@ -211,6 +211,42 @@ Two things to take from this. First, **a skill's instruction budget is real** �
 
 Stopping after two rounds was deliberate, per this file's own entry on the personal-reflection heuristic: when each round of tuning trades one failure for another, the approach is the problem, not the tuning. The remaining regression is on a picky file-enumeration rubric item and is documented in the PR rather than tuned against.
 
+### A SKILL.md edit's eval blast radius is that skill's own scenarios, and nothing else
+
+**Established:** 2026-08-10 · **Source:** issue #204, `tests/evals/test_skill_evals.py`, measured against a same-day full-suite baseline
+
+The instruction-budget entry above says to "budget an eval run for scenarios you did *not* touch". That means other scenarios **of the same skill** — it is easy to read as suite-wide, and acting on the wider reading wastes a lot of time and money. `test_skill_eval_scenario` calls `load_skill(skill_name, workspace)` once per case and hands that single skill to `run_scenario`; nothing composes two skills into one prompt. So editing `transcript/SKILL.md` cannot change how a `note-revision` or `kb-commit` scenario behaves — there is no shared channel for it to travel through.
+
+This matters because the full suite churns hard between runs and invites false conclusions. A same-day before/after here: 16 failures baseline, and a partial re-run with five *new* failures and roughly eight *recoveries*, all in skills the change never touched. Read as a regression signal that is alarming; read correctly it is the ~45–53% flakiness this file already documents, restated. Scope the run to the edited skill (`-m eval -k "<skill>-"`) and sample it several times — six runs of one skill's scenarios cost a fraction of one full sweep and are a far better signal.
+
+Corollary worth checking before you rely on an eval at all: **a skill can have no `eval.json`.** `entity-resolve/` ships only a `SKILL.md`, so prose changes there are unmeasured no matter how the suite is invoked, and the `entity-resolution-*` scenarios belong to a different skill with a confusingly similar name.
+
+### Grade the decision the DAG call actually emits, not the prose the eval harness happens to collect
+
+**Established:** 2026-08-15 · **Source:** issue #240 step 2 — six live samples of `entity-resolve/eval.json` (3 before the fix, 3 after), raw transcripts in that session
+
+`run_scenario` asks for a free-form "what would you do and why" answer, so it is natural to write rubric items about the *reasoning* — "explicitly reasons that X", "draws the contrast between the two mentions", "states that a dated record's title never matches the project's". Six items of that shape were written across three `entity-resolve` scenarios. All six failed, in every one of three runs, while **every judgment item passed in every run**. The model had the verdicts right each time (`Cole: minor`, `Mara: notable`, participant `central`, constraint-only company `peripheral` at high confidence) and lost points purely for not narrating them in the demanded form.
+
+In production this call emits `EntityResolutionOutput` — `action`, `relevance`, `confidence`, `target_note_path` — and never narrates anything. So those items graded an output channel production does not have, which is the sibling entry above ("an eval must put a production signal in the channel production puts it in") inverted: not a signal in the wrong slot, but a *graded artifact that does not exist downstream*. Rewriting the six to grade decisions instead (`does NOT propose create for Cole`, `grades Mara strictly higher than Cole`, `finds the project page despite no name overlap`) took the suite from 32/37, 31/37, 33/37 to **36/36 three times running**, with no change to any SKILL.md.
+
+The test when writing a rubric item: **could this be scored from the JSON the DAG node returns?** If it can only be scored from an explanation, it is measuring the harness's artifact, not the skill — and it will fail against a model that is deciding correctly. Reserve prose-shaped items for skills whose real output *is* prose.
+
+### An eval scenario built from the skill's own worked example measures recall, not judgment
+
+**Established:** 2026-08-15 · **Source:** `entity-resolve/eval.json` (issue #240), `tests/evals/runner.py`'s `run_scenario`
+
+`run_scenario` pastes the skill body verbatim into the system prompt, so any worked example inside `SKILL.md` is *in context* while the model answers. Build a scenario around that same example and a passing grade proves only that the model can copy an answer sitting a few hundred tokens above the question. `entity-resolve/SKILL.md` ends its relevance section with a fully worked planning-call example — two central participants, a `minor` "no read on them yet" colleague, a `peripheral` company named as *"the reason I only have two weeks free"* — which is exactly the shape ADR 0015 wants calibrated, and therefore exactly the shape to *not* reuse. The scenarios keep each judgment (peripheral-by-constraint, minor-by-non-assessment) and change the situation, the wording, and the entities around it.
+
+The rule for any new `eval.json`: **for each rubric item, check whether the skill file already contains a near-verbatim instance of it.** If it does, vary the surface until only the judgment transfers — otherwise a green scenario is indistinguishable from a broken one.
+
+### A judgment defined in both a `Field` description and a SKILL.md ships as one prompt that no eval can see
+
+**Established:** 2026-08-15 · **Source:** the [#239 review](https://github.com/ebridges/wakil/pull/239) (fix 1), `EntityResolution.relevance` in `src/wakil/llm/schemas.py`
+
+`build_system_prompt(skill, output_model)` concatenates the skill body **and** `output_model.model_json_schema()` into one `system` string, so every `Field(description=...)` on a contract is model-facing instruction sitting a few hundred tokens from the skill prose — and a field whose description defines a judgment is a second, competing copy of that judgment. `relevance` graded `minor` as "mentioned but not a focus" from ADR 0015 onward while `entity-resolve/SKILL.md` replaced that focus test with a substance test; both reached the model in the same message, and the schema copy is the one adjacent to the field being emitted. Nothing in the repo could observe it: `tests/evals/runner.py` builds `system = f"{BASE_SYSTEM}\n\n{skill.body}"` with no schema block at all, so this is the sibling entry below ("an eval must put a production signal in the channel production puts it in") in its sharpest form — a production channel the harness does not model *at all*, not merely one it models in the wrong slot.
+
+The rule: **define a judgment in exactly one place, and make it the skill body** — the channel evals actually exercise. A `Field` description should say what the field measures and point at the skill section that defines it (see the comment on `relevance` for the shape). Applies to all five `build_system_prompt` call sites, and to `confidence`/`proposed_frontmatter_confidence`/`has_update`, which carry judgment prose today.
+
 ### An eval must put a production signal in the channel production puts it in
 
 **Established:** 2026-08-09 · **Source:** the [#202 review](https://github.com/ebridges/wakil/pull/202), `src/wakil/skills/transcript/eval.json`

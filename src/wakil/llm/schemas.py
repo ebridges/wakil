@@ -129,14 +129,22 @@ class EntityResolution(BaseModel):
         "confidence even if it's central to the source. See `relevance` for the "
         "separate question of how much the source actually concerns this entity.",
     )
+    # Deliberately a pointer rather than a second definition of the four levels.
+    # This schema only ever reaches a model through
+    # `build_system_prompt(skill, EntityResolutionOutput)` (`_run_entity_resolution`),
+    # which puts `entity-resolve/SKILL.md`'s body in the same system message — so the
+    # levels are always present, and stating them twice lets the two copies drift.
+    # They did: this description sat unchanged from ADR 0015 while the skill replaced
+    # its focus test ("mentioned but not a focus") with a substance test, leaving the
+    # model two different tests for `minor` in one message (PR #239 review). Nothing
+    # can catch a repeat — `tests/evals/runner.py` builds its system prompt from
+    # `skill.body` alone, with no schema block at all.
     relevance: Literal["central", "notable", "minor", "peripheral"] | None = Field(
         default=None,
-        description="How much this source actually concerns this entity — "
-        "independent of confidence. central: a primary subject of or participant in "
-        "the source. notable: a real stakeholder in what's discussed, even if not "
-        "personally discussed at length. minor: mentioned with some context but not "
-        "a focus. peripheral: named only as background — the source isn't really "
-        "about them. See the skill body for worked examples.",
+        description="How much this source substantively concerns this entity — a "
+        "separate question from `confidence`, which is identity-match certainty. The "
+        "four levels are defined in the skill body's \"Source relevance gate\"; apply "
+        "those definitions.",
     )
     proposed_frontmatter: dict | None = Field(
         default=None,
