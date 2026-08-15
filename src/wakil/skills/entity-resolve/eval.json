@@ -34,10 +34,9 @@
       "expected_behavior": [
         "Judges Tobias Vance as relevance 'central' — he is one of only two participants in the conversation, and a participant in a 1:1 is by definition central to it",
         "Does NOT downgrade Tobias Vance to 'notable' or 'minor' on the grounds that the conversation is about systems, architecture, or the schema rather than about him personally",
-        "Reasons explicitly that the subject matter of a conversation does not determine the relevance of its participants — being a participant is itself the centrality signal",
         "Resolves Tobias Vance with action 'update' against the existing page people/tobias-vance.md rather than proposing a new page for him",
-        "Assigns high confidence to the Tobias Vance identity match (a distinctly-named participant with an existing page), and keeps that confidence judgment separate from the relevance judgment",
-        "Judges the single-parent schema assumption / graph-store migration as a real entity in its own right (a concept or project) rather than folding it into the person's resolution"
+        "Assigns high confidence to the Tobias Vance identity match (a distinctly-named participant with an existing page), and does not lower that confidence to match a relevance judgment or vice versa",
+        "Resolves the entities this source touches separately — Tobias Vance, Vantage Archive Systems, and the schema/graph-store work each get their own judgment — rather than collapsing them into a single destination"
       ],
       "related_skills": ["entity-enrichment", "note-revision"]
     },
@@ -71,9 +70,9 @@
       },
       "expected_behavior": [
         "Judges Cole as relevance 'minor' — 'I don't have a read on him yet' records the speaker's absence of an assessment rather than any substantive information about Cole",
-        "Explicitly reasons that Cole's mention does not become substantive merely because his start date or onboarding status is stated",
+        "Does NOT propose action 'create' for Cole — an absent assessment is not a reason to open a durable page",
         "Judges Mara as relevance 'notable' — concrete, durable observations (rewrote the flaky ingestion test suite on her own initiative, pushed back correctly on the release process, being considered for the September schema work) are substantive entity-level information",
-        "Draws the contrast between the two mentions explicitly: both people are new hires mentioned in the same short exchange, and the difference in relevance comes from substance, not from length of mention or seniority",
+        "Grades Mara strictly higher than Cole, even though both are new hires of the same tenure named in the same short exchange — the two do not come out at the same relevance level",
         "Judges Lena Fischbach as relevance 'central' as the other participant in the conversation",
         "Does not invent a last name, title, or further detail for Cole or Mara beyond what the transcript states"
       ],
@@ -112,8 +111,8 @@
       "expected_behavior": [
         "Recognizes that the existing projects/vantage-schema-migration.md page is the accumulating page this source is really about, and resolves it with action 'update'",
         "Declines to create a separate dated meeting/journal record for this source, on the grounds that its content already has a home on the project's own Timeline",
-        "Reaches that conclusion by checking whether an existing note of any type already covers the source's content, NOT by looking for an existing note whose name matches the source's title or date",
-        "States or implies that a dated record's title will essentially never match the name of the project or company it is actually about, so name matching is the wrong check",
+        "Finds the project page even though nothing about it shares a name with the source's own title or date — the match is made on what the note covers, not on name similarity",
+        "Does NOT propose action 'create' for any meeting, journal, or other dated-record entity for this source",
         "Resolves the participants (Nadia Ferrante, Tobias Vance) as their own entities, independently of the project resolution, rather than collapsing everything into one destination",
         "Judges the Vantage Schema Migration project as relevance 'central' to this source"
       ],

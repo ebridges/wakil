@@ -221,6 +221,16 @@ This matters because the full suite churns hard between runs and invites false c
 
 Corollary worth checking before you rely on an eval at all: **a skill can have no `eval.json`.** `entity-resolve/` ships only a `SKILL.md`, so prose changes there are unmeasured no matter how the suite is invoked, and the `entity-resolution-*` scenarios belong to a different skill with a confusingly similar name.
 
+### Grade the decision the DAG call actually emits, not the prose the eval harness happens to collect
+
+**Established:** 2026-08-15 · **Source:** issue #240 step 2 — six live samples of `entity-resolve/eval.json` (3 before the fix, 3 after), raw transcripts in that session
+
+`run_scenario` asks for a free-form "what would you do and why" answer, so it is natural to write rubric items about the *reasoning* — "explicitly reasons that X", "draws the contrast between the two mentions", "states that a dated record's title never matches the project's". Six items of that shape were written across three `entity-resolve` scenarios. All six failed, in every one of three runs, while **every judgment item passed in every run**. The model had the verdicts right each time (`Cole: minor`, `Mara: notable`, participant `central`, constraint-only company `peripheral` at high confidence) and lost points purely for not narrating them in the demanded form.
+
+In production this call emits `EntityResolutionOutput` — `action`, `relevance`, `confidence`, `target_note_path` — and never narrates anything. So those items graded an output channel production does not have, which is the sibling entry above ("an eval must put a production signal in the channel production puts it in") inverted: not a signal in the wrong slot, but a *graded artifact that does not exist downstream*. Rewriting the six to grade decisions instead (`does NOT propose create for Cole`, `grades Mara strictly higher than Cole`, `finds the project page despite no name overlap`) took the suite from 32/37, 31/37, 33/37 to **36/36 three times running**, with no change to any SKILL.md.
+
+The test when writing a rubric item: **could this be scored from the JSON the DAG node returns?** If it can only be scored from an explanation, it is measuring the harness's artifact, not the skill — and it will fail against a model that is deciding correctly. Reserve prose-shaped items for skills whose real output *is* prose.
+
 ### An eval scenario built from the skill's own worked example measures recall, not judgment
 
 **Established:** 2026-08-15 · **Source:** `entity-resolve/eval.json` (issue #240), `tests/evals/runner.py`'s `run_scenario`
