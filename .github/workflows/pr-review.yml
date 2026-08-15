@@ -73,17 +73,25 @@ jobs:
             clear the check executed rather than silently doing nothing.
 
       # No `if:` — a step defaults to `success()`, so a review that errored or
-      # was cancelled never gets labelled `reviewed`. The label means findings
-      # were posted, not merely that the workflow fired.
+      # was cancelled keeps `to-review` and never gets `reviewed`. The labels
+      # mean findings were posted, not merely that the workflow fired, and a
+      # failed run stays visibly queued rather than looking done.
+      #
+      # Dropping `to-review` makes re-review one click: add the label again.
+      # Removing it raises an `unlabeled` event, which is inert here because the
+      # trigger lists `labeled` only — do not add `unlabeled` to that list, or
+      # this step starts a self-triggering loop that bills per iteration.
+      # Both edits go in one `gh` call, so this is a single API write.
       #
       # `--repo` is explicit on purpose: every `gh` subcommand fills unspecified
       # context from ambient state rather than erroring, and this repo has been
       # bitten by that twice (docs/TROUBLESHOOTING.md, the `gh release create`
       # and `gh pr create --head` entries).
-      - name: Mark as reviewed
+      - name: Mark reviewed, clear the request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
           gh pr edit ${{ github.event.pull_request.number }}
           --repo ${{ github.repository }}
           --add-label reviewed
+          --remove-label to-review
