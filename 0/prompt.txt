@@ -1,0 +1,23 @@
+sync /Users/ebridges/Projects/wakil-worktrees/transcript as well as your .claude/worktrees/pr239-fixes so that the PR has the latest fixes
+
+---
+
+Using anonymized examples from @~/Projects/kb-professional/sources/transcripts create evals for @src/wakil/skills/entity-resolve/
+
+---
+
+Does this resolve this issue?  https://github.com/ebridges/wakil/issues/240
+
+If so, add a comment to that issue, linking it to the PR
+
+---
+
+source @env.sh for an updated api key
+
+---
+
+update @.github/workflows/pr-review.yml workflow to only trigger upon the addition of a "to-review" label to the PR.  after it completes, it should remove that label.
+
+---
+
+update @.github/workflows/pr-review.yml workflow to only trigger upon the addition of a "to-review" label to the PR.  after it completes, it should add a label: "reviewed".
