@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0] - 2026-08-15
+
+### ✨ Features
+
+- ✨ feat(transcript): capture every class of material, not just decisions (#239)
+
 ## [0.3.0] - 2026-08-10
 
 ### ✨ Features
@@ -26,6 +32,7 @@ All notable changes to this project are documented in this file.
 - 📝 docs(readme): mention the automated pr-reviewer CI comment (#185)
 - 📝 docs(adr): add 0000-template.md for new ADRs (#191)
 - 📝 docs(process): add a triage policy for pr-reviewer feedback (#222)
+- 📝 docs(changelog): v0.3.0
 
 ## [0.2.1] - 2026-07-30
 
