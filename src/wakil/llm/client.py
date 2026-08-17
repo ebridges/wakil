@@ -126,17 +126,21 @@ class OpenAICompatibleClient:
         # keeping cacheable_prefix as a stable leading segment is what makes
         # that automatic match possible, nothing more is needed here.
         user_content = f"{cacheable_prefix}\n\n{prompt}" if cacheable_prefix else prompt
+        # `max_completion_tokens` unconditionally: the gpt-5 family rejects the
+        # older `max_tokens` outright, and every other OpenAI model accepts the
+        # new name, so there is nothing to branch on.
+        body: dict[str, object] = {
+            "model": self.model,
+            "max_completion_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_content},
+            ],
+        }
         response = httpx.post(
             f"{self._base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={
-                "model": self.model,
-                "max_tokens": max_tokens,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_content},
-                ],
-            },
+            json=body,
             timeout=300,
         )
         if response.status_code != 200:
