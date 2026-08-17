@@ -9,6 +9,7 @@ variables so no credentials are ever stored in the workspace:
     WAKIL_PROVIDER          force "anthropic" or "openai"
     WAKIL_MODEL             override the model id
     WAKIL_OPENAI_BASE_URL   OpenAI-compatible base URL (default api.openai.com/v1)
+    WAKIL_REASONING_EFFORT  reasoning models only (e.g. gpt-5): minimal|low|medium|high
 """
 
 import os
@@ -106,10 +107,17 @@ class AnthropicClient:
 
 
 class OpenAICompatibleClient:
-    def __init__(self, model: str, api_key: str, base_url: str = DEFAULT_OPENAI_BASE_URL):
+    def __init__(
+        self,
+        model: str,
+        api_key: str,
+        base_url: str = DEFAULT_OPENAI_BASE_URL,
+        reasoning_effort: str | None = None,
+    ):
         self.model = model
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+        self._reasoning_effort = reasoning_effort
 
     def complete(
         self,
@@ -126,17 +134,25 @@ class OpenAICompatibleClient:
         # keeping cacheable_prefix as a stable leading segment is what makes
         # that automatic match possible, nothing more is needed here.
         user_content = f"{cacheable_prefix}\n\n{prompt}" if cacheable_prefix else prompt
+        # `max_completion_tokens` unconditionally: the gpt-5 family rejects the
+        # older `max_tokens` outright, and every other OpenAI model accepts the
+        # new name, so there is nothing to branch on.
+        body: dict[str, object] = {
+            "model": self.model,
+            "max_completion_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_content},
+            ],
+        }
+        # Only for reasoning models: gpt-4.1/gpt-4o 400 on an unrecognized
+        # `reasoning_effort`, so it must stay absent unless asked for.
+        if self._reasoning_effort:
+            body["reasoning_effort"] = self._reasoning_effort
         response = httpx.post(
             f"{self._base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={
-                "model": self.model,
-                "max_tokens": max_tokens,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_content},
-                ],
-            },
+            json=body,
             timeout=300,
         )
         if response.status_code != 200:
@@ -174,5 +190,12 @@ def resolve_client() -> ModelClient | None:
         if not api_key or not model:
             raise ModelError("OpenAI-compatible provider needs OPENAI_API_KEY and WAKIL_MODEL set.")
         base_url = os.environ.get("WAKIL_OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)
-        return OpenAICompatibleClient(model=model, api_key=api_key, base_url=base_url)
+        # Passed through unvalidated — the provider's own error names the
+        # values it currently supports, and would outlive a local allowlist.
+        return OpenAICompatibleClient(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            reasoning_effort=os.environ.get("WAKIL_REASONING_EFFORT") or None,
+        )
     raise ModelError(f"Unknown WAKIL_PROVIDER: {provider}")

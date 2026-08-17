@@ -560,7 +560,12 @@ Configure a provider via environment variables (see `.env.example`):
 
 - `ANTHROPIC_API_KEY` — uses Anthropic (default model `claude-opus-4-8`)
 - `OPENAI_API_KEY` + `WAKIL_MODEL` (+ optional `WAKIL_OPENAI_BASE_URL`) — any
-  OpenAI-compatible endpoint, including local model servers
+  OpenAI-compatible endpoint, including local model servers. The gpt-5 family
+  needs no extra configuration beyond `WAKIL_MODEL=gpt-5` — but note that on a
+  reasoning model the token budget covers reasoning *and* output, so a large
+  structured request can truncate where it wouldn't on `gpt-4.1`
+- `WAKIL_REASONING_EFFORT` — `minimal`/`low`/`medium`/`high`, for reasoning
+  models on the OpenAI-compatible path only; `gpt-4.1`/`gpt-4o` reject it
 - `WAKIL_MODEL` / `WAKIL_PROVIDER` — override the model or force a provider
 
 `wakil init` indexes every Markdown file in the workspace (title, frontmatter,

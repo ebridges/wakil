@@ -13,6 +13,7 @@ def clean_env(monkeypatch):
         "WAKIL_PROVIDER",
         "WAKIL_MODEL",
         "WAKIL_OPENAI_BASE_URL",
+        "WAKIL_REASONING_EFFORT",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -107,3 +108,65 @@ def test_openai_compatible_complete_raises_truncated_on_length_finish(monkeypatc
     with pytest.raises(llm_client.ModelTruncatedError) as exc_info:
         client.complete("sys", "prompt", max_tokens=456)
     assert exc_info.value.max_tokens == 456
+
+
+class _OkResponse:
+    status_code = 200
+
+    def json(self):
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+
+def _capture_post(monkeypatch) -> dict:
+    """Record the body of the next httpx.post and return a stubbed 200."""
+    captured: dict = {}
+
+    def fake_post(*args, **kwargs):
+        captured.update(kwargs["json"])
+        return _OkResponse()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    return captured
+
+
+def test_openai_compatible_complete_sends_max_completion_tokens(monkeypatch):
+    # The gpt-5 family 400s on "max_tokens"; assert the old key is *absent*,
+    # not merely that the new one is present, or the two could both be sent.
+    client = llm_client.OpenAICompatibleClient(model="gpt-5", api_key="k")
+    body = _capture_post(monkeypatch)
+    assert client.complete("sys", "prompt", max_tokens=789) == "ok"
+    assert body["max_completion_tokens"] == 789
+    assert "max_tokens" not in body
+
+
+def test_openai_compatible_complete_omits_reasoning_effort_by_default(monkeypatch):
+    client = llm_client.OpenAICompatibleClient(model="gpt-4.1", api_key="k")
+    body = _capture_post(monkeypatch)
+    client.complete("sys", "prompt")
+    assert "reasoning_effort" not in body
+
+
+def test_openai_compatible_complete_sends_reasoning_effort_when_set(monkeypatch):
+    client = llm_client.OpenAICompatibleClient(
+        model="gpt-5", api_key="k", reasoning_effort="minimal"
+    )
+    body = _capture_post(monkeypatch)
+    client.complete("sys", "prompt")
+    assert body["reasoning_effort"] == "minimal"
+
+
+def test_resolve_client_openai_reads_reasoning_effort(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("WAKIL_MODEL", "gpt-5")
+    monkeypatch.setenv("WAKIL_REASONING_EFFORT", "low")
+    client = llm_client.resolve_client()
+    assert isinstance(client, llm_client.OpenAICompatibleClient)
+    assert client._reasoning_effort == "low"
+
+
+def test_resolve_client_openai_without_reasoning_effort(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("WAKIL_MODEL", "gpt-4.1")
+    client = llm_client.resolve_client()
+    assert isinstance(client, llm_client.OpenAICompatibleClient)
+    assert client._reasoning_effort is None
