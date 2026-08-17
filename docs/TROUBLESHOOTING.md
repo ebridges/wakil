@@ -16,6 +16,18 @@ nothing; see the `development-docs` skill (`.claude/skills/development-docs/SKIL
 the judgment process that maintains this file. Every entry cites a concrete
 source (commit SHA, PR #, or session detail) for traceability.
 
+### `WAKIL_MODEL=gpt-5` 400s on every call, and on gpt-5 `max_tokens` is a *combined* reasoning+output budget
+
+**Date:** 2026-08-17 · **Source:** #245, `docs/gpt-5-compatibility-spec.md` — live measurements against `https://api.openai.com/v1`; `OpenAICompatibleClient.complete` in `src/wakil/llm/client.py`
+
+**Symptom:** every call fails with `Model endpoint returned 400: {"error":{"message":"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", ...}}`. Reaching for a differently-named model doesn't help: `gpt-5-chat-latest` returns 404, "has been deprecated."
+
+**Root cause:** the gpt-5 family removed `max_tokens` from `/chat/completions`. `gpt-4.1` and `gpt-4o` accept *both* names, so the fix is an unconditional rename of the wire key — no per-model branch. Only the wire key changed; `complete()`'s own `max_tokens` parameter, `ModelTruncatedError`, and `complete_with_contract`'s doubling retry all keep wakil's vocabulary. Untested corner: whether older self-hosted OpenAI-compatible servers (llama.cpp, vLLM, LM Studio) accept `max_completion_tokens` — if one 400s, the fix is a `self._base_url == DEFAULT_OPENAI_BASE_URL` branch.
+
+**The part that isn't self-explanatory:** on a reasoning model, **reasoning tokens are billed against `max_completion_tokens`, so `DEFAULT_MAX_TOKENS` is a combined reasoning+output budget, not an output budget.** Measured on gpt-5: at `max_completion_tokens=16` the response comes back `finish_reason=length` with 16 reasoning tokens and **empty content**; at 2000 it's `stop`, 128 reasoning tokens, and the real answer. So a structured response that fits comfortably in 8192 output tokens on `gpt-4.1` can truncate on `gpt-5` and burn `complete_with_contract`'s single doubling retry to recover — and a large payload plus heavy reasoning can exhaust *both* attempts and surface as `ModelContractError(truncated=True)`, which says nothing about reasoning. `WAKIL_REASONING_EFFORT=minimal|low|medium` drives reasoning tokens to 0 and removes both the cost and the retry risk; it is gated on being set because `gpt-4.1`/`gpt-4o` 400 with `Unrecognized request argument supplied: reasoning_effort`.
+
+One trap when reproducing this: a small-budget smoke test against gpt-5 (`max_tokens=16`) raises `ModelTruncatedError` with empty content, which looks like a *failure* of the rename and isn't — use a few thousand tokens.
+
 ### `python-frontmatter`'s `loads` splits on a leading `---` whatever follows it, and never raises
 
 **Date:** 2026-08-09 · **Source:** PR #194 review, findings 1–2; `_split_authored_markdown` / `_is_frontmatter` in `src/wakil/app/ingest_service.py`
